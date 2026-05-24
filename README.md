@@ -36,7 +36,7 @@ Motif constraints enforce sequence fragments such as RGD or EEMQR. Fixed motif p
 
 where positions are counted from the N-terminus using 1-based indexing. Random motif placement enforces motif inclusion while allowing the location to vary.
 
-Linker tokens such as Ahx, AEEA, PEG4, PEG8, bAla, and gAla are treated as linker or spacer components, not as default N-terminal modifiers. N-terminal modifiers include chemical or label-type entries such as Ac, Pal, Myr, Biotin, FITC, and dye labels.
+Linker tokens such as Ahx, AEEA, PEG4, PEG8, G4S, SMCC, and DSS are treated as linker or spacer components, not as default N-terminal modifiers. Amino-acid-like units such as bAla and gAla may be treated as non-natural or amino-acid-like residues rather than linker-only units. N-terminal modifiers include chemical or label-type entries such as Ac, Pal, Myr, Biotin, FITC, and dye labels.
 
 ### SPPS Planner
 
@@ -131,6 +131,120 @@ The SPPS Planner includes an explicit last coupling step rule. After the last Fm
 
 For final non-Fmoc steps such as Ac, chemical modifiers, labels, or dye attachments, no additional Fmoc deprotection is scheduled after the modifier reaction. Final wash logic is still applied after the final non-Fmoc step.
 
+## Repository Structure
+
+The recommended public GitHub repository structure is shown below. This layout separates the main launcher, module-specific applications, shared GUI components, documentation, tests, examples, installer configuration, and user manuals.
+
+```text
+Pepforge/
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── environment.yml
+├── INSTALL_BUILD_TOOLS_AND_BUILD.bat
+├── RUN_SOURCE_DEV.bat
+├── main_launcher.py
+├── assets/
+│   ├── Pepforge_Icon.png
+│   └── Pepforge_Icon.ico
+├── apps/
+│   ├── hotspot_finder/
+│   ├── peptide_design_engine/
+│   └── spps_planner_app/
+├── suite_gui/
+├── peptiforg_core/
+├── docs/
+│   ├── HOTSPOT_METHOD.md
+│   ├── PEPTIDE_ENGINE_METHOD.md
+│   ├── SPPS_METHOD.md
+│   ├── SPPS_PROCESS_RULES.md
+│   ├── SPPS_COUPLING_COCKTAIL_RULE.md
+│   ├── SPPS_BRANCH_MODE.md
+│   ├── INSTALLATION_GUIDE.md
+│   └── RELEASE_NOTES.md
+├── tests/
+│   ├── test_spps_parser_contract.py
+│   ├── test_spps_cycle_contract.py
+│   └── test_peptide_engine_constraints.py
+├── installer/
+│   └── Pepforge_Setup.iss
+├── examples/
+│   ├── example_hotspot_input.txt
+│   ├── example_peptide_design_config.csv
+│   ├── example_spps_sequence.txt
+│   └── example_outputs/
+├── MANUAL_KO.txt
+├── MANUAL_EN.txt
+└── FEATURE_DIFFERENTIATION_ANALYSIS.txt
+```
+
+### Directory Description
+
+- `README.md`  
+  Main public-facing project document describing Pepforge, its modules, installation, usage, outputs, limitations, and repository structure.
+
+- `LICENSE`  
+  Open-source license file for the public research-preview release.
+
+- `requirements.txt`  
+  Python package requirements for source-level execution and build preparation.
+
+- `environment.yml`  
+  Optional Conda environment definition for users who prefer environment-based installation.
+
+- `INSTALL_BUILD_TOOLS_AND_BUILD.bat`  
+  Windows batch script used to install build requirements, build the desktop application, and generate the installer when Inno Setup is available.
+
+- `RUN_SOURCE_DEV.bat`  
+  Development-mode script for launching Pepforge directly from source without generating the installer.
+
+- `main_launcher.py`  
+  Main desktop launcher for accessing Hot Spot Finder, Peptide Design Engine, and SPPS Planner.
+
+- `assets/`  
+  Program icons, visual assets, installer icons, splash-screen resources, and other visual files used by the desktop application.
+
+- `apps/hotspot_finder/`  
+  Sequence-based hotspot analysis module.
+
+- `apps/peptide_design_engine/`  
+  Peptide candidate generation module with motif, chemistry, constraint, optional ML-prior logic, and SPPS-ready output metadata.
+
+- `apps/spps_planner_app/`  
+  Editable SPPS planning module for synthesis step generation, material usage calculation, coupling cocktail handling, branch mode, checklist export, and ML-ready logging.
+
+- `suite_gui/`  
+  Shared desktop GUI components and module-level graphical interfaces.
+
+- `peptiforg_core/`  
+  Shared core utilities, data structures, and common logic used across modules.
+
+- `docs/`  
+  Detailed method notes and technical documentation for each module.
+
+- `tests/`  
+  Parser, SPPS cycle, and peptide design constraint tests.
+
+- `installer/`  
+  Windows installer configuration files.
+
+- `examples/`  
+  Public-safe example inputs and outputs for demonstration.
+
+- `MANUAL_KO.txt` and `MANUAL_EN.txt`  
+  Korean and English user manuals.
+
+- `FEATURE_DIFFERENTIATION_ANALYSIS.txt`  
+  Comparative analysis describing Pepforge's features, intended use, differences from related tool categories, and limitations.
+
+### Repository Notes
+
+1. The repository structure should match the actual uploaded project as closely as possible.
+2. If a listed file does not exist, either create a simple placeholder file or remove that line from the README.
+3. Private data, protected beta files, password hashes, API keys, tokens, raw synthesis logs, and internal laboratory records should not be uploaded.
+4. The public GitHub repository should use the GitHub Public version, not the Protected Beta version.
+5. The Protected Beta version should be used only for internal installer creation and laboratory/team distribution.
+
 ## Installation
 
 From the root Pepforge folder, run:
@@ -185,4 +299,4 @@ In the SPPS Planner, ordinary intermediate coupling-to-next-coupling transitions
 
 ### N-terminal linker restriction
 
-Linker tokens are not allowed to occupy the N-terminal modifier position. N-terminal chemistry is reserved for terminal modifiers or labels such as Ac, Pal, Myr, Biotin, FITC, CY dyes, FAM, or TAMRA. Linker and spacer units such as PEG4, PEG8, Ahx, AEEA, bAla, G4S, SMCC, and related tokens are treated as internal or bridge/spacer elements only.
+Linker tokens are not allowed to occupy the N-terminal modifier position. N-terminal chemistry is reserved for terminal modifiers or labels such as Ac, Pal, Myr, Biotin, FITC, CY dyes, FAM, or TAMRA. Linker and spacer units such as PEG4, PEG8, Ahx, AEEA, G4S, SMCC, DSS, and related tokens are treated as internal or bridge/spacer elements only. Amino-acid-like units such as bAla and gAla may be used as amino-acid-like residues depending on the selected design settings.
