@@ -1,47 +1,414 @@
-Pepforge 사용 설명서
+Pepforge 사용자 매뉴얼
+=====================
 
-1. 실행
-- Pepforge 폴더에서 INSTALL_BUILD_TOOLS_AND_BUILD.bat를 실행하면 설치파일을 만들 수 있다.
-- 생성 위치: installer/output/Pepforge_Setup_v0.1.0.exe
-- 설치 후 바탕화면 아이콘 또는 시작 메뉴에서 Pepforge를 실행한다.
+Integrated Peptide Research Workflow Platform
+Hot Spot Finder / Peptide Design Engine / SPPS Planner
 
-2. Hot Spot Finder
-- 단백질 서열을 붙여 넣는다.
-- 분석을 실행하면 hotspot 후보가 (14K) 형식으로 출력된다.
-- 숫자는 N말단부터 센 residue 번호이며, 문자는 해당 아미노산이다.
-- 결과는 실험적으로 검증된 결합 위치가 아니라 sequence-only 기반 후보 region이다.
+1. 개요
+-------
 
-3. Peptide Design Engine
-- target sequence를 입력한다.
-- length mode를 RANDOM 또는 FIX로 선택한다.
-- chemistry/constraint 옵션은 체크된 항목만 적용된다.
-- motif는 RGD@1, EEMQR@4처럼 위치 지정이 가능하다.
-- linker는 N-terminal modifier가 아니라 linker/spacer/bridge 용도로 사용된다.
-- 결과는 full candidate와 ranked candidate로 저장할 수 있다.
+Pepforge는 peptide 연구 workflow를 통합적으로 지원하기 위한 연구용 소프트웨어이다. 프로그램은 세 가지 주요 모듈로 구성된다.
 
-4. SPPS Planner
-- Sequence에 Ac-EEMQRR-NH2, EEMQRR-NH2, EEMQRR 같은 표기를 입력한다.
-- Resin, scale, loading, unit eq, coupling reagent, catalyst, base, deprotection, solvent 조건을 설정한다.
-- 표는 C-term에서 N-term 방향으로 생성된다.
-- 아래 editable table에서 각 step의 Unit eq, Repeat, reagent eq/count, base eq/count, solvent count를 직접 수정할 수 있다.
-- 수정값은 Material Usage와 ML-ready log에 반영된다.
-- Ac는 화면상 Unit name에는 Ac로 표시되고, 계산상 사용 시약은 Acetic anhydride(Ac2O)로 집계된다.
-- 2-CTC/Trityl resin은 초기 Fmoc deprotection이 없고 DCM swell/loading 조건으로 처리된다.
-- Wang/Rink/Amide resin은 Fmoc resin으로 보고 초기 deprotection이 포함된다.
+1. Hot Spot Finder
+   단백질 sequence에서 hotspot 후보 residue 또는 local hotspot region을 탐색한다.
 
-5. Export
-- Export CSV + XLSX를 누르면 editable plan, material usage, operation form, printable checklist, ML-ready log, XLSX 파일이 출력된다.
-- 출력 폴더는 SPPS Planner 상단에서 지정할 수 있다.
+2. Peptide Design Engine
+   motif, chemistry option, label, tag, linker, non-natural amino acid, D-amino acid, optional ML-prior 등을 고려하여 peptide candidate를 생성한다.
 
+3. SPPS Planner
+   입력한 peptide sequence를 바탕으로 C-terminal에서 N-terminal 방향의 SPPS synthesis table을 생성한다. Coupling cocktail, material usage, deprotection, wash, branch mode, checklist, operation form, ML-ready log 등을 포함한다.
 
-마지막 coupling / final wash 규칙:
-- 마지막 Fmoc-AA coupling 이후 DMF wash 2회가 들어간다.
-- 이후 final Fmoc deprotection을 수행한다.
-- deprotection 이후 final wash로 DMF 3회, DCM 3회가 들어간다.
-- 실험실에 따라 MeOH wash 3회를 추가할 수 있으며, SPPS Planner 상단의 Final MeOH wash count를 3으로 설정하면 된다.
-- Ac, chemical, label, modifier처럼 Fmoc이 없는 최종 step 뒤에는 deprotection을 넣지 않는다. 단, final wash는 적용된다.
+Pepforge는 단순한 peptide generator가 아니라 sequence analysis, candidate design, synthesis planning, material usage, checklist, experimental logging을 연결하는 design-to-synthesis platform이다.
 
+2. 설치 및 실행
+---------------
 
-## Intermediate coupling wash rule
+2.1 설치파일 만들기
 
-In the SPPS Planner, ordinary intermediate coupling-to-next-coupling transitions use DMF wash x2 by default. DCM wash and optional MeOH wash are treated as final wash or resin-specific operations rather than default washes after every intermediate coupling.
+Pepforge 폴더 안에서 다음 파일을 실행한다.
+
+INSTALL_BUILD_TOOLS_AND_BUILD.bat
+
+성공하면 설치파일이 다음 위치에 생성된다.
+
+installer/output/Pepforge_Setup_v0.1.0.exe
+
+2.2 개발 모드 실행
+
+개발 또는 테스트 목적이라면 다음 파일을 실행한다.
+
+RUN_SOURCE_DEV.bat
+
+또는 다음 명령을 사용할 수 있다.
+
+python main_launcher.py
+
+2.3 설치 후 실행
+
+설치 후 바탕화면 또는 시작 메뉴에서 Pepforge를 실행한다. 메인 런처에서 다음 모듈 중 하나를 선택한다.
+
+Hot Spot Finder
+Peptide Design Engine
+SPPS Planner
+
+3. Hot Spot Finder
+------------------
+
+3.1 목적
+
+Hot Spot Finder는 protein sequence에서 candidate hotspot residue 또는 local hotspot region을 찾는 전용 모듈이다. 이 결과는 Peptide Design Engine에서 motif 또는 constraint 후보로 사용할 수 있다.
+
+3.2 입력
+
+Protein sequence를 입력한다. FASTA header가 있거나 순수 sequence만 있어도 사용할 수 있다.
+
+3.3 출력
+
+출력 예:
+
+(14K), (17Y), (19R)
+
+14는 N-terminal 기준 1부터 센 residue position이고, K는 해당 위치의 amino acid이다.
+
+Local hotspot region 예:
+
+(158W), (161Y), (163Y), (167R), (168R)
+
+이는 local window 안에서 hotspot-like context를 가진 대표 residue들을 의미한다.
+
+3.4 해석
+
+Hot Spot Finder score는 상대적 우선순위 신호이다. 실험적으로 검증된 binding residue라고 해석하면 안 된다. 구조 정보, docking, conservation, 실험 결과와 함께 검토하는 것이 좋다.
+
+4. Peptide Design Engine
+------------------------
+
+4.1 목적
+
+Peptide Design Engine은 사용자가 지정한 length, motif, chemistry, constraint 조건에 따라 peptide candidate를 생성한다.
+
+4.2 Length mode
+
+Fixed mode:
+지정 길이의 peptide를 생성한다.
+
+Random mode:
+최소/최대 길이 범위 안에서 peptide를 생성한다.
+
+4.3 Motif constraint
+
+Motif는 생성 peptide 안에 반드시 포함시키고 싶은 sequence pattern이다.
+
+예:
+
+RGD
+EEMQR
+KLV
+
+Fixed placement:
+
+RGD@1, EEMQR@4
+
+의미:
+1번 위치부터 RGD
+4번 위치부터 EEMQR
+
+위치는 N-terminal 기준 1부터 센다.
+
+4.4 Motif hide/show
+
+Motif option을 체크 해제하면 motif preset, motif input, placement mode, position input이 숨겨진다. 또한 내부 CONFIG에서도 motif constraint가 꺼진다.
+
+4.5 Chemistry option
+
+각 chemistry option은 checkbox로 제어된다.
+
+예:
+D-amino acid
+non-natural amino acid
+label
+tag
+linker
+base chemistry
+motif
+bridge constraint
+
+체크 해제하면 해당 옵션은 candidate generation에 적용되지 않는다.
+
+4.6 N-terminal modifier와 linker 구분
+
+N-terminal modifier로 허용되는 예:
+
+Ac
+Pal
+Myr
+Biotin
+FITC
+FAM
+TAMRA
+CY dyes
+
+N-terminal modifier로 랜덤 배치하지 않는 linker-only 예:
+
+PEG4
+PEG8
+AEEA
+Ahx
+G4S
+SMCC
+DSS
+
+bAla와 gAla는 linker-only가 아니라 amino-acid-like unit으로 볼 수 있다.
+
+5. SPPS Planner
+---------------
+
+5.1 목적
+
+SPPS Planner는 peptide sequence를 입력하면 C-terminal에서 N-terminal 방향으로 synthesis plan을 생성한다.
+
+예:
+
+Ac-EEMQRR-NH2
+
+Core sequence:
+
+EEMQRR
+
+Synthesis direction:
+
+R → R → Q → M → E → E → Ac
+
+5.2 Sequence 입력
+
+지원 예:
+
+EEMQRR
+EEMQRR-NH2
+-EEMQRR-NH2
+Ac-EEMQRR-NH2
+AcEEMQRR-NH2
+FITC-EEMQRR-NH2
+Biotin-EEMQRR-NH2
+
+EEMQRR-NH2는 앞에 '-'를 붙이지 않아도 core peptide로 인식되어야 한다.
+
+5.3 상단 입력부
+
+주요 입력 항목:
+
+Sequence
+Resin type / family
+Resin scale
+Loading
+Default unit eq
+Default unit repeat
+Coupling reagent 1
+Coupling reagent 1 eq
+Coupling reagent 1 count
+Coupling reagent 2 / catalyst
+Coupling reagent 2 / catalyst eq
+Coupling reagent 2 / catalyst count
+Coupling base
+Coupling base eq
+Coupling base count
+Default coupling cocktail solvent
+mL per mmol
+Deprotection base
+Deprotection ratio
+Deprotection count
+Solvent 1
+Solvent 1 count
+Solvent 2
+Solvent 2 count
+Final MeOH wash count
+Output folder
+
+5.4 버튼
+
+Build Table:
+sequence를 parsing하고 editable table을 만든다.
+
+Recalculate Usage:
+사용량을 다시 계산한다.
+
+Export CSV/XLSX:
+결과 파일을 저장한다.
+
+Open Output Folder:
+결과 폴더를 연다.
+
+Append row:
+새 row를 추가한다.
+
+Delete selected row:
+선택 row를 삭제한다.
+
+Reset column widths:
+사용자가 조절한 column width를 초기화한다.
+
+5.5 Resin logic
+
+2-CTC / Trityl resin:
+swell solvent = DCM
+loading solvent = DCM-rich condition
+default loading cocktail solvent = 90% DCM / 10% DMF
+initial Fmoc deprotection 없음
+
+Amide / Rink / Wang resin:
+swell solvent = DMF
+coupling solvent = DMF 중심
+Fmoc resin으로 취급
+initial deprotection 가능
+
+5.6 Coupling cocktail
+
+Coupling step은 하나의 coupling cocktail로 취급한다.
+
+구성:
+
+amino acid 또는 modifier
+coupling reagent 1
+coupling reagent 2 / catalyst / additive
+coupling base
+coupling cocktail solvent
+
+예:
+
+Fmoc-AA-OH + DIC + HOBt + DMF
+
+또는:
+
+Fmoc-AA-OH + HBTU + HOBt + DIEA + DMF
+
+Material Usage에서는 각각의 시약량을 따로 계산하지만, operation logic은 하나의 coupling cocktail로 표시한다.
+
+5.7 일반 STD cycle
+
+일반 중간 Fmoc-AA cycle:
+
+deprotection ×2
+→ DMF wash ×6
+→ coupling cocktail
+→ DMF wash ×2
+→ next cycle
+
+5.8 Last Fmoc-AA coupling
+
+마지막에 붙이는 unit이 Fmoc-AA라면:
+
+pre-coupling deprotection
+→ DMF wash ×6
+→ last Fmoc-AA coupling cocktail
+→ DMF wash ×2
+→ final Fmoc deprotection
+→ DMF wash ×3
+→ DCM wash ×3
+→ optional MeOH wash
+
+Final deprotection 후에는 DMF wash ×6을 다시 넣지 않는다.
+
+5.9 Ac / chemical / tag / label / modifier
+
+Ac, chemical, tag, label, modifier는 Fmoc-AA가 아니므로 해당 row 자체에는 deprotection이 없다.
+
+예:
+
+Ac
+FITC
+Biotin
+FAM
+TAMRA
+CY dyes
+Pal
+Myr
+DOTA
+NOTA
+
+이 경우:
+
+modifier coupling
+→ post-modifier deprotection 없음
+→ final wash DMF ×3
+→ final wash DCM ×3
+→ optional MeOH wash
+
+만약 modifier를 붙이기 전에 Fmoc 제거가 필요하다면, 그 deprotection은 modifier row가 아니라 직전 Fmoc-AA step에 귀속된다.
+
+5.10 Acetylation
+
+표시명:
+
+Ac
+
+실제 사용 시약:
+
+Acetic anhydride
+Ac2O
+
+기준값:
+
+MW = 102.09 g/mol
+density = 1.08 g/mL
+
+계산식:
+
+Ac2O volume (mL) = resin scale (mmol) × Ac eq × 102.09 / 1000 / 1.08
+
+5.11 Branch mode
+
+Branch mode는 side-chain branch peptide planning을 위한 기능이다.
+
+기본값:
+
+Branch mode OFF
+
+Branch mode ON 시 입력:
+
+Branch point
+Branch arm sequence
+Protecting group
+Branch deprotection condition
+
+예:
+
+Main sequence: Ac-EEMQKRR-NH2
+Branch point: K5
+Branch arm sequence: RGD
+Protecting group: Mtt
+
+5.12 Material Usage Table
+
+Material Usage Table은 실제 사용 순서에 가깝게 process order로 표시된다.
+
+포함 항목:
+
+resin
+amino acid
+coupling reagent
+catalyst/additive
+base
+coupling cocktail solvent
+deprotection base
+deprotection solvent
+post-coupling wash solvent
+final wash solvent
+modifier reagent
+branch reagent
+
+5.13 Export
+
+Export CSV/XLSX를 누르면 output folder에 결과가 저장된다.
+
+예상 파일:
+
+spps_editable_plan.csv
+material_usage_table.csv
+operation_form.csv
+printable_synthesis_checklist.csv
+spps_ml_ready_log.csv
+spps_plan.xlsx
+
+5.14 주의사항
+
+Pepforge는 연구 및 계획 보조용 도구이다. 실험 전에 반드시 시약 form, hydrate/salt 여부, density, purity, vendor specification, resin loading, scale conversion, 실험실 protocol, chemical compatibility, branch protecting group compatibility, 안전 규정을 확인해야 한다.

@@ -1,31 +1,295 @@
 Pepforge User Manual
+====================
 
-1. Launching
-Run INSTALL_BUILD_TOOLS_AND_BUILD.bat from the Pepforge root folder to build the installer. The installer is generated at installer/output/Pepforge_Setup_v0.1.0.exe. After installation, launch Pepforge from the desktop shortcut or Start Menu.
+Integrated Peptide Research Workflow Platform
+Hot Spot Finder / Peptide Design Engine / SPPS Planner
 
-2. Hot Spot Finder
-Paste a protein sequence and run the analysis. Hotspot residues are shown in compact form such as (14K), where 14 is the N-terminal 1-based residue number and K is the amino acid. The result is a sequence-only prioritization signal and should not be interpreted as experimentally validated binding evidence.
+1. Overview
+-----------
 
-3. Peptide Design Engine
-Enter one or more target sequences, choose RANDOM or FIX length mode, and enable only the chemistry/constraint systems you want to apply. Motifs can be fixed by position using syntax such as RGD@1 or EEMQR@4. Linkers are treated as spacer/bridge components, not default N-terminal modifiers.
+Pepforge is an integrated peptide research software platform designed to connect sequence analysis, peptide candidate generation, and SPPS-oriented synthesis planning.
 
-4. SPPS Planner
-Enter peptide notation such as Ac-EEMQRR-NH2, EEMQRR-NH2, or EEMQRR. Select resin type, scale, loading, unit equivalent, coupling reagent, catalyst, base, deprotection, and solvent settings. The editable table is generated in C-terminal to N-terminal synthesis order. Each row can be edited directly, including unit eq, repeat, reagent eq/count, base eq/count, and solvent count. Material usage and ML-ready logs are calculated from the current editable table state.
+The platform consists of three main modules:
 
-Ac is displayed as Ac in the Unit column. The default calculation reagent is Acetic anhydride (Ac2O). 2-CTC/Trityl resin uses no initial Fmoc deprotection and DCM swell/loading conditions. Wang/Rink/Amide resin is treated as Fmoc resin and includes initial deprotection.
+1. Hot Spot Finder
+   A sequence-based tool for identifying candidate hotspot residues or local hotspot regions from protein sequences.
 
-5. Export
-Use Export CSV + XLSX to export the editable plan, material usage, operation form, printable checklist, ML-ready log, and workbook.
+2. Peptide Design Engine
+   A constrained peptide candidate generation module supporting motifs, chemistry options, labels, tags, linkers, non-natural amino acids, D-amino acids, optional ML-prior scoring, and structured output.
 
+3. SPPS Planner
+   An editable solid-phase peptide synthesis planning module that generates C-terminal to N-terminal synthesis tables, coupling cocktail information, material usage summaries, operation forms, printable checklists, branch-mode plans, and ML-ready logs.
 
-Last coupling / final wash rule:
-- After the last Fmoc-AA coupling, the planner schedules DMF wash x2.
-- Final Fmoc deprotection is then scheduled.
-- After final deprotection, final wash is applied as DMF x3 and DCM x3.
-- If a laboratory additionally uses methanol washing, set Final MeOH wash count to 3 to add MeOH x3.
-- Final Ac, chemical, label, and modifier steps do not require post-coupling Fmoc deprotection, but final wash is still applied.
+Pepforge is not only a peptide generator. It is intended to support a complete design-to-synthesis workflow.
 
+2. Installation and Execution
+-----------------------------
 
-## Intermediate coupling wash rule
+From the root Pepforge folder, run:
 
-In the SPPS Planner, ordinary intermediate coupling-to-next-coupling transitions use DMF wash x2 by default. DCM wash and optional MeOH wash are treated as final wash or resin-specific operations rather than default washes after every intermediate coupling.
+INSTALL_BUILD_TOOLS_AND_BUILD.bat
+
+The generated installer is expected at:
+
+installer/output/Pepforge_Setup_v0.1.0.exe
+
+For development mode, run:
+
+RUN_SOURCE_DEV.bat
+
+or:
+
+python main_launcher.py
+
+3. Hot Spot Finder
+------------------
+
+Hot Spot Finder analyzes protein sequences and reports candidate hotspot residues or local hotspot regions.
+
+Example output:
+
+(14K), (17Y), (19R)
+
+where 14 is the 1-based residue position and K is the amino acid at that position.
+
+Hotspot results are prioritization signals and should not be interpreted as experimentally confirmed binding residues.
+
+4. Peptide Design Engine
+------------------------
+
+The Peptide Design Engine generates peptide candidates under user-defined constraints.
+
+Main features:
+
+fixed or random length generation
+motif constraints
+fixed or random motif placement
+motif presets
+chemistry option toggles
+D-amino acid support
+non-natural amino acid support
+label and tag handling
+linker and spacer logic
+optional ML-prior scoring
+SPPS-related metadata export
+
+Motif example:
+
+RGD@1, EEMQR@4
+
+For a 12-mer peptide:
+
+position 1-3 = RGD
+position 4-8 = EEMQR
+
+If motif constraint is unchecked, motif-related controls are hidden and motif constraints are disabled internally.
+
+Allowed N-terminal modifiers include:
+
+Ac
+Pal
+Myr
+Biotin
+FITC
+FAM
+TAMRA
+CY dyes
+
+Linker-only units such as PEG4, PEG8, AEEA, Ahx, G4S, SMCC, and DSS are not placed as random N-terminal modifiers by default.
+
+5. SPPS Planner
+---------------
+
+The SPPS Planner generates editable solid-phase peptide synthesis plans.
+
+Example input:
+
+Ac-EEMQRR-NH2
+
+Core sequence:
+
+EEMQRR
+
+Synthesis direction:
+
+R → R → Q → M → E → E → Ac
+
+Supported notation examples:
+
+EEMQRR
+EEMQRR-NH2
+-EEMQRR-NH2
+Ac-EEMQRR-NH2
+AcEEMQRR-NH2
+FITC-EEMQRR-NH2
+Biotin-EEMQRR-NH2
+
+6. Resin Logic
+--------------
+
+2-CTC / Trityl resin:
+
+swell solvent = DCM
+loading solvent = DCM-rich condition
+default loading cocktail solvent = 90% DCM / 10% DMF
+no initial Fmoc deprotection for the resin itself
+
+Amide / Rink / Wang resin:
+
+swell solvent = DMF
+coupling solvent = DMF-centered
+treated as Fmoc-type resin
+initial deprotection may be required
+
+7. Coupling Cocktail
+--------------------
+
+Pepforge treats coupling as one coupling cocktail.
+
+A coupling step includes:
+
+amino acid or modifier
+coupling reagent 1
+coupling reagent 2 / catalyst / additive
+coupling base
+coupling cocktail solvent
+
+Example:
+
+Fmoc-AA-OH + DIC + HOBt + DMF
+
+or:
+
+Fmoc-AA-OH + HBTU + HOBt + DIEA + DMF
+
+Material usage reports individual reagent quantities, but the operation is represented as one coupling cocktail.
+
+8. Standard Fmoc Cycle
+----------------------
+
+The standard intermediate Fmoc-AA cycle is:
+
+deprotection ×2
+→ DMF wash ×6
+→ coupling cocktail
+→ DMF wash ×2
+→ next cycle
+
+9. Last Fmoc-AA Coupling
+------------------------
+
+If the final unit is an Fmoc-protected amino acid:
+
+pre-coupling deprotection
+→ DMF wash ×6
+→ last Fmoc-AA coupling cocktail
+→ DMF wash ×2
+→ final Fmoc deprotection
+→ DMF wash ×3
+→ DCM wash ×3
+→ optional MeOH wash
+
+After final deprotection, Pepforge does not add another DMF wash ×6 cycle.
+
+10. Ac / Chemical / Tag / Label / Modifier
+------------------------------------------
+
+Ac, chemical modifiers, tags, and labels are non-Fmoc operations.
+
+Examples:
+
+Ac
+FITC
+Biotin
+FAM
+TAMRA
+CY dyes
+Pal
+Myr
+DOTA
+NOTA
+
+For these operations:
+
+modifier coupling
+→ no post-modifier deprotection
+→ final wash DMF ×3
+→ final wash DCM ×3
+→ optional MeOH wash
+
+If Fmoc removal is required before attaching a modifier, that deprotection is assigned to the previous Fmoc-AA step, not to the modifier row.
+
+11. N-terminal Acetylation
+--------------------------
+
+Displayed unit:
+
+Ac
+
+Actual reagent:
+
+Acetic anhydride
+Ac2O
+
+Reference values:
+
+MW = 102.09 g/mol
+density = 1.08 g/mL
+
+Calculation:
+
+Ac2O volume (mL) = resin scale (mmol) × Ac eq × 102.09 / 1000 / 1.08
+
+12. Branch Mode
+---------------
+
+Branch mode supports side-chain branch planning.
+
+Default:
+
+Branch mode OFF
+
+When enabled, the user may define:
+
+branch point
+branch arm sequence
+protecting group
+branch deprotection condition
+
+Example:
+
+Main sequence: Ac-EEMQKRR-NH2
+Branch point: K5
+Branch arm: RGD
+Protecting group: Mtt
+
+13. Export
+----------
+
+Export CSV/XLSX may generate:
+
+spps_editable_plan.csv
+material_usage_table.csv
+operation_form.csv
+printable_synthesis_checklist.csv
+spps_ml_ready_log.csv
+spps_plan.xlsx
+
+14. Safety and Verification
+---------------------------
+
+Before experimental use, users must verify:
+
+reagent identity
+salt or hydrate form
+density
+concentration
+purity
+vendor specification
+resin loading
+scale conversion
+solvent compatibility
+protecting group compatibility
+laboratory safety requirements
+
+Pepforge is a planning tool and does not replace expert review.
