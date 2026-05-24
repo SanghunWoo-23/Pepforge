@@ -1,0 +1,4 @@
+record_name,position,conservation_score
+small_protein,10,0.91
+small_protein,20,0.87
+small_protein,30,0.22

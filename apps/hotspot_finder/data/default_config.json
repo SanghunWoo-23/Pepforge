@@ -1,0 +1,24 @@
+{
+  "use_esm": false,
+  "esm_model": "esm2_t6_8M_UR50D",
+  "device": "auto",
+  "window_size": 900,
+  "overlap": 150,
+  "safe_window_limit": 1000,
+  "clamp_window_size": true,
+  "batch_size": 4,
+  "use_masked_marginal": true,
+  "use_mutation_sensitivity": true,
+  "max_mutation_scan_length": 2500,
+  "top_n": 30,
+  "merge_position_mode": "model_position",
+  "weights": {
+    "rule_score": 0.42,
+    "esm_embedding_score": 0.12,
+    "esm_unpredictability_score": 0.18,
+    "esm_mutation_sensitivity": 0.18,
+    "conservation_score": 0.05,
+    "structure_score": 0.05,
+    "supervised_score": 0.0
+  }
+}

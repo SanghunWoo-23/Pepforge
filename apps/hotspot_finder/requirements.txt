@@ -1,0 +1,8 @@
+numpy
+pandas
+matplotlib
+scikit-learn
+ipywidgets
+torch
+fair-esm
+joblib

@@ -1,0 +1,8 @@
+record_name,position,supervised_score
+natural_peptide,1,0.3
+natural_peptide,2,0.45
+natural_peptide,3,0.8
+natural_peptide,4,0.88
+natural_peptide,5,0.78
+natural_peptide,6,0.35
+natural_peptide,7,0.4

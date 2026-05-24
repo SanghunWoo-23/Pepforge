@@ -1,0 +1,38 @@
+mod,class,charge_delta,hydrophobicity_delta,bulkiness_delta,hotspot_bonus,notes
+Biotin,affinity_tag,0,1.2,2.0,0.04,Biotin side-chain modification
+Mal,reactive_handle,0,0.5,1.0,0.02,Maleimide handle
+PO3H2,phosphorylation,-2,-1.5,1.0,0.06,Phosphorylation-like group
+pS,phosphorylation,-2,-1.5,1.0,0.06,Phosphoserine notation
+pT,phosphorylation,-2,-1.5,1.0,0.06,Phosphothreonine notation
+pY,phosphorylation,-2,-1.5,1.0,0.06,Phosphotyrosine notation
+Pal,lipidation,0,4.0,3.0,0.03,Palmitoylation-like group
+Myr,lipidation,0,3.8,2.8,0.03,Myristoylation-like group
+Ac,acetylation,0,0.2,0.5,0.01,Side-chain acetylation-like annotation
+Azide,click_handle,0,0.2,0.7,0.01,Azide click handle
+Alkyne,click_handle,0,0.4,0.7,0.01,Alkyne click handle
+PEG4,pegylation,0,0.0,2.0,0.0,PEG4 side-chain modification
+Me,methylation,0,0.4,0.5,0.01,Methylation side-chain annotation
+Me1,methylation,0,0.4,0.5,0.01,Monomethylation
+Me2,methylation,0,0.7,0.8,0.02,Dimethylation
+Me3,methylation,1,1.0,1.1,0.03,Trimethylation/quaternary-like annotation
+AcK,acetylation,-1,0.2,0.8,0.03,Acetyl lysine-like side-chain annotation
+Ub,protein_modifier,0,0.0,4.0,0.05,Ubiquitin-like bulky annotation; not structurally explicit
+SUMO,protein_modifier,0,0.0,4.0,0.05,SUMO-like bulky annotation; not structurally explicit
+GlyGly,ubiquitin_remnant,0,-0.2,1.0,0.03,GlyGly remnant annotation
+Farnesyl,lipidation,0,4.2,3.0,0.03,Farnesylation-like side-chain annotation
+Geranyl,lipidation,0,4.0,2.8,0.03,Geranylation-like side-chain annotation
+Geranylgeranyl,lipidation,0,4.5,3.5,0.03,Geranylgeranylation-like side-chain annotation
+GlcNAc,glycosylation,0,-1.0,2.5,0.04,O-GlcNAc-like glycosylation annotation
+GalNAc,glycosylation,0,-1.0,2.5,0.04,GalNAc-like glycosylation annotation
+Mannose,glycosylation,0,-1.0,2.5,0.04,Mannose-like glycosylation annotation
+Sulfo,sulfation,-1,-1.2,1.0,0.05,Sulfation-like side-chain annotation
+NO2,nitration,0,0.3,0.8,0.03,Nitration annotation
+Cl,halogenation,0,0.8,0.7,0.02,Chlorination-like annotation
+Br,halogenation,0,1.0,0.9,0.02,Bromination-like annotation
+I,halogenation,0,1.2,1.0,0.02,Iodination-like annotation
+FITC,label,0,1.0,2.5,0.02,Side-chain FITC label
+FAM,label,0,0.8,2.4,0.02,Side-chain FAM label
+Cy3,label,0,1.2,2.8,0.02,Side-chain Cy3 label
+Cy5,label,0,1.5,3.0,0.02,Side-chain Cy5 label
+TAMRA,label,0,1.0,2.7,0.02,Side-chain TAMRA label
+CHS,lipidation,0,4.5,3.5,0.03,CHS side-chain annotation

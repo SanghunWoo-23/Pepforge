@@ -1,0 +1,7 @@
+name,class,MW,density_g_mL,state,default_role,notes
+HOBt,catalyst/additive,135.13,,solid,additive,Common additive; safety/regulatory considerations may apply
+Oxyma,catalyst/additive,142.11,,solid,additive,Common additive for carbodiimide coupling
+HOAt,catalyst/additive,136.11,,solid,additive,High-performance additive; safety/regulatory considerations may apply
+DMAP,catalyst/additive,122.17,,solid,catalyst,Used in acylation/esterification contexts
+NHS,catalyst/additive,115.09,,solid,activation additive,NHS ester chemistry context
+Sulfo-NHS,catalyst/additive,217.13,,solid,activation additive,Water-soluble NHS derivative

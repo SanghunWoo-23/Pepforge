@@ -1,0 +1,147 @@
+Pepforge 사용 설명서
+====================
+
+1. 실행과 설치
+--------------
+
+소스 상태에서 테스트하려면 다음 파일을 실행한다.
+
+    RUN_SOURCE_DEV.bat
+
+배포용 설치파일을 만들려면 `Pepforge` 폴더에서 다음 파일을 실행한다.
+
+    INSTALL_BUILD_TOOLS_AND_BUILD.bat
+
+빌드가 성공하면 설치파일은 다음 위치에 생성된다.
+
+    installer\output\Pepforge_Setup_v0.1.0.exe
+
+설치 후 기본 위치는 다음과 같다.
+
+    C:\Users\<사용자>\AppData\Local\Programs\Pepforge
+
+바탕화면 아이콘은 기본 생성되도록 설정되어 있다.
+
+
+2. 메인 런처
+------------
+
+메인 런처에서는 다음 모듈을 선택할 수 있다.
+
+- Hot Spot Finder
+- Peptide Design Engine
+- SPPS Planner
+- Workflow Mode
+
+각 모듈은 독립적으로 실행할 수 있고, Workflow Mode에서는 hotspot 분석, peptide 설계, SPPS 계획을 project/session 단위로 연결할 수 있다.
+
+
+3. Hot Spot Finder 사용법
+-------------------------
+
+목적:
+입력 서열에서 peptide 설계에 우선적으로 검토할 residue 위치를 계산한다.
+
+사용 순서:
+
+1. Hot Spot Finder를 연다.
+2. FASTA 또는 text 서열을 불러오거나 직접 입력한다.
+3. 필요하면 window, overlap, top-N을 조정한다.
+4. Run analysis를 누른다.
+5. Hot spots 표를 확인한다.
+6. Open output folder로 저장 위치를 연다.
+
+표시 형식:
+
+    rank | record | sequence number/amino acid | score | confidence | reason
+
+예시:
+
+    1 | target | 15/R | 0.82 | high | positive/charged; polar
+
+여기서 `15/R`은 15번 residue가 R이라는 뜻이다. 화면에는 내부 전체 계산 데이터가 아니라 계산된 hotspot 결과만 표시된다.
+
+
+4. Peptide Design Engine 사용법
+-------------------------------
+
+목적:
+사용자가 지정한 조건에 따라 peptide 후보를 생성하고 우선순위를 정한다.
+
+사용 순서:
+
+1. Peptide Design Engine을 연다.
+2. target sequence를 입력한다.
+3. length mode와 generation parameter를 설정한다.
+4. Chemistry / Constraints 탭에서 적용할 기능만 체크한다.
+5. 필요한 경우 motif placement 또는 bridge constraint를 설정한다.
+6. 실행 후 후보 결과를 확인하고 CSV로 저장한다.
+
+Chemistry 체크박스 동작:
+체크를 해제하면 해당 기능의 세부 옵션이 숨겨지고, 새 후보 생성에 적용되지 않는다.
+
+Motif placement:
+
+- OFF: motif 강제 배치 없음.
+- FIXED: `RGD@1 / EEMQR@4`처럼 N-term 기준 1부터 위치 지정.
+- RANDOM: `RGD / EEMQR`처럼 motif만 지정하고 위치는 후보마다 랜덤 배치.
+
+Motif preset:
+RGD, PXXP-like, LXXLL-like, KLV-like 등의 시작 템플릿을 제공한다. preset은 자동 정답이 아니라 초기 설정값이므로 연구 목적에 맞게 수정해야 한다.
+
+
+5. SPPS Planner 사용법
+----------------------
+
+목적:
+peptide notation을 인식해 C-term에서 N-term 방향의 합성 계획표를 만든다.
+
+사용 순서:
+
+1. SPPS Planner를 연다.
+2. sequence를 입력한다.
+
+       Ac-EEMQRR-NH2
+
+3. resin scale, loading, amino-acid eq, modifier eq, coupling reagent, catalyst, base, deprotection base, solvent, repeat 등을 입력한다.
+4. Parse sequence / build table을 누른다.
+5. 아래 editable table에서 필요한 칸을 더블클릭해 수정한다.
+6. Material Usage 표에서 시약/용매 사용량을 확인한다.
+7. CSV/XLSX로 출력한다.
+
+수정 가능한 주요 항목:
+
+- unit name,
+- unit equivalent,
+- unit amount,
+- coupling reagent,
+- catalyst,
+- base,
+- deprotection base,
+- deprotection ratio,
+- solvent,
+- solvent-use count,
+- repeat count.
+
+eq, repeat, MW 관련 값이 바뀌면 사용량 표가 다시 계산된다.
+
+출력 파일:
+
+- editable SPPS plan,
+- material usage table,
+- step reagent plan,
+- ML-ready synthesis log,
+- printable synthesis checklist,
+- XLSX workbook.
+
+
+6. Printable Checklist
+----------------------
+
+합성 중 출력해서 사용할 수 있는 체크리스트다. step, reagent/unit name, eq, amount, coupling system, repeat, date, checked, note 칸을 포함한다.
+
+
+7. 주의사항
+-----------
+
+Pepforge의 hotspot score, ML-prior score, 합성 계산값은 연구 보조용이다. 실제 실험 전에는 반드시 실험실 SOP, 시약 form, resin type, coupling condition을 연구자가 확인해야 한다.

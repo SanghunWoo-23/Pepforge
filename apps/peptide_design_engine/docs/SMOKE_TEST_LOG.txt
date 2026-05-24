@@ -1,0 +1,22 @@
+COMMAND:
+/opt/pyvenv/bin/python peptide_cli.py --target DELIKFVRWA --pop 20 --gen 2 --top-n 5 --outdir /mnt/data/peptide_verified_smoke_output
+
+RETURN CODE:
+0
+
+STDOUT:
+[Gen 000] best=12.479 mean=11.109 valid=0.85
+[Gen 001] best=12.918 mean=11.630 valid=0.95
+
+✅ DONE
+Output ZIP: /mnt/data/peptide_verified_smoke_output.zip
+
+🏆 Top candidates
+  1 | score=12.901 | length=30 | valid=True | AA_G4-dS-Sar-MePhe-Abu-Pen-Hyp-R-dQ-dD-dQ-F-Q-Bip-Nle-D-dQ-L-Y-F-F-R-G-D-K-L-V-F-F-NH2
+  2 | score=12.535 | length=25 | valid=True | HA-MeAla-S-E-AA_GS6-dN-Nle-Sar-C-Chg-dK-R-G-D-K-L-Sec-L-F-K-L-V-F-F-NH2
+  3 | score=12.437 | length=19 | valid=True | HA-MeAla-S-E-AA_GS6-dM-dA-Sar-C-Chg-R-G-D-K-L-V-F-F-NH2
+  4 | score=12.422 | length=26 | valid=True | ROX-Stear-dS-Sar-MePhe-Triazole-Pen-Abu-R-dQ-dD-dQ-F-Q-Bip-Nle-Bip-R-G-D-K-L-V-F-F-NH2
+  5 | score=12.390 | length=28 | valid=True | S-dQ-dQ-SMCC-dI-dT-Hydrazone-dG-S-V-dV-Phe4Cl-dD-Phe4F-R-G-D-K-L-V-F-K-K-L-V-F-F-NH2
+
+
+STDERR:

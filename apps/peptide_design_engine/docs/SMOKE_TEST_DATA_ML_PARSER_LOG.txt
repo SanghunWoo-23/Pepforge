@@ -1,0 +1,36 @@
+$ /opt/pyvenv/bin/python /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/Python/peptide_cli.py --parse-af3-folder /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/sample_external_outputs/af3_output_example --candidate-map /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/templates/candidate_mapping_template.csv --training-db /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/smoke_training_data_parser_test.csv --no-run
+RET=0
+STDOUT:
+✅ AF3 parsed: 1 rows -> /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/parsed_af3_latest.csv
+✅ training data updated: /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/smoke_training_data_parser_test.csv | added=1 | total=1
+
+STDERR:
+Spreadsheet runtime warmup failed during python startup
+Traceback (most recent call last):
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/patches/warm_spreadsheet_runtime_on_startup.py", line 26, in warm_spreadsheet_runtime_on_startup
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/spreadsheet_warmup.py", line 785, in warm_spreadsheet_runtime
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/spreadsheet_warmup.py", line 720, in _warm_feature_flows
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/spreadsheet_warmup.py", line 704, in _warm_collaboration_flows
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/generated/interface/models.py", line 48821, in hydrate_crdt_from_proto
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/rpc/remote.py", line 747, in __call__
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/rpc/client.py", line 150, in call
+artifact_tool.rpc.client.RemoteError: hydrateCrdtFromProto requires an empty collaborative document.
+
+
+$ /opt/pyvenv/bin/python /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/Python/peptide_cli.py --parse-prodigy /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/sample_external_outputs/prodigy_output_example --candidate-map /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/templates/candidate_mapping_template.csv --training-db /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/smoke_training_data_parser_test.csv --no-run
+RET=0
+STDOUT:
+✅ PRODIGY parsed: 2 rows -> /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/parsed_prodigy_latest.csv
+✅ training data updated: /mnt/data/pde_gui_data_ml_work/Peptide_Design_Engine_DESKTOP_GUI_EXE_READY_FULL/data/smoke_training_data_parser_test.csv | added=2 | total=3
+
+STDERR:
+Spreadsheet runtime warmup failed during python startup
+Traceback (most recent call last):
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/patches/warm_spreadsheet_runtime_on_startup.py", line 26, in warm_spreadsheet_runtime_on_startup
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/spreadsheet_warmup.py", line 785, in warm_spreadsheet_runtime
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/spreadsheet_warmup.py", line 720, in _warm_feature_flows
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/spreadsheet_warmup.py", line 704, in _warm_collaboration_flows
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/generated/interface/models.py", line 48821, in hydrate_crdt_from_proto
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/rpc/remote.py", line 747, in __call__
+  File "/tmp/tmp.9eeVjt35CN/artifact_tool_v2-2.7.5/artifact_tool/rpc/client.py", line 150, in call
+artifact_tool.rpc.client.RemoteError: hydrateCrdtFromProto requires an empty collaborative document.

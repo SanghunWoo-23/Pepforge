@@ -1,0 +1,47 @@
+Pepforge 사용 설명서
+
+1. 실행
+- Pepforge 폴더에서 INSTALL_BUILD_TOOLS_AND_BUILD.bat를 실행하면 설치파일을 만들 수 있다.
+- 생성 위치: installer/output/Pepforge_Setup_v0.1.0.exe
+- 설치 후 바탕화면 아이콘 또는 시작 메뉴에서 Pepforge를 실행한다.
+
+2. Hot Spot Finder
+- 단백질 서열을 붙여 넣는다.
+- 분석을 실행하면 hotspot 후보가 (14K) 형식으로 출력된다.
+- 숫자는 N말단부터 센 residue 번호이며, 문자는 해당 아미노산이다.
+- 결과는 실험적으로 검증된 결합 위치가 아니라 sequence-only 기반 후보 region이다.
+
+3. Peptide Design Engine
+- target sequence를 입력한다.
+- length mode를 RANDOM 또는 FIX로 선택한다.
+- chemistry/constraint 옵션은 체크된 항목만 적용된다.
+- motif는 RGD@1, EEMQR@4처럼 위치 지정이 가능하다.
+- linker는 N-terminal modifier가 아니라 linker/spacer/bridge 용도로 사용된다.
+- 결과는 full candidate와 ranked candidate로 저장할 수 있다.
+
+4. SPPS Planner
+- Sequence에 Ac-EEMQRR-NH2, EEMQRR-NH2, EEMQRR 같은 표기를 입력한다.
+- Resin, scale, loading, unit eq, coupling reagent, catalyst, base, deprotection, solvent 조건을 설정한다.
+- 표는 C-term에서 N-term 방향으로 생성된다.
+- 아래 editable table에서 각 step의 Unit eq, Repeat, reagent eq/count, base eq/count, solvent count를 직접 수정할 수 있다.
+- 수정값은 Material Usage와 ML-ready log에 반영된다.
+- Ac는 화면상 Unit name에는 Ac로 표시되고, 계산상 사용 시약은 Acetic anhydride(Ac2O)로 집계된다.
+- 2-CTC/Trityl resin은 초기 Fmoc deprotection이 없고 DCM swell/loading 조건으로 처리된다.
+- Wang/Rink/Amide resin은 Fmoc resin으로 보고 초기 deprotection이 포함된다.
+
+5. Export
+- Export CSV + XLSX를 누르면 editable plan, material usage, operation form, printable checklist, ML-ready log, XLSX 파일이 출력된다.
+- 출력 폴더는 SPPS Planner 상단에서 지정할 수 있다.
+
+
+마지막 coupling / final wash 규칙:
+- 마지막 Fmoc-AA coupling 이후 DMF wash 2회가 들어간다.
+- 이후 final Fmoc deprotection을 수행한다.
+- deprotection 이후 final wash로 DMF 3회, DCM 3회가 들어간다.
+- 실험실에 따라 MeOH wash 3회를 추가할 수 있으며, SPPS Planner 상단의 Final MeOH wash count를 3으로 설정하면 된다.
+- Ac, chemical, label, modifier처럼 Fmoc이 없는 최종 step 뒤에는 deprotection을 넣지 않는다. 단, final wash는 적용된다.
+
+
+## Intermediate coupling wash rule
+
+In the SPPS Planner, ordinary intermediate coupling-to-next-coupling transitions use DMF wash x2 by default. DCM wash and optional MeOH wash are treated as final wash or resin-specific operations rather than default washes after every intermediate coupling.

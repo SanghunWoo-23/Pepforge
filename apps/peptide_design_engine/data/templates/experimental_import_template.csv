@@ -1,0 +1,2 @@
+candidate_id,sequence,clean_sequence,target_id,hplc_purity,ms_confirmed,experimental_binding,activity_label,notes
+PDE_0001,ACDEFGHIK,ACDEFGHIK,TargetA,92.1,1,0.68,good,replace with actual experiment values

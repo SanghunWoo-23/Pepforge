@@ -1,0 +1,4 @@
+record_name,position,solvent_accessibility,disorder_score,contact_number,pLDDT
+small_protein,10,0.72,0.18,8,91.2
+small_protein,20,0.65,0.21,12,88.5
+small_protein,30,0.12,0.05,30,96.1

@@ -1,0 +1,577 @@
+# Peptide Design Engine — User Manual KR
+
+## 1. 기본 개념
+
+Peptide Design Engine은 peptide 후보를 생성하고, 조건을 적용하고, 구조 검증에 사용할 수 있도록 정리하는 설계 시스템이다.
+
+이 엔진은 다음을 수행한다.
+
+```text
+peptide 후보 생성
+→ length / chemistry / motif / linker 조건 적용
+→ target 또는 hotspot 기반 설계 bias 적용
+→ scoring 및 filtering
+→ docking-readiness 분류
+→ CSV / FASTA / manifest export
+```
+
+이 엔진은 다음을 직접 수행하지 않는다.
+
+```text
+molecular docking
+binding energy calculation
+molecular dynamics
+wet-lab validation
+```
+
+따라서 결과는 “후보 생성 및 구조검증 준비”로 해석해야 한다.
+
+---
+
+## 2. Colab Preset Mode
+
+Colab UI에는 다음 preset이 포함된다.
+
+### Fast Mode
+
+빠른 테스트와 배포용 데모에 적합하다.
+
+권장 목적:
+
+```text
+빠른 실행
+사용자 데모
+기능 확인
+```
+
+특징:
+
+```text
+Length 짧음
+Population 작음
+Generation 적음
+Chemistry 대부분 OFF
+ML OFF
+Pseudo-docking OFF
+```
+
+---
+
+### Paper Mode
+
+논문용 후보 생성에 적합하다.
+
+권장 목적:
+
+```text
+논문 figure/table 후보 생성
+해석 가능한 후보 확보
+docking-ready 후보 정리
+```
+
+특징:
+
+```text
+Length 12–15
+TopK 약 25
+Bridge/linker 사용 가능
+ML 기본 OFF
+Hotspot 필요 시 ON
+```
+
+---
+
+### Exploration Mode
+
+화학적 다양성 탐색에 적합하다.
+
+권장 목적:
+
+```text
+D-form 후보 탐색
+noncanonical residue 탐색
+linker/tag/label/chemical 포함 후보 탐색
+실험 아이디어 확장
+```
+
+특징:
+
+```text
+D-form ON
+Noncanonical ON
+Linker ON
+Tag/Label/Chemistry ON
+Optional ML ON 가능
+```
+
+---
+
+### Hotspot Only Mode
+
+motif 없이 hotspot만 target bias로 사용하는 모드다.
+
+이 모드는 다음 문제를 피하기 위해 추가되었다.
+
+```text
+motif 칸을 비웠는데도 hotspot이 motif처럼 강제로 들어가는 상황
+```
+
+Hotspot Only Mode의 핵심 설정은 다음과 같다.
+
+```text
+MOTIF_LOCK = OFF
+LOCKED_MOTIFS = empty
+AUTO_HOTSPOT = ON
+HOTSPOT_REPLACE_TARGETS = ON
+HOTSPOT_LOCK_AS_MOTIF = OFF
+```
+
+즉, hotspot은 TARGETS로만 사용되고 peptide 안에 강제로 삽입되지 않는다.
+
+추천 상황:
+
+```text
+target-derived bias만 주고 싶을 때
+기능성 motif를 따로 넣고 싶지 않을 때
+논문용으로 가장 안전한 hotspot 기반 후보를 만들 때
+```
+
+---
+
+## 3. Length 설정
+
+### RANGE
+
+`MinLen`과 `MaxLen` 사이에서 후보 길이를 생성한다.
+
+추천:
+
+```text
+빠른 테스트: 10–12
+논문 후보: 12–15
+탐색 모드: 12–20
+긴 linker 후보: 18–30
+```
+
+### FIX
+
+`FixLen`으로 길이를 고정한다.
+
+사용 상황:
+
+```text
+길이를 엄격히 비교하고 싶을 때
+합성 길이를 고정하고 싶을 때
+동일 길이 후보만 만들고 싶을 때
+```
+
+### Length Count
+
+```text
+TOKEN: linker/tag/chemical token을 하나의 단위로 계산
+EXPANDED: surrogate 또는 expanded sequence 기준으로 계산
+```
+
+일반적으로는 `TOKEN`을 추천한다.
+
+---
+
+## 4. Chemistry 옵션
+
+체크박스 의미:
+
+```text
+체크됨 = 해당 기능 사용
+체크 안 됨 = 해당 기능 사용하지 않음
+```
+
+### D-form
+
+D-amino acid token을 후보에 포함한다.
+
+주의:
+
+```text
+표준 docking workflow에 바로 맞지 않을 수 있음
+parameterization 필요 가능성 있음
+```
+
+### Non-natural
+
+noncanonical residue를 포함한다.
+
+주의:
+
+```text
+force field parameter 필요 가능성 있음
+surrogate FASTA는 prescreening 용도
+```
+
+### Linker
+
+linker token을 포함한다.
+
+사용 상황:
+
+```text
+bridge peptide
+motif 연결
+epitope 간 연결
+flexible spacer 설계
+```
+
+### Tag / Label / Base Chemistry
+
+실험용 tag, label, chemical modification을 포함한다.
+
+주의:
+
+```text
+구조 모델링 복잡도 증가
+main docking 후보로는 비추천일 수 있음
+```
+
+---
+
+## 5. Motif / Constraint
+
+이 엔진에서 motif는 target 결합 자체와 반드시 같은 뜻이 아니다.
+
+```text
+MOTIF = 내가 peptide 안에 반드시 넣고 싶은 기능성 서열
+TARGET = 설계 bias 또는 target-derived reference
+```
+
+### Motif Lock
+
+```text
+ON  = motif 강제 포함
+OFF = motif 강제 없음
+```
+
+### Motif Position
+
+```text
+FREE   = 기존 방식, 위치 자유
+N_TERM = N-terminal 쪽에 배치
+CENTER = 중앙 근처에 배치
+C_TERM = C-terminal 쪽에 배치
+```
+
+### Motif Map 예시
+
+```text
+KLVFF:CENTER
+HHHHHH:C_TERM
+RGD:N_TERM
+```
+
+---
+
+## 6. Target과 Hotspot
+
+Target은 설계 bias의 기준이다.
+
+추천 target:
+
+```text
+5–10 aa 정도의 epitope-like fragment
+surface/interface에서 뽑은 짧은 서열
+known binding-related region
+```
+
+비추천:
+
+```text
+전체 단백질 sequence를 그대로 TARGETS에 넣기
+너무 긴 buried sequence 넣기
+```
+
+---
+
+## 7. Auto Hotspot 기능
+
+Auto Hotspot은 protein sequence 또는 PDB text에서 hotspot-like fragment를 자동으로 뽑아 TARGETS로 사용하는 기능이다.
+
+중요:
+
+```text
+이 기능은 실제 binding hotspot을 증명하지 않는다.
+target-specific design bias를 강화하는 optional preprocessing이다.
+```
+
+### Sequence mode
+
+Protein sequence를 sliding window로 나누고 hydrophobicity, aromatic residue, charge balance 등을 이용해 fragment를 점수화한다.
+
+추천 설정:
+
+```text
+HotSource: SEQUENCE
+HotWin: 5–8
+HotTopK: 3–5
+Use as TARGETS: ON
+Lock hotspots: OFF
+```
+
+### PDB mode
+
+PDB text에서 CA atom neighbor count를 이용해 surface-exposure proxy를 계산한다.
+
+중요 표현:
+
+```text
+SASA-like surface exposure proxy
+```
+
+정식 SASA 계산은 아니다.
+
+추천 설정:
+
+```text
+HotSource: PDB
+HotWin: 5–8
+HotTopK: 3–5
+MinExpose: 0.30–0.45
+Use as TARGETS: ON
+Lock hotspots: OFF 또는 선택적 ON
+```
+
+---
+
+## 8. Hotspot과 Motif의 안전한 조합
+
+### motif 없이 hotspot만 쓰고 싶을 때
+
+```text
+MOTIF_LOCK = OFF
+LOCKED_MOTIFS = empty
+AUTO_HOTSPOT = ON
+HOTSPOT_REPLACE_TARGETS = ON
+HOTSPOT_LOCK_AS_MOTIF = OFF
+```
+
+이 설정은 Hotspot Only Mode가 자동으로 적용한다.
+
+### hotspot을 motif처럼 강제하고 싶을 때
+
+```text
+AUTO_HOTSPOT = ON
+HOTSPOT_LOCK_AS_MOTIF = ON
+```
+
+이 경우 추출된 hotspot fragment가 peptide 안에 강제로 포함될 수 있다.
+
+---
+
+## 9. Docking 관련 설정
+
+이 엔진은 docking을 직접 수행하지 않는다.
+
+대신 다음을 수행한다.
+
+```text
+docking-ready 후보 분류
+surrogate FASTA 생성
+modeling manifest 생성
+pseudo-docking input 준비
+```
+
+### Docking Stage
+
+```text
+OFF
+FINAL_TOP_ONLY
+EVERY_N_GENERATIONS
+```
+
+일반적으로 `FINAL_TOP_ONLY`를 추천한다.
+
+### Docking Engine
+
+```text
+NONE
+CUSTOM
+ROSETTA
+VINA
+DIFFDOCK
+```
+
+이 설정은 실제 docking 실행이 아니라 route/계획 표시 성격이 강하다.
+
+---
+
+## 10. 결과 파일
+
+### results_top.csv
+
+최종 상위 후보 리스트.
+
+### docking_ready_candidates.csv
+
+docking-ready 기준으로 정리된 후보.
+
+### extracted_hotspots.csv
+
+Auto Hotspot을 켰을 때 생성된다.
+
+포함 정보:
+
+```text
+motif
+score
+source
+start/end
+exposure
+```
+
+### hotspot_peptide_map
+
+각 peptide가 추출 hotspot과 어떻게 연결되는지 보여준다.
+
+예:
+
+```text
+KLVFF:YES|RGD:NO
+```
+
+### best_hotspot
+
+가장 높은 점수의 hotspot motif를 표시한다.
+
+---
+
+## 11. 추천 실험 구조
+
+논문용 비교는 다음 3개 조건을 권장한다.
+
+```text
+1. Hotspot OFF
+2. Hotspot Only Mode with SEQUENCE
+3. Hotspot Only Mode with PDB
+```
+
+이 비교를 통해 hotspot-guided design bias가 후보 분포와 hotspot overlap에 어떤 영향을 주는지 볼 수 있다.
+
+---
+
+## 12. 해석 원칙
+
+반드시 다음을 구분해야 한다.
+
+```text
+target-derived design bias ≠ binding proof
+pseudo-docking input ≠ docking result
+ML reranking ≠ experimental evidence
+surface proxy ≠ formal SASA
+```
+
+안전한 논문 표현:
+
+```text
+The engine generates docking-ready peptide candidates and prepares structured inputs for downstream validation workflows.
+```
+
+또는:
+
+```text
+The optional hotspot module provides target-derived design bias using sequence-based or SASA-like surface-exposure proxy features.
+```
+
+
+---
+
+# Target Mode 상세
+
+Colab UI의 TargetMode는 다음 세 가지다.
+
+```text
+SINGLE
+MULTI
+BRIDGE
+```
+
+## SINGLE
+
+target 또는 hotspot이 하나일 때 사용하는 모드다.
+
+추천 상황:
+
+```text
+target epitope 1개
+hotspot 1개
+단일 target bias 실험
+```
+
+## MULTI
+
+target 또는 hotspot이 여러 개일 때 사용하는 모드다.
+
+추천 상황:
+
+```text
+Auto Hotspot으로 HOTSPOT_TOPK 3~5개를 뽑은 경우
+여러 epitope를 동시에 고려하는 경우
+```
+
+## BRIDGE
+
+target-derived anchor와 linker/bridge 설계를 함께 고려하는 모드다.
+
+추천 상황:
+
+```text
+두 hotspot 또는 두 motif 사이를 연결하는 peptide 설계
+linker가 포함된 bridge peptide 설계
+```
+
+---
+
+# Hotspot과 Motif 구분
+
+반드시 구분해야 한다.
+
+```text
+HOTSPOT = 단백질 sequence/PDB에서 자동으로 추출된 target-derived reference
+MOTIF   = 사용자가 peptide 안에 넣고 싶은 기능성 서열
+```
+
+즉:
+
+```text
+hotspot은 참고/bias
+motif는 삽입/강제
+```
+
+Hotspot Only Mode에서는 hotspot을 TARGETS로만 쓰고 motif처럼 강제 삽입하지 않는다.
+
+```text
+AUTO_HOTSPOT = ON
+HOTSPOT_REPLACE_TARGETS = ON
+HOTSPOT_LOCK_AS_MOTIF = OFF
+MOTIF_LOCK = OFF
+```
+
+---
+
+# 결과 CSV에서 확인할 컬럼
+
+Auto Hotspot을 켠 경우 결과 CSV에 다음 컬럼을 확인한다.
+
+```text
+target_hotspot_sequences
+target_hotspot_source
+hotspot_used_as_targets
+hotspot_peptide_map
+best_hotspot
+```
+
+예:
+
+```text
+target_hotspot_sequences = KLVFF;RGD;WYYF
+hotspot_peptide_map = KLVFF:YES|RGD:NO|WYYF:PARTIAL
+best_hotspot = KLVFF
+```
+
+이 컬럼들은 “어떤 protein hotspot을 target으로 사용했고, 생성 peptide가 그 hotspot과 어떻게 연결되는지”를 보여준다.

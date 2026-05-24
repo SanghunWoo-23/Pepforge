@@ -1,0 +1,49 @@
+# Peptide Design Engine — annotated config
+
+TARGETS: ["DELIKFVRWA", "YYERWFCAA"]  # Target epitope/sequence list. Multiple targets enable multi-target or bridge design.
+POP: 200  # Population size. Larger = broader search but slower. Example: 100, 200, 500.
+GEN: 20  # Number of generations. Larger = more optimization. Example: 10, 20, 50.
+SEED: 42  # Random seed for reproducibility.
+ENGINE_MODE: "NSGA2"  # 선택지: NSGA2, GA
+DESIGN_MODE: "MULTI_TARGET_BINDER"  # 선택지: MULTI_TARGET_BINDER, BRIDGE_LINKER
+
+LEN_MODE: "RANDOM"  # 선택지: RANDOM, FIX
+FIX_LENGTH: 24  # LEN_MODE=FIX일 때 사용하는 길이.
+MIN_LENGTH: 18  # LEN_MODE=RANDOM일 때 최소 길이.
+MAX_LENGTH: 30  # LEN_MODE=RANDOM일 때 최대 길이.
+LENGTH_COUNT_MODE: "TOKEN"  # 선택지: TOKEN, EXPANDED. TOKEN은 modification token 기준, EXPANDED는 surrogate residue 길이 기준.
+TRIM_TO_LENGTH: true  # 길이 초과 후보를 자동 trimming할지 여부.
+
+USE_D: true  # D-form amino acid 허용 여부.
+USE_NON_NAT: true  # noncanonical residue 허용 여부.
+USE_LINKER: true  # linker token 허용 여부.
+USE_TAG: true  # His/FLAG/HA 등 tag 허용 여부.
+USE_LABEL: true  # Biotin/FITC 등 label 허용 여부.
+USE_BASE_CHEM: true  # Acetyl/Fmoc 등 chemical cap 허용 여부.
+USE_CTERM_NH2: true  # C-terminal amide 허용 여부.
+
+LINKER_MODE: "MIX"  # 선택지: FIX, MIX, AUTO
+FIX_LINKER_TYPE: "PEG4"  # LINKER_MODE=FIX일 때 사용할 linker.
+LINKER_TYPES: ["AA_GS2", "AA_G4", "PEG4"]  # MIX/AUTO에서 사용할 linker 후보.
+LINKER_POS: [2, 4]  # linker 삽입 위치 후보.
+MAX_LINKERS: 2  # 후보당 최대 linker 수.
+
+MOTIF_LOCK: true  # motif 강제 삽입/보호 여부.
+LOCKED_MOTIFS: ["RGD", "KLVFF"]  # 보존할 motif 목록.
+LOCK_RESIDUES: ["C", "W"]  # mutation/삭제에서 보호할 residue.
+
+BINDER_MODE: "BALANCED"  # 선택지: BALANCED, AFFINITY_FIRST, DEVELOPABILITY, DUAL_BINDER, CYCLIC_PEPTIDE
+CLUSTERS: 5  # 최종 후보 clustering 수.
+FINAL_TOPK: 10  # 저장/표시할 최종 후보 수.
+
+DOCKING_STAGE: "FINAL_TOP_ONLY"  # 선택지: OFF, FINAL_TOP_ONLY, EVERY_N_GENERATIONS
+DOCKING_ENGINE: "NONE"  # 선택지: NONE, CUSTOM, ROSETTA, VINA, DIFFDOCK
+USE_AF: false  # AlphaFold/ColabFold 계열 구조 예측 route를 고려할지 여부.
+AF_LFORM_ONLY: true  # AF/ColabFold route를 L-form canonical 후보에만 제한할지 여부.
+
+USE_OPTIONAL_ML: false  # optional ML-style surrogate reranking 사용 여부. Core engine은 ML 없이 동작.
+ML_RERANK_WEIGHT: 0.20  # ML rerank score 반영 비율. 예: 0.0~0.8.
+
+PREPARE_PSEUDODOCKING_COLAB: false  # receptor:peptide FASTA 생성 여부. 실제 docking이 아니라 optional structure-plausibility input.
+RECEPTOR_SEQUENCE: ""  # pseudo-docking 입력용 receptor protein sequence.
+PSEUDODOCKING_TOPK: 10  # pseudo-docking FASTA로 내보낼 상위 후보 수.

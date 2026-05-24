@@ -1,0 +1,8 @@
+﻿system,coupling_reagent,catalyst_or_additive,base,solvent,note
+DIC/HOBt,DIC,HOBt,,DMF,Default AA-like acid coupling; user-editable.
+DIC/Oxyma,DIC,Oxyma,,DMF/NMP,Alternative carbodiimide/additive system; user-editable.
+HBTU/DIEA,HBTU,,DIEA,DMF,Uronium activation; often used for difficult couplings/modifiers; verify SOP.
+HATU/DIEA,HATU,,DIEA,DMF,Stronger uronium activation; verify racemization/SOP.
+PyBOP/DIEA,PyBOP,,DIEA,DMF,Phosphonium activation; user-editable.
+NHS ester/DIEA,Activated NHS ester,,DIEA,DMF,For activated labels such as some biotin/dye reagents; no DIC/HOBt unless reagent form requires it.
+FITC/DIEA,FITC,protect from light,DIEA,DMF,Amine-labeling/isothiocyanate-type default; verify reagent and SOP.

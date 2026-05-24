@@ -1,0 +1,15 @@
+name,class,MW,density_g_mL,state,default_role,notes
+DIEA,base,129.25,0.742,liquid,base,Also called DIPEA
+DIPEA,base,129.25,0.742,liquid,base,Same as DIEA
+NMM,base,101.15,0.920,liquid,base,N-methylmorpholine
+Pyridine,base,79.10,0.982,liquid,base/solvent,Used in some acylation conditions
+DMF,solvent,73.09,0.944,liquid,solvent,Common SPPS solvent
+NMP,solvent,99.13,1.030,liquid,solvent,Common SPPS solvent
+DCM,solvent,84.93,1.330,liquid,solvent,Common swelling/wash solvent; especially relevant to CTC/trityl loading
+MeOH,solvent,32.04,0.792,liquid,solvent,Optional final wash in some labs
+TFA,cleavage reagent,114.02,1.490,liquid,acid cleavage,TFA cleavage reagent
+TIS,scavenger,158.36,0.773,liquid,scavenger,Cleavage cocktail scavenger
+Acetic anhydride,modifier reagent,102.09,1.080,liquid,N-terminal acetylation,Actual reagent for default Ac calculation
+FITC,label reagent,389.38,,solid,label,Isothiocyanate dye; protect from light and verify reagent form
+Biotin-NHS,label reagent,341.38,,solid,label,NHS ester form; chemistry differs from biotin acid
+Biotin acid,modifier reagent,244.31,,solid,modifier,Acid form may require coupling reagent/base

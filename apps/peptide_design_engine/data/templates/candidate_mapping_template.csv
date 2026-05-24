@@ -1,0 +1,3 @@
+candidate_id,sequence,clean_sequence,target_id,source_name,file,folder,notes
+PDE_0001,Ac-A-C-D-E-F-G-NH2,ACDEFG,TargetA,PDE_0001,PDE_0001_summary_confidences.json,PDE_0001,Example mapping for AF3/PRODIGY filename matching
+PDE_0002,RGD-PEG4-KLVFF,RGDKLVFF,TargetA_BRIDGE,PDE_0002,PDE_0002_prodigy.txt,PDE_0002,Example mapping for bridge candidate

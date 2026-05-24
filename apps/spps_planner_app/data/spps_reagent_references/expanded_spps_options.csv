@@ -1,0 +1,17 @@
+﻿category,name,typical_use,note
+resin,Rink Amide,C-terminal amide,loading-dependent
+resin,Rink Amide AM,C-terminal amide,loading-dependent
+resin,2-CTC,C-terminal acid,DCM-heavy swelling/loading
+resin,Wang,C-terminal acid,protocol-dependent
+coupling,DIC/HOBt,standard Fmoc-AA-OH coupling,user can override eq
+coupling,DIC/Oxyma,standard/low-racemization option,user can override eq
+coupling,HBTU/DIEA,uronium activation,user can override eq
+coupling,HATU/DIEA,strong activation,user can override eq
+coupling,PyBOP/DIEA,phosphonium activation,user can override eq
+modifier,FITC/DIEA,isothiocyanate label,protect from light; verify SOP
+modifier,Biotin-NHS/DIEA,activated ester label,verify exact biotin reagent form
+modifier,Biotin acid/HATU/DIEA,acid coupling,verify SOP
+solvent,DMF,primary SPPS solvent,default
+solvent,NMP,alternative SPPS solvent,optional
+solvent,DCM,swelling/wash/CTC,optional
+deprotection,20% Piperidine/DMF,Fmoc removal,default

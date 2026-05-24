@@ -1,0 +1,21 @@
+﻿rule,value,unit,notes
+depro_dmf_ratio,0.8,fraction,20% piperidine + 80% DMF deprotection solution
+depro_piperidine_ratio,0.2,fraction,20% piperidine + 80% DMF deprotection solution
+amide_loading_dmf_swell,1.0,repeat,Amide loading
+amide_loading_depro,2.0,repeat,Amide loading
+amide_loading_dmf_wash,6.0,repeat,After amide loading deprotection
+amide_loading_synthesis,1.0,repeat,100% DMF
+amide_loading_post_dmf_wash,2.0,repeat,After amide loading synthesis
+ctc_loading_dcm_swell,1.0,repeat,CTC/trityl loading
+ctc_loading_synthesis,1.0,repeat,90% DCM + 10% DMF
+ctc_loading_synthesis_dmf_fraction,0.1,fraction,CTC/trityl loading synthesis solvent
+ctc_loading_synthesis_dcm_fraction,0.9,fraction,CTC/trityl loading synthesis solvent
+regular_depro,2.0,repeat,Regular AA coupling
+regular_dmf_wash_after_depro,2.0,repeat,Pre-coupling wash
+regular_coupling,1.0,repeat,AA coupling
+regular_post_dmf_wash,6.0,repeat,Post-coupling wash
+last_depro,2.0,repeat,Last/N-term cap
+last_dmf_wash_after_depro,6.0,repeat,Before N-term cap reaction
+last_reaction,1.0,repeat,N-term cap reaction
+last_post_dmf_wash,3.0,repeat,After N-term cap
+last_dcm_wash,3.0,repeat,Final DCM wash

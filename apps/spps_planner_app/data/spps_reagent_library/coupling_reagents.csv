@@ -1,0 +1,11 @@
+name,class,MW,density_g_mL,state,default_role,notes
+DIC,coupling reagent,126.20,0.815,liquid,activation,Common carbodiimide coupling reagent
+DCC,coupling reagent,206.33,,solid,activation,Carbodiimide reagent
+EDC,coupling reagent,191.70,,solid,activation,Water-compatible carbodiimide; reagent form may vary
+HBTU,coupling reagent,379.25,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
+HATU,coupling reagent,380.23,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
+HCTU,coupling reagent,413.69,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
+TBTU,coupling reagent,321.08,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
+PyBOP,coupling reagent,520.39,,solid,phosphonium coupling reagent,Often used with DIEA/DIPEA
+COMU,coupling reagent,427.35,,solid,coupling reagent,Often used with base
+CDI,coupling reagent,162.15,,solid,activation reagent,Context-dependent

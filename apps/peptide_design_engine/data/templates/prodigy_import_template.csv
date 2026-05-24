@@ -1,0 +1,2 @@
+candidate_id,sequence,clean_sequence,target_id,prodigy_delta_g,prodigy_kd,notes
+PDE_0001,ACDEFGHIK,ACDEFGHIK,TargetA,-8.4,1.2e-6,replace with PRODIGY output values

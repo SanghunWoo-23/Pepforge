@@ -1,0 +1,13 @@
+name: peptide_engine_min
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - pyyaml
+  - pip:
+      - pyinstaller

@@ -1,0 +1,13 @@
+Pepforge Complete Stabilized Edition
+
+This package consolidates the current complete feature set and adds final stabilization documentation, parser contracts, reagent database schema notes, and build-environment guidance.
+
+Included focus areas:
+1. SPPS parser contract for Ac-EEMQRR-NH2, EEMQRR-NH2, EEMQRR, and attached N-terminal modifiers.
+2. Resin-dependent SPPS logic for 2-CTC/Trityl and Wang/Rink/Amide resin families.
+3. Reagent class separation: unit, coupling reagent 1, catalyst/additive, base, solvent, deprotection, and modifier.
+4. Acetic anhydride (Ac2O) handling for N-terminal Ac.
+5. Final wash logic and printable checklist workflow.
+6. ML-ready log format for future synthesis outcome modeling.
+
+This edition remains a research-preview build. Windows executable and installer generation must still be tested on the target Windows machine.

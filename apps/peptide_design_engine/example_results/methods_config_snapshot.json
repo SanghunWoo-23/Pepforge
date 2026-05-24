@@ -1,0 +1,273 @@
+{
+  "POP": 20,
+  "GEN": 2,
+  "SEED": 42,
+  "ENGINE_MODE": "NSGA2",
+  "LEN_MODE": "RANDOM",
+  "FIX_LENGTH": 24,
+  "MIN_LENGTH": 18,
+  "MAX_LENGTH": 30,
+  "LENGTH_COUNT_MODE": "TOKEN",
+  "TRIM_TO_LENGTH": true,
+  "LENGTH_PENALTY_WEIGHT": 2.0,
+  "TARGETS": [
+    [
+      "D",
+      "E",
+      "L",
+      "I",
+      "K",
+      "F",
+      "V",
+      "R",
+      "W",
+      "A"
+    ]
+  ],
+  "USE_D": true,
+  "USE_NON_NAT": true,
+  "USE_TAG": true,
+  "TAG_TYPES": [
+    "His6",
+    "His8",
+    "His10",
+    "FLAG",
+    "HA",
+    "Myc",
+    "StrepII",
+    "TwinStrep",
+    "V5",
+    "T7",
+    "ALFA",
+    "AviTag",
+    "SpyTag"
+  ],
+  "USE_BASE_CHEM": true,
+  "BASE_CHEM_TYPES": [
+    "Pal",
+    "Myr",
+    "Stear",
+    "Ole",
+    "Chol",
+    "Nic",
+    "Caf",
+    "Gal",
+    "Ac",
+    "Bz",
+    "Fmoc",
+    "Boc",
+    "Succinyl",
+    "Maleimide",
+    "Azide",
+    "Alkyne",
+    "DBCO",
+    "TCO",
+    "Tetrazine",
+    "BiotinCap"
+  ],
+  "USE_LABEL": true,
+  "LABEL_TYPES": [
+    "NONE",
+    "BIOTIN",
+    "Desthiobiotin",
+    "FITC",
+    "FAM",
+    "TAMRA",
+    "ROX",
+    "CY3",
+    "CY5",
+    "CY5_5",
+    "CY7",
+    "Alexa488",
+    "Alexa555",
+    "Alexa647",
+    "DOTA",
+    "NOTA",
+    "DFO",
+    "NBD",
+    "Dansyl",
+    "BODIPY",
+    "EDANS",
+    "Dabcyl",
+    "BHQ1",
+    "BHQ2"
+  ],
+  "USE_CTERM_NH2": true,
+  "USE_LINKER": true,
+  "LINKER_MODE": "MIX",
+  "FIX_LINKER_TYPE": "PEG4",
+  "LINKER_TYPES": [
+    "Gly",
+    "GG",
+    "GGG",
+    "GS",
+    "GSG",
+    "G4S",
+    "G4Sx2",
+    "Ahx",
+    "AEEA",
+    "PEG1",
+    "PEG2",
+    "PEG3",
+    "PEG4",
+    "PEG6",
+    "PEG8",
+    "PEG12",
+    "PEG24",
+    "bAla",
+    "gAla",
+    "Sar",
+    "Pro",
+    "PipLink",
+    "LysLink",
+    "CysLink",
+    "SS",
+    "Triazole",
+    "Click",
+    "DSS",
+    "SMCC",
+    "SulfoSMCC",
+    "EDC",
+    "Hydrazone",
+    "Oxime",
+    "AA_G2",
+    "AA_G4",
+    "AA_G6",
+    "AA_A2",
+    "AA_A4",
+    "AA_GS2",
+    "AA_GS4",
+    "AA_GS6",
+    "AA_AP"
+  ],
+  "LINKER_POS": [
+    2,
+    4
+  ],
+  "MAX_LINKERS": 2,
+  "USE_AA_LINKER_LIBRARY": true,
+  "LINKER_LENGTH_SELECTION_MODE": "TOKEN",
+  "CUSTOM_AA_LINKERS": {
+    "AA_G2": {
+      "sequence": "GG",
+      "length_A": 7.6,
+      "flex": 0.7
+    },
+    "AA_G4": {
+      "sequence": "GGGG",
+      "length_A": 15.2,
+      "flex": 1.0
+    },
+    "AA_G6": {
+      "sequence": "GGGGGG",
+      "length_A": 22.8,
+      "flex": 1.15
+    },
+    "AA_A2": {
+      "sequence": "AA",
+      "length_A": 7.2,
+      "flex": 0.45
+    },
+    "AA_A4": {
+      "sequence": "AAAA",
+      "length_A": 14.4,
+      "flex": 0.55
+    },
+    "AA_GS2": {
+      "sequence": "GS",
+      "length_A": 7.6,
+      "flex": 0.75
+    },
+    "AA_GS4": {
+      "sequence": "GSGS",
+      "length_A": 15.2,
+      "flex": 1.0
+    },
+    "AA_GS6": {
+      "sequence": "GSGSGS",
+      "length_A": 22.8,
+      "flex": 1.15
+    },
+    "AA_AP": {
+      "sequence": "APAP",
+      "length_A": 13.2,
+      "flex": 0.35
+    }
+  },
+  "MOTIF_LOCK": true,
+  "LOCKED_MOTIFS": [
+    [
+      "R",
+      "G",
+      "D"
+    ],
+    [
+      "K",
+      "L",
+      "V",
+      "F",
+      "F"
+    ]
+  ],
+  "LOCKED_MOTIF_POS": [
+    {
+      "motif": [
+        "R",
+        "G",
+        "D"
+      ],
+      "pos": 2
+    },
+    {
+      "motif": [
+        "K",
+        "L",
+        "V",
+        "F",
+        "F"
+      ],
+      "pos": -6
+    }
+  ],
+  "LOCK_RESIDUES": [
+    "C",
+    "W"
+  ],
+  "DUAL_MOTIFS": [
+    {
+      "motif": [
+        "R",
+        "G",
+        "D"
+      ],
+      "target": 0
+    },
+    {
+      "motif": [
+        "K",
+        "L",
+        "V",
+        "F",
+        "F"
+      ],
+      "target": 1
+    }
+  ],
+  "DUAL_MIN_DISTANCE": 6,
+  "CLUSTERS": 5,
+  "ELITE_KEEP": 20,
+  "FINAL_TOPK": 5,
+  "BINDER_MODE": "BALANCED",
+  "DOCKING_STAGE": "FINAL_TOP_ONLY",
+  "DOCKING_ENGINE": "NONE",
+  "USE_REAL_DOCKING": false,
+  "USE_AF": false,
+  "AF_LFORM_ONLY": true,
+  "MAX_D_RATIO": 0.6,
+  "MAX_NON_NAT_RATIO": 0.5,
+  "MAX_CYS": 2,
+  "MIN_HYDRO_RATIO": 0.15,
+  "MAX_HYDRO_RATIO": 0.75,
+  "MAX_ABS_CHARGE": 7,
+  "MIN_RESIDUE_COUNT": 4
+}

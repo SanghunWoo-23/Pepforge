@@ -1,0 +1,31 @@
+Pepforge User Manual
+
+1. Launching
+Run INSTALL_BUILD_TOOLS_AND_BUILD.bat from the Pepforge root folder to build the installer. The installer is generated at installer/output/Pepforge_Setup_v0.1.0.exe. After installation, launch Pepforge from the desktop shortcut or Start Menu.
+
+2. Hot Spot Finder
+Paste a protein sequence and run the analysis. Hotspot residues are shown in compact form such as (14K), where 14 is the N-terminal 1-based residue number and K is the amino acid. The result is a sequence-only prioritization signal and should not be interpreted as experimentally validated binding evidence.
+
+3. Peptide Design Engine
+Enter one or more target sequences, choose RANDOM or FIX length mode, and enable only the chemistry/constraint systems you want to apply. Motifs can be fixed by position using syntax such as RGD@1 or EEMQR@4. Linkers are treated as spacer/bridge components, not default N-terminal modifiers.
+
+4. SPPS Planner
+Enter peptide notation such as Ac-EEMQRR-NH2, EEMQRR-NH2, or EEMQRR. Select resin type, scale, loading, unit equivalent, coupling reagent, catalyst, base, deprotection, and solvent settings. The editable table is generated in C-terminal to N-terminal synthesis order. Each row can be edited directly, including unit eq, repeat, reagent eq/count, base eq/count, and solvent count. Material usage and ML-ready logs are calculated from the current editable table state.
+
+Ac is displayed as Ac in the Unit column. The default calculation reagent is Acetic anhydride (Ac2O). 2-CTC/Trityl resin uses no initial Fmoc deprotection and DCM swell/loading conditions. Wang/Rink/Amide resin is treated as Fmoc resin and includes initial deprotection.
+
+5. Export
+Use Export CSV + XLSX to export the editable plan, material usage, operation form, printable checklist, ML-ready log, and workbook.
+
+
+Last coupling / final wash rule:
+- After the last Fmoc-AA coupling, the planner schedules DMF wash x2.
+- Final Fmoc deprotection is then scheduled.
+- After final deprotection, final wash is applied as DMF x3 and DCM x3.
+- If a laboratory additionally uses methanol washing, set Final MeOH wash count to 3 to add MeOH x3.
+- Final Ac, chemical, label, and modifier steps do not require post-coupling Fmoc deprotection, but final wash is still applied.
+
+
+## Intermediate coupling wash rule
+
+In the SPPS Planner, ordinary intermediate coupling-to-next-coupling transitions use DMF wash x2 by default. DCM wash and optional MeOH wash are treated as final wash or resin-specific operations rather than default washes after every intermediate coupling.

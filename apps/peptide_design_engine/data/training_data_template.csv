@@ -1,0 +1,5 @@
+candidate_id,sequence,clean_sequence,target_id,design_mode,source_file,source_type,af3_confidence,af3_iptm,af3_ptm,af3_ranking_score,prodigy_delta_g,prodigy_kd,docking_score,hplc_purity,ms_confirmed,experimental_binding,activity_label,notes
+PDE_EXAMPLE_0001,Ac-A-C-D-E-F-G-NH2,ACDEFG,TargetA,MULTI_TARGET_BINDER,example.csv,EXPERIMENT,0.72,0.61,0.70,0.68,-8.4,1.2e-6,-6.9,92.1,1,0.68,good,example only
+PDE_EXAMPLE_0002,RGD-PEG4-KLVFF,RGDKLVFF,TargetA_BRIDGE,BRIDGE_LINKER,example.csv,PRODIGY,0.65,0.55,0.66,0.60,-7.1,5.4e-6,-5.8,88.4,1,0.41,medium,example only
+PDE_EXAMPLE_0003,W-H-Q-E-V-I-F-K-F-D-C-NH2,WHQEVIFKFDC,TargetA,MULTI_TARGET_BINDER,example.csv,EXPERIMENT,0.81,0.70,0.75,0.73,-9.0,8.0e-7,-7.4,95.0,1,0.82,good,example only
+PDE_EXAMPLE_0004,G-P-S-T-N-Q-A-A-NH2,GPSTNQAA,TargetA,MULTI_TARGET_BINDER,example.csv,EXPERIMENT,0.50,0.40,0.44,0.42,-5.0,2.0e-5,-4.1,76.0,1,0.22,low,example only

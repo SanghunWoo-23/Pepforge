@@ -1,0 +1,6 @@
+﻿solvent,role,note
+DMF,SPPS wash/reaction/deprotection solvent,Default planner solvent.
+NMP,Alternative coupling solvent,User-selectable.
+DCM,Swelling/wash/loading solvent,Important for CTC/trityl workflows.
+Piperidine,Fmoc deprotection component,Planner defaults to 20% piperidine in DMF for deprotection.
+TFA,Cleavage suggestion,Planner provides heuristic; verify SOP.

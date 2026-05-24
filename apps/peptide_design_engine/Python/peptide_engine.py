@@ -1,0 +1,2481 @@
+
+# =========================================================
+# Peptide Design Engine — VERIFIED LENGTH-ONLY FINAL
+# Length means final total token/expanded length:
+# peptide + linker + tag + label + chemistry + NH2
+# =========================================================
+from __future__ import annotations
+
+import os, json, math, random, datetime, zipfile, csv, re
+from pathlib import Path
+from collections import Counter, defaultdict
+import numpy as np
+
+# -------------------------
+# Core data
+# -------------------------
+AA = list("ACDEFGHIKLMNPQRSTVWY")
+HYDRO_AA = set("AVILMFWY")
+AROMATIC = set("FWYH")
+POSITIVE = set("KRH")
+NEGATIVE = set("DE")
+ANCHOR = set("FWYHILV")
+
+D_FORM = ["d" + a for a in AA]
+NON_NAT = [
+    "Nle","Nva","Abu","Aib","Sar","Orn","Dab","Dap","Cit","Hyl","Hyp",
+    "Cha","Chg","Tic","Nal","Bip","Phe4F","Phe4Cl","Phe4Me","TyrMe",
+    "hArg","hLys","MeAla","MeGly","MeLeu","MePhe","MeVal","Sec","Pen","Pra", "bAla", "gAla"
+]
+NON_NAT_MAP = {
+    "Nle":"L","Nva":"V","Abu":"A","Aib":"A","Sar":"G","Orn":"K","Dab":"K","Dap":"K","Cit":"R",
+    "Hyl":"K","Hyp":"P","Cha":"L","Chg":"V","Tic":"F","Nal":"F","Bip":"F","Phe4F":"F","Phe4Cl":"F",
+    "Phe4Me":"F","TyrMe":"Y","hArg":"R","hLys":"K","MeAla":"A","MeGly":"G","MeLeu":"L","MePhe":"F",
+    "MeVal":"V","Sec":"C","Pen":"C","Pra":"K", "bAla":"A", "gAla":"G"
+}
+
+LINKER_LENGTH = {
+    "Gly":3.8,"GG":7.6,"GGG":11.4,"GS":7.6,"GSG":11.4,"G4S":19.0,"G4Sx2":38.0,
+    "Ahx":7.0,"AEEA":9.0,"PEG1":3.5,"PEG2":7.0,"PEG3":11.0,"PEG4":15.0,"PEG6":22.0,
+    "PEG8":30.0,"PEG12":45.0,"PEG24":90.0,"Sar":3.6,"Pro":3.1,
+    "PipLink":4.5,"LysLink":6.5,"CysLink":5.5,"SS":5.8,"Triazole":5.0,"Click":5.0,
+    "DSS":11.4,"SMCC":8.3,"SulfoSMCC":8.3,"EDC":2.0,"Hydrazone":4.0,"Oxime":4.0,
+}
+LINKER_FLEX = {k:0.7 for k in LINKER_LENGTH}
+LINKER_FLEX.update({"PEG4":1.0,"PEG8":1.2,"PEG12":1.35,"PEG24":1.5,"Ahx":0.6,"Pro":0.2,"SS":0.3,"G4S":1.1,"G4Sx2":1.3})
+
+CONFIG = {
+    "POP": 200,
+    "GEN": 20,
+    "SEED": 42,
+    "ENGINE_MODE": "NSGA2",
+    "DESIGN_MODE": "MULTI_TARGET_BINDER",  # MULTI_TARGET_BINDER / BRIDGE_LINKER
+    "BRIDGE_USE_TARGET_ANCHORS": True,
+    "BRIDGE_ANCHOR_LEN": 4,
+    "BRIDGE_REQUIRE_ORDER": True,
+    "BRIDGE_LINKER_BONUS_WEIGHT": 1.4,
+
+    # Unified LENGTH control: final full sequence length, not clean AA-only length.
+    "LEN_MODE": "RANDOM",
+    "FIX_LENGTH": 24,
+    "MIN_LENGTH": 18,
+    "MAX_LENGTH": 30,
+    "LENGTH_COUNT_MODE": "TOKEN",  # TOKEN / RESIDUE / EXPANDED
+    "LENGTH_METRIC": "TOKEN",  # TOKEN counts selected construct tokens; terminal NH2 is excluded
+    "COUNT_TERMINAL_MODS_IN_LENGTH": False,
+    "TRIM_TO_LENGTH": True,
+    "LENGTH_PENALTY_WEIGHT": 2.0,
+
+    "TARGETS": [list("DELIKFVRWA"), list("YYERWFCAA")],
+
+    "USE_D": True,
+    "USE_NON_NAT": True,
+    "NON_NAT_TYPES": NON_NAT.copy(),
+    "USE_TAG": True,
+    "TAG_TYPES": ["His6","His8","His10","FLAG","HA","Myc","StrepII","TwinStrep","V5","T7","ALFA","AviTag","SpyTag"],
+    "USE_BASE_CHEM": True,
+    "BASE_CHEM_TYPES": ["Pal","Myr","Stear","Ole","Chol","Nic","Caf","Gal","Ac","Bz","Fmoc","Boc","Succinyl","Maleimide","Azide","Alkyne","DBCO","TCO","Tetrazine","BiotinCap"],
+    "USE_LABEL": True,
+    "LABEL_TYPES": ["NONE","BIOTIN","Desthiobiotin","FITC","FAM","TAMRA","ROX","CY3","CY5","CY5_5","CY7","Alexa488","Alexa555","Alexa647","DOTA","NOTA","DFO","NBD","Dansyl","BODIPY","EDANS","Dabcyl","BHQ1","BHQ2"],
+    "USE_CTERM_NH2": True,
+    "ENRICH_SELECTED_CHEMISTRY": False,  # optional soft enrichment, not hard forcing
+    "CHEMISTRY_BONUS_WEIGHT": 0.35,
+    "TERMINAL_RULES_STRICT": True,
+    "NTERM_ONLY_CHEM_TAG_LABEL": True,
+    "DISALLOW_NTERM_LINKER": True,
+    "NTERM_LINKER_RULE_NOTE": "Linker-only tokens are never placed as N-terminal modifiers. bAla/gAla are treated as amino-acid-like residues, not linker-only tokens.",
+    "DISALLOW_CTERM_LINKER": False,
+
+    "USE_LINKER": True,
+    "LINKER_MODE": "MIX",  # FIX / MIX / AUTO
+    "FIX_LINKER_TYPE": "PEG4",
+    "LINKER_TYPES": ["Gly","GG","GGG","GS","GSG","G4S","G4Sx2","Ahx","AEEA","PEG1","PEG2","PEG3","PEG4","PEG6","PEG8","PEG12","PEG24","Sar","Pro","PipLink","LysLink","CysLink","SS","Triazole","Click","DSS","SMCC","SulfoSMCC","EDC","Hydrazone","Oxime"],
+    "LINKER_POS": [2,4],
+    "MAX_LINKERS": 2,
+    "USE_AA_LINKER_LIBRARY": True,
+    "LINKER_LENGTH_SELECTION_MODE": "TOKEN",  # TOKEN / EXPAND_TO_RESIDUES
+    "CUSTOM_AA_LINKERS": {
+        "AA_G2": {"sequence": "GG", "length_A": 7.6, "flex": 0.70},
+        "AA_G4": {"sequence": "GGGG", "length_A": 15.2, "flex": 1.00},
+        "AA_G6": {"sequence": "GGGGGG", "length_A": 22.8, "flex": 1.15},
+        "AA_A2": {"sequence": "AA", "length_A": 7.2, "flex": 0.45},
+        "AA_A4": {"sequence": "AAAA", "length_A": 14.4, "flex": 0.55},
+        "AA_GS2": {"sequence": "GS", "length_A": 7.6, "flex": 0.75},
+        "AA_GS4": {"sequence": "GSGS", "length_A": 15.2, "flex": 1.00},
+        "AA_GS6": {"sequence": "GSGSGS", "length_A": 22.8, "flex": 1.15},
+        "AA_AP": {"sequence": "APAP", "length_A": 13.2, "flex": 0.35},
+    },
+
+    "MOTIF_LOCK": True,
+    "LOCKED_MOTIFS": [list("RGD"), list("KLVFF")],
+    "LOCKED_MOTIF_POS": [{"motif": list("RGD"), "pos": 2}, {"motif": list("KLVFF"), "pos": -6}],
+
+    # Motif placement control.
+    # OFF    : do not enforce motif placement.
+    # FIXED  : place each motif at a user-defined N-terminal 1-based start position.
+    # RANDOM : keep motifs fixed as sequences but randomly choose non-overlapping positions per candidate.
+    # Input examples:
+    #   FIXED  -> "RGD@1, EEMQR@4"
+    #   RANDOM -> "RGD, EEMQR"
+    "MOTIF_PLACEMENT_MODE": "OFF",
+    "MOTIF_PLACEMENT_SPECS": "",
+    "LOCK_RESIDUES": ["C","W"],
+    "DUAL_MOTIFS": [{"motif": list("RGD"), "target":0}, {"motif": list("KLVFF"), "target":1}],
+    "DUAL_MIN_DISTANCE": 6,
+
+    "CLUSTERS": 5,
+    "ELITE_KEEP": 20,
+    "FINAL_TOPK": 10,
+    "BINDER_MODE": "BALANCED",
+    "DOCKING_STAGE": "FINAL_TOP_ONLY",  # OFF / FINAL_TOP_ONLY / EVERY_N_GENERATIONS
+    "DOCKING_ENGINE": "NONE",
+    "USE_REAL_DOCKING": False,
+    "USE_AF": False,
+    "AF_LFORM_ONLY": True,
+
+    # Advanced docking-readiness layer. Keeps D/non-natural/linker/label/tag/chemistry
+    # generation enabled, but classifies and exports candidates for downstream
+    # Rosetta/HADDOCK/MD parameterization instead of silently treating everything
+    # as a simple L-form peptide.
+    "DOCKING_READY_MODE": "ADVANCED",  # BASIC / ADVANCED
+    "DOCKING_READY_BONUS_WEIGHT": 1.0,
+    "MAX_PARAM_TOKENS": 8,
+    "ALLOW_SURROGATE_DOCKING": True,
+
+
+    # Optional target hotspot / epitope extraction layer.
+    # Lightweight design preprocessor; not docking or binding proof.
+    "AUTO_HOTSPOT": False,
+    "HOTSPOT_SOURCE": "SEQUENCE",  # SEQUENCE / PDB
+    "HOTSPOT_WINDOW": 6,
+    "HOTSPOT_TOPK": 5,
+    "HOTSPOT_SEQUENCE": "",
+    "HOTSPOT_PDB_TEXT": "",
+    "HOTSPOT_CHAIN": "",
+    "HOTSPOT_LOCK_AS_MOTIF": False,
+    "HOTSPOT_REPLACE_TARGETS": True,
+    "HOTSPOT_MIN_EXPOSURE": 0.35,
+    "HOTSPOT_BINDING_WEIGHT": 0.8,
+    "HOTSPOT_DEBUG_MODE": False,
+    "HOTSPOT_DEBUG_FORCE_TOPK": 5,
+    "CHEMISTRY_LONG_TARGET_BALANCE": True,
+    "MOTIF_POSITION_MODE": "FREE",  # FREE / N_TERM / CENTER / C_TERM
+    "MOTIF_POSITION_MAP": {},
+
+    "MAX_D_RATIO": 0.6,
+    "MAX_NON_NAT_RATIO": 0.5,
+    "MAX_CYS": 2,
+    "MIN_HYDRO_RATIO": 0.15,
+    "MAX_HYDRO_RATIO": 0.75,
+    "MAX_ABS_CHARGE": 7,
+    "MIN_RESIDUE_COUNT": 4,
+
+    # Optional PDB/interface-derived statistical prior.
+    # This is a hypothesis-generating ranking prior, not a validated binding predictor.
+    "USE_ML_PRIOR": False,
+    "ML_PRIOR_WEIGHT": 0.45,
+    "ML_PRIOR_TABLE_PATH": "data/ml_prior/pdb_interface_prior_sample.csv",
+    "ML_PRIOR_SOURCE_LABEL": "sample_pdb_interface_prior",
+    "USE_PRETRAINED_ML_PRIOR": True,
+    "ML_PRIOR_MODEL_PATH": "data/ml_prior/pepforge_ml_prior_baseline.joblib",
+}
+
+
+# Known terminal tag expansions used for surrogate FASTA export.
+# Surrogates are for fast pre-screening only; modified candidates still need
+# explicit parameterization for final docking/MD validation.
+TERMINAL_TAG_SEQUENCE = {
+    "His6":"HHHHHH", "His8":"HHHHHHHH", "His10":"HHHHHHHHHH",
+    "FLAG":"DYKDDDDK", "HA":"YPYDVPDYA", "Myc":"EQKLISEEDL", "StrepII":"WSHPQFEK",
+    "TwinStrep":"WSHPQFEKGGGSGGGSGGSAWSHPQFEK", "V5":"GKPIPNPLLGLDST", "T7":"MASMTGGQQMG",
+    "ALFA":"SRLEEELRRRLTE", "AviTag":"GLNDIFEAQKIEWHE", "SpyTag":"AHIVMVDAYKPTK",
+}
+
+
+def set_global_seed(seed=42):
+    random.seed(int(seed))
+    np.random.seed(int(seed))
+
+
+def normalize_length_config():
+    """Normalize FIX/RANGE length settings inside the engine as a safety layer."""
+    try:
+        CONFIG["FIX_LENGTH"] = int(CONFIG.get("FIX_LENGTH", 24))
+        CONFIG["MIN_LENGTH"] = int(CONFIG.get("MIN_LENGTH", 18))
+        CONFIG["MAX_LENGTH"] = int(CONFIG.get("MAX_LENGTH", 30))
+    except Exception:
+        CONFIG["FIX_LENGTH"] = 24
+        CONFIG["MIN_LENGTH"] = 18
+        CONFIG["MAX_LENGTH"] = 30
+    if CONFIG.get("LEN_MODE", "RANDOM") == "FIX":
+        CONFIG["MIN_LENGTH"] = CONFIG["FIX_LENGTH"]
+        CONFIG["MAX_LENGTH"] = CONFIG["FIX_LENGTH"]
+    elif CONFIG["MIN_LENGTH"] > CONFIG["MAX_LENGTH"]:
+        CONFIG["MIN_LENGTH"], CONFIG["MAX_LENGTH"] = CONFIG["MAX_LENGTH"], CONFIG["MIN_LENGTH"]
+    return CONFIG
+
+def update_config(config=None):
+    if config:
+        CONFIG.update(config)
+    normalize_length_config()
+    sync_custom_aa_linkers()
+    return CONFIG
+
+def base(x):
+    if isinstance(x, str) and len(x) == 2 and x.startswith("d") and x[1] in AA:
+        return x[1]
+    return NON_NAT_MAP.get(x, x)
+
+def is_residue(x):
+    return base(x) in AA
+
+def clean_bases(seq):
+    return [base(x) for x in seq if base(x) in AA]
+
+def to_esm_seq(seq):
+    return "".join(clean_bases(seq))
+
+# -------------------------
+# PDB/interface-derived ML/statistical prior scaffold
+# -------------------------
+_ML_PRIOR_CACHE = {"path": None, "rows": []}
+
+
+def _default_ml_prior_path():
+    return Path(__file__).resolve().parents[1] / "data" / "ml_prior" / "pdb_interface_prior_sample.csv"
+
+
+def load_ml_prior_rows(path=None):
+    """Load a small CSV-based statistical prior table.
+
+    This is intentionally lightweight. It supports future replacement by a
+    true pretrained model while remaining EXE-friendly and auditable.
+
+    Expected columns:
+      type,key,score,source,note
+
+    Supported type values:
+      motif        : key is a peptide motif such as RGD or KLVFF
+      residue      : key is a single residue such as R, W, F
+      pair         : key is a 2-residue unordered/ordered pair such as R-D
+      composition  : key can be hydrophobic, aromatic, positive, negative
+    """
+    if not CONFIG.get("USE_ML_PRIOR", False):
+        return []
+    p = path or CONFIG.get("ML_PRIOR_TABLE_PATH", "") or str(_default_ml_prior_path())
+    p = Path(str(p))
+    if not p.is_absolute():
+        candidate = Path(__file__).resolve().parents[1] / p
+        p = candidate if candidate.exists() else p
+    key = str(p.resolve()) if p.exists() else str(p)
+    if _ML_PRIOR_CACHE.get("path") == key:
+        return _ML_PRIOR_CACHE.get("rows", [])
+    rows = []
+    if p.exists():
+        try:
+            with open(p, newline="", encoding="utf-8-sig") as f:
+                for r in csv.DictReader(f):
+                    try:
+                        score = float(r.get("score", 0.0))
+                    except Exception:
+                        score = 0.0
+                    rows.append({
+                        "type": str(r.get("type", "")).strip().lower(),
+                        "key": str(r.get("key", "")).strip().upper(),
+                        "score": score,
+                        "source": str(r.get("source", "")).strip(),
+                        "note": str(r.get("note", "")).strip(),
+                    })
+        except Exception:
+            rows = []
+    _ML_PRIOR_CACHE["path"] = key
+    _ML_PRIOR_CACHE["rows"] = rows
+    return rows
+
+
+
+_ML_MODEL_CACHE = {"path": None, "payload": None}
+
+_ML_FEATURE_NAMES = [
+    "length", "hydrophobic_ratio", "aromatic_ratio", "positive_ratio", "negative_ratio", "charge_norm",
+    "anchor_ratio", "gly_ratio", "pro_ratio", "cys_ratio", "acidic_basic_balance",
+    "motif_RGD", "motif_KLV", "motif_EEMQR", "motif_PXXP_like", "motif_LXXLL_like",
+    "dipeptide_DE", "dipeptide_KK_RR", "aromatic_cluster"
+]
+
+
+def _ml_prior_model_path():
+    p = Path(str(CONFIG.get("ML_PRIOR_MODEL_PATH", "data/ml_prior/pepforge_ml_prior_baseline.joblib")))
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parents[1] / p
+    return p
+
+
+def _load_pretrained_ml_prior_model():
+    if not CONFIG.get("USE_PRETRAINED_ML_PRIOR", True):
+        return None
+    p = _ml_prior_model_path()
+    if not p.exists():
+        return None
+    key = str(p.resolve())
+    if _ML_MODEL_CACHE.get("path") == key:
+        return _ML_MODEL_CACHE.get("payload")
+    try:
+        import joblib
+        payload = joblib.load(p)
+    except Exception:
+        payload = None
+    _ML_MODEL_CACHE["path"] = key
+    _ML_MODEL_CACHE["payload"] = payload
+    return payload
+
+
+def _ml_prior_feature_dict_from_clean(clean):
+    c = [x for x in clean.upper() if x in AA]
+    n = max(1, len(c))
+    s = "".join(c)
+    pos = sum(1 for x in c if x in POSITIVE)
+    neg = sum(1 for x in c if x in NEGATIVE)
+    return {
+        "length": len(c) / 30.0,
+        "hydrophobic_ratio": sum(1 for x in c if x in HYDRO_AA) / n,
+        "aromatic_ratio": sum(1 for x in c if x in AROMATIC) / n,
+        "positive_ratio": pos / n,
+        "negative_ratio": neg / n,
+        "charge_norm": (pos - neg) / n,
+        "anchor_ratio": sum(1 for x in c if x in ANCHOR) / n,
+        "gly_ratio": c.count("G") / n,
+        "pro_ratio": c.count("P") / n,
+        "cys_ratio": c.count("C") / n,
+        "acidic_basic_balance": 1.0 - min(1.0, abs(pos - neg) / max(1, pos + neg)),
+        "motif_RGD": float("RGD" in s),
+        "motif_KLV": float("KLV" in s),
+        "motif_EEMQR": float("EEMQR" in s),
+        "motif_PXXP_like": float(re.search(r"P..P", s) is not None),
+        "motif_LXXLL_like": float(re.search(r"L..LL", s) is not None),
+        "dipeptide_DE": float("DE" in s or "ED" in s),
+        "dipeptide_KK_RR": float("KK" in s or "RR" in s),
+        "aromatic_cluster": float(re.search(r"[FWYH].{0,2}[FWYH]", s) is not None),
+    }
+
+
+def _pretrained_ml_prior_score(clean):
+    payload = _load_pretrained_ml_prior_model()
+    if not payload:
+        return None
+    try:
+        model = payload.get("model", payload)
+        names = payload.get("feature_names", _ML_FEATURE_NAMES) if isinstance(payload, dict) else _ML_FEATURE_NAMES
+        f = _ml_prior_feature_dict_from_clean(clean)
+        X = np.array([[float(f.get(name, 0.0)) for name in names]], dtype=float)
+        return float(np.tanh(model.predict(X)[0]))
+    except Exception:
+        return None
+
+
+def _statistical_ml_prior_score(clean):
+    rows = load_ml_prior_rows()
+    if not rows:
+        return 0.0
+    vals = []
+    c = list(clean)
+    aa_counts = Counter(c)
+    n = max(1, len(c))
+    for r in rows:
+        typ, key, sc = r.get("type", ""), r.get("key", ""), float(r.get("score", 0.0))
+        if not key:
+            continue
+        if typ == "motif":
+            if key in clean:
+                vals.append(sc)
+            else:
+                best = 0
+                for L in range(min(len(key), len(clean)), 2, -1):
+                    if any(key[i:i+L] in clean for i in range(len(key)-L+1)):
+                        best = L
+                        break
+                if best:
+                    vals.append(sc * best / max(1, len(key)))
+        elif typ == "residue":
+            vals.append(sc * aa_counts.get(key, 0) / n)
+        elif typ == "pair":
+            parts = [x for x in re.split(r"[-:_]", key) if x]
+            if len(parts) == 2:
+                a, b = parts[0], parts[1]
+                pair_count = sum(1 for i in range(len(c)-1) if c[i] == a and c[i+1] == b)
+                unordered = sum(1 for i in range(len(c)-1) if {c[i], c[i+1]} == {a, b})
+                vals.append(sc * max(pair_count, 0.5 * unordered) / max(1, len(c)-1))
+        elif typ == "composition":
+            if key == "HYDROPHOBIC":
+                vals.append(sc * sum(1 for x in c if x in HYDRO_AA) / n)
+            elif key == "AROMATIC":
+                vals.append(sc * sum(1 for x in c if x in AROMATIC) / n)
+            elif key == "POSITIVE":
+                vals.append(sc * sum(1 for x in c if x in POSITIVE) / n)
+            elif key == "NEGATIVE":
+                vals.append(sc * sum(1 for x in c if x in NEGATIVE) / n)
+    if not vals:
+        return 0.0
+    return float(np.tanh(np.mean(vals)))
+
+
+def ml_prior_score(seq):
+    """Optional pretrained-lite + statistical ML prior score.
+
+    This is a hypothesis-generating ranking prior, not a validated binding
+    affinity predictor. If the bundled pretrained-lite model exists, it is used
+    first and blended with the transparent CSV statistical prior. If the model
+    cannot be loaded, the engine falls back to the CSV prior only.
+    """
+    if not CONFIG.get("USE_ML_PRIOR", False):
+        return 0.0
+    clean = "".join(clean_bases(seq)).upper()
+    if not clean:
+        return 0.0
+    stat = _statistical_ml_prior_score(clean)
+    pred = _pretrained_ml_prior_score(clean)
+    if pred is None:
+        return stat
+    # Blend model with auditable CSV prior. The model dominates but the prior
+    # keeps behavior interpretable and stable for early beta usage.
+    return float(np.tanh(0.75 * pred + 0.25 * stat))
+
+
+def seq_to_string(seq):
+    return "-".join(str(x) for x in seq)
+
+def token_length(x):
+    """Construct-token length contribution.
+    NH2 is a terminal modification and always contributes 0.
+    Chemical/linker/tag/label tokens can contribute to construct length when
+    TOKEN mode is selected.
+    """
+    if x == "NH2":
+        return 0
+    return 1
+
+def residue_length(seq):
+    """Amino-acid residue length.
+    NH2, chemical caps, labels, tags, and non-peptide linker tokens do not count.
+    AA-based linker tokens count by their residue expansion.
+    """
+    total = 0
+    for x in seq:
+        if x == "NH2":
+            continue
+        if x in CONFIG.get("CUSTOM_AA_LINKERS", {}):
+            total += len(str(CONFIG["CUSTOM_AA_LINKERS"][x].get("sequence", ""))) or 0
+        elif is_residue(x):
+            total += 1
+    return int(total)
+
+def expanded_length(seq):
+    """Expanded peptide-like construct length for reporting.
+    NH2 remains 0. AA-linkers and known peptide tags can expand.
+    Non-peptide chemical labels/caps count as 1 construct token.
+    """
+    total = 0
+    for x in seq:
+        if x == "NH2":
+            continue
+        if x in CONFIG.get("CUSTOM_AA_LINKERS", {}):
+            total += len(str(CONFIG["CUSTOM_AA_LINKERS"][x].get("sequence", ""))) or 0
+        elif isinstance(x, str) and x.startswith("His") and x[3:].isdigit():
+            total += int(x[3:])
+        elif x == "FLAG":
+            total += 8
+        elif x == "HA":
+            total += 9
+        elif x == "Myc":
+            total += 10
+        elif is_residue(x):
+            total += 1
+        else:
+            # non-peptide linker / label / cap / chemical token as one construct unit
+            total += 1
+    return int(total)
+
+def sequence_length(seq):
+    """Primary design length.
+    TOKEN is the default construct length: selected chemical/linker/tag/label
+    tokens can occupy length, while terminal NH2 does not.
+    RESIDUE is available when the user wants pure amino-acid mer length.
+    """
+    mode = CONFIG.get("LENGTH_COUNT_MODE", CONFIG.get("LENGTH_METRIC", "TOKEN"))
+    if mode == "RESIDUE":
+        return residue_length(seq)
+    if mode == "EXPANDED":
+        return expanded_length(seq)
+    return int(sum(token_length(x) for x in seq))
+
+def length_bounds():
+    normalize_length_config()
+    if CONFIG.get("LEN_MODE", "RANDOM") == "FIX":
+        L = int(CONFIG.get("FIX_LENGTH", 24))
+        return L, L
+    mn = int(CONFIG.get("MIN_LENGTH", 18))
+    mx = int(CONFIG.get("MAX_LENGTH", 30))
+    if mn > mx:
+        mn, mx = mx, mn
+    return mn, mx
+
+def length_ok(seq):
+    mn, mx = length_bounds()
+    L = sequence_length(seq)
+    return mn <= L <= mx
+
+def length_score(seq):
+    mn, mx = length_bounds()
+    L = sequence_length(seq)
+    if mn <= L <= mx:
+        return 1.0
+    if L > mx:
+        return -float(L - mx) / max(1, mx)
+    return -float(mn - L) / max(1, mn)
+
+def hydrophobic_ratio(seq):
+    c = clean_bases(seq)
+    return sum(1 for x in c if x in HYDRO_AA) / max(1, len(c))
+
+def aromatic_ratio(seq):
+    c = clean_bases(seq)
+    return sum(1 for x in c if x in AROMATIC) / max(1, len(c))
+
+def charge_score(seq):
+    c = clean_bases(seq)
+    return sum(1 for x in c if x in POSITIVE) - sum(1 for x in c if x in NEGATIVE)
+
+def contains_motif(seq, motif):
+    b = clean_bases(seq)
+    m = [base(x) for x in motif]
+    if not m:
+        return True
+    return any(b[i:i+len(m)] == m for i in range(max(0, len(b)-len(m)+1)))
+
+def find_motif_position(seq, motif):
+    b = clean_bases(seq)
+    m = [base(x) for x in motif]
+    for i in range(max(0, len(b)-len(m)+1)):
+        if b[i:i+len(m)] == m:
+            return i
+    return None
+
+def sync_custom_aa_linkers():
+    if not CONFIG.get("USE_AA_LINKER_LIBRARY", False):
+        return
+    for name, meta in (CONFIG.get("CUSTOM_AA_LINKERS", {}) or {}).items():
+        if not isinstance(meta, dict) or not meta.get("sequence"):
+            continue
+        length = float(meta.get("length_A", 3.8 * len(str(meta["sequence"]))))
+        LINKER_LENGTH[name] = length
+        LINKER_FLEX[name] = float(meta.get("flex", 0.8))
+        if name not in CONFIG["LINKER_TYPES"]:
+            CONFIG["LINKER_TYPES"].append(name)
+
+def build_pool():
+    pool = AA.copy()
+    if CONFIG.get("USE_D", True):
+        pool += D_FORM
+    if CONFIG.get("USE_NON_NAT", True):
+        pool += list(CONFIG.get("NON_NAT_TYPES", NON_NAT))
+    return pool
+
+def choose_linker_token():
+    sync_custom_aa_linkers()
+    choice = random.choice(CONFIG.get("LINKER_TYPES", list(LINKER_LENGTH.keys())))
+    if CONFIG.get("LINKER_LENGTH_SELECTION_MODE") == "EXPAND_TO_RESIDUES":
+        meta = CONFIG.get("CUSTOM_AA_LINKERS", {}).get(choice)
+        if isinstance(meta, dict) and meta.get("sequence"):
+            return list(str(meta["sequence"]))
+    return choice
+
+def append_token_or_list(seq, token):
+    if isinstance(token, list):
+        seq.extend(token)
+    else:
+        seq.append(token)
+    return seq
+
+def linker_tokens_in_sequence(seq):
+    return [x for x in seq if x in LINKER_LENGTH]
+
+
+def terminal_chem_tokens():
+    """Tokens allowed at the N-terminus.
+
+    Linker tokens are intentionally excluded even if a user accidentally
+    adds a linker name to BASE_CHEM_TYPES or LABEL_TYPES. Linkers are
+    internal/bridge/spacer elements and must not occupy the N-terminal
+    modifier position.
+    """
+    linker_set = set(CONFIG.get("LINKER_TYPES", [])) | set(LINKER_LENGTH.keys())
+    allowed = (
+        set(CONFIG.get("TAG_TYPES", [])) |
+        set(CONFIG.get("BASE_CHEM_TYPES", [])) |
+        (set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"})
+    )
+    return allowed - linker_set
+
+def is_terminal_chem_token(x):
+    return x in terminal_chem_tokens()
+
+def is_linker_token(x):
+    return x in LINKER_LENGTH
+
+def first_residue_index(seq):
+    """Return the index of the first true amino-acid-like residue.
+    Terminal chemistry/tag/label tokens before this index are not considered
+    peptide core. Linkers must never be inserted before this residue.
+    """
+    for i, x in enumerate(seq):
+        if is_residue(x):
+            return i
+    return None
+
+def safe_internal_linker_insert_index(seq, preferred_idx=None):
+    """Choose a safe internal insertion index for linker tokens.
+
+    The returned index is always after at least one amino-acid-like residue,
+    so linker/spacer tokens cannot become N-terminal elements even when
+    LINKER_POS contains 0, mutation inserts at index 0, or crossover creates
+    a linker-led sequence.
+    """
+    if not seq:
+        return 0
+    first = first_residue_index(seq)
+    if first is None:
+        return len(seq)
+    min_idx = first + 1
+    if preferred_idx is None:
+        return min_idx
+    try:
+        idx = int(preferred_idx)
+    except Exception:
+        idx = min_idx
+    return max(min_idx, min(idx, len(seq)))
+
+def has_nterm_linker(seq):
+    """True if the construct body starts with a linker before any residue."""
+    seen_residue = False
+    for x in seq:
+        if x == "NH2" or is_terminal_chem_token(x):
+            continue
+        if is_residue(x):
+            seen_residue = True
+            return False
+        if is_linker_token(x) and not seen_residue:
+            return True
+        # unknown non-terminal tokens are treated as body tokens and stop scan
+        if not is_linker_token(x):
+            return False
+    return False
+
+def enforce_terminal_rules(seq):
+    """Apply final construct topology rules.
+    - chemical/tag/label tokens are N-terminal only
+    - linker tokens are internal/middle only, never N-terminal
+    - NH2 remains C-terminal only
+    """
+    seq = [x for x in list(seq) if x is not None]
+    if not CONFIG.get("TERMINAL_RULES_STRICT", True):
+        return seq
+
+    # Remove NH2 temporarily.
+    had_nh2 = bool(seq and "NH2" in seq)
+    seq = [x for x in seq if x != "NH2"]
+
+    # Pull all selected terminal chemistry/tag/label tokens to N-term.
+    nterm_tokens = []
+    body = []
+    for x in seq:
+        if is_terminal_chem_token(x):
+            if x not in nterm_tokens:
+                nterm_tokens.append(x)
+        else:
+            body.append(x)
+
+    # Linkers cannot be first construct element.
+    if CONFIG.get("DISALLOW_NTERM_LINKER", True):
+        while body and is_linker_token(body[0]):
+            # remove leading linker rather than moving it before N-term chemistry
+            body.pop(0)
+
+    # Optional C-terminal linker restriction.
+    if CONFIG.get("DISALLOW_CTERM_LINKER", False):
+        while body and is_linker_token(body[-1]):
+            body.pop()
+
+    # Ensure any remaining linker is internal: if after nterm tokens there is no residue before a linker, remove it.
+    cleaned = []
+    seen_residue = False
+    for x in body:
+        if is_residue(x):
+            seen_residue = True
+            cleaned.append(x)
+        elif is_linker_token(x):
+            if seen_residue:
+                cleaned.append(x)
+        else:
+            cleaned.append(x)
+
+    # Avoid ending with linker if C-terminal linker is disallowed.
+    if CONFIG.get("DISALLOW_CTERM_LINKER", False):
+        while cleaned and is_linker_token(cleaned[-1]):
+            cleaned.pop()
+
+    out = nterm_tokens + cleaned
+    if CONFIG.get("USE_CTERM_NH2", True):
+        out.append("NH2")
+    return out
+
+def effective_linker_length(seq):
+    total = 0.0
+    flex = 0.0
+    for x in seq:
+        if x in LINKER_LENGTH:
+            total += LINKER_LENGTH[x]
+            flex += LINKER_FLEX.get(x, 0.5)
+    return total * (1 + 0.05 * min(flex, 3))
+
+def locked_clean_positions_from_motifs(seq):
+    locked = set()
+    b = clean_bases(seq)
+    for motif in CONFIG.get("LOCKED_MOTIFS", []):
+        m = [base(x) for x in motif]
+        for i in range(max(0, len(b)-len(m)+1)):
+            if b[i:i+len(m)] == m:
+                locked.update(range(i, i+len(m)))
+    return locked
+
+
+# =========================================================
+# OPTIONAL_HOTSPOT_AND_MOTIF_POSITION_LAYER
+# =========================================================
+_THREE_TO_ONE = {
+    "ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E","GLY":"G","HIS":"H",
+    "ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P","SER":"S","THR":"T","TRP":"W",
+    "TYR":"Y","VAL":"V","MSE":"M","SEC":"C","PYL":"K"
+}
+
+def normalize_protein_sequence(seq):
+    return "".join([c for c in str(seq).upper() if c in AA])
+
+def hotspot_fragment_score(fragment, exposure=1.0):
+    frag = normalize_protein_sequence(fragment)
+    if not frag:
+        return 0.0
+    n = max(1, len(frag))
+    hydrophobic = sum(c in "AILMFWYV" for c in frag) / n
+    aromatic = sum(c in "FWY" for c in frag) / n
+    positive = sum(c in "KRH" for c in frag) / n
+    negative = sum(c in "DE" for c in frag) / n
+    gly_pro = sum(c in "GP" for c in frag) / n
+    charge_balance = 1.0 - min(1.0, abs(positive - negative) * 3.0)
+    return float(1.20*hydrophobic + 1.50*aromatic + 0.50*(positive+negative) + 0.50*charge_balance + float(exposure) - 0.35*gly_pro)
+
+def extract_hotspots_from_sequence(seq, window=None, top_k=None):
+    s = normalize_protein_sequence(seq)
+    window = int(window or CONFIG.get("HOTSPOT_WINDOW", 6))
+    top_k = int(top_k or CONFIG.get("HOTSPOT_TOPK", 5))
+    if len(s) < window or window <= 0:
+        return []
+    scored = []
+    for i in range(len(s) - window + 1):
+        frag = s[i:i+window]
+        scored.append({"motif": frag, "score": hotspot_fragment_score(frag, 1.0), "start": i+1, "end": i+window, "source": "SEQUENCE", "exposure": 1.0})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    out, seen = [], set()
+    for row in scored:
+        if row["motif"] in seen:
+            continue
+        seen.add(row["motif"])
+        out.append(row)
+        if len(out) >= top_k:
+            break
+    return out
+
+
+def fallback_debug_hotspots_from_sequence(seq, window=None, top_k=None):
+    """Always return simple sequence windows for debugging hotspot flow.
+    This is not a biological hotspot predictor; it is a diagnostic fallback.
+    """
+    s = normalize_protein_sequence(seq)
+    window = int(window or CONFIG.get("HOTSPOT_WINDOW", 6))
+    top_k = int(top_k or CONFIG.get("HOTSPOT_DEBUG_FORCE_TOPK", CONFIG.get("HOTSPOT_TOPK", 5)))
+    if not s:
+        return []
+    window = max(3, min(window, len(s)))
+    if len(s) <= window:
+        return [{"motif": s, "score": hotspot_fragment_score(s, 1.0), "start": 1, "end": len(s), "source": "DEBUG_SEQUENCE_FALLBACK", "exposure": 1.0}]
+    # Spread windows across the protein to visualize positions, then sort by heuristic.
+    candidates = []
+    positions = set()
+    if top_k <= 1:
+        positions.add(max(0, (len(s)-window)//2))
+    else:
+        for j in range(top_k * 3):
+            positions.add(int(round(j * max(1, len(s)-window) / max(1, top_k * 3 - 1))))
+    for i in sorted(positions):
+        frag = s[i:i+window]
+        if len(frag) == window:
+            candidates.append({"motif": frag, "score": hotspot_fragment_score(frag, 1.0), "start": i+1, "end": i+window, "source": "DEBUG_SEQUENCE_FALLBACK", "exposure": 1.0})
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    out, seen = [], set()
+    for c in candidates:
+        if c["motif"] in seen:
+            continue
+        seen.add(c["motif"])
+        out.append(c)
+        if len(out) >= top_k:
+            break
+    return out
+
+def parse_pdb_ca_atoms(pdb_text, chain_filter=""):
+    records, seen = [], set()
+    chain_filter = str(chain_filter or "").strip()
+    for line in str(pdb_text).splitlines():
+        if not (line.startswith("ATOM") or line.startswith("HETATM")):
+            continue
+        if line[12:16].strip() != "CA":
+            continue
+        aa = _THREE_TO_ONE.get(line[17:20].strip().upper())
+        if not aa:
+            continue
+        chain = line[21].strip()
+        if chain_filter and chain != chain_filter:
+            continue
+        try:
+            resi = int(line[22:26])
+            coord = np.array([float(line[30:38]), float(line[38:46]), float(line[46:54])], dtype=float)
+        except Exception:
+            continue
+        key = (chain, resi)
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append({"aa": aa, "chain": chain, "resi": resi, "coord": coord})
+    return records
+
+def assign_surface_proxy(records, radius=10.0):
+    if not records:
+        return records
+    coords = np.array([r["coord"] for r in records], dtype=float)
+    counts = []
+    for i in range(len(records)):
+        d = np.linalg.norm(coords - coords[i], axis=1)
+        counts.append(int(np.sum((d < radius) & (d > 0.01))))
+    mx = max(1, max(counts))
+    for r, c in zip(records, counts):
+        r["neighbor_count"] = c
+        r["surface_proxy"] = float(max(0.0, 1.0 - c/mx))
+    return records
+
+def extract_hotspots_from_pdb(pdb_text, window=None, top_k=None, chain=None):
+    window = int(window or CONFIG.get("HOTSPOT_WINDOW", 6))
+    top_k = int(top_k or CONFIG.get("HOTSPOT_TOPK", 5))
+    chain = CONFIG.get("HOTSPOT_CHAIN", "") if chain is None else chain
+    records = assign_surface_proxy(parse_pdb_ca_atoms(pdb_text, chain_filter=chain))
+    if len(records) < window or window <= 0:
+        return []
+    scored = []
+    for i in range(len(records) - window + 1):
+        chunk = records[i:i+window]
+        if len(set(r["chain"] for r in chunk)) > 1:
+            continue
+        if any(chunk[j+1]["resi"] - chunk[j]["resi"] != 1 for j in range(len(chunk)-1)):
+            continue
+        frag = "".join(r["aa"] for r in chunk)
+        exposure = float(np.mean([r.get("surface_proxy", 0.0) for r in chunk]))
+        if exposure < float(CONFIG.get("HOTSPOT_MIN_EXPOSURE", 0.35)):
+            continue
+        scored.append({"motif": frag, "score": hotspot_fragment_score(frag, exposure), "start": chunk[0]["resi"], "end": chunk[-1]["resi"], "chain": chunk[0]["chain"], "source": "PDB_SURFACE_PROXY", "exposure": exposure})
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:top_k]
+
+
+def hotspot_sequence_source():
+    """Return protein sequence source for sequence-based hotspot extraction.
+    Priority:
+    1) HOTSPOT_SEQUENCE field
+    2) RECEPTOR_SEQUENCE field
+    3) TARGETS field, useful when the user pastes a full protein sequence into Targets
+    """
+    explicit = normalize_protein_sequence(CONFIG.get("HOTSPOT_SEQUENCE", ""))
+    if explicit:
+        return explicit
+    receptor = normalize_protein_sequence(CONFIG.get("RECEPTOR_SEQUENCE", ""))
+    if receptor:
+        return receptor
+    targets = CONFIG.get("TARGETS", []) or []
+    joined = ""
+    for t in targets:
+        if isinstance(t, (list, tuple)):
+            s = "".join(str(x) for x in t)
+        else:
+            s = str(t)
+        s = normalize_protein_sequence(s)
+        if len(s) > len(joined):
+            joined = s
+    return joined
+
+
+def extract_config_hotspots():
+    if not CONFIG.get("AUTO_HOTSPOT", False):
+        CONFIG["_HOTSPOT_STATUS"] = "AUTO_HOTSPOT_OFF"
+        return []
+
+    source = str(CONFIG.get("HOTSPOT_SOURCE", "SEQUENCE")).upper()
+    debug = bool(CONFIG.get("HOTSPOT_DEBUG_MODE", False))
+    seq_source = hotspot_sequence_source()
+
+    hs = []
+    if source == "PDB":
+        pdb_text = str(CONFIG.get("HOTSPOT_PDB_TEXT", "") or "")
+        if pdb_text.strip():
+            hs = extract_hotspots_from_pdb(
+                pdb_text,
+                CONFIG.get("HOTSPOT_WINDOW", 6),
+                CONFIG.get("HOTSPOT_TOPK", 5),
+                CONFIG.get("HOTSPOT_CHAIN", "")
+            )
+            CONFIG["_HOTSPOT_STATUS"] = "PDB_HOTSPOTS_EXTRACTED" if hs else "PDB_NO_HOTSPOTS_FOUND"
+            if hs:
+                return hs
+        else:
+            CONFIG["_HOTSPOT_STATUS"] = "PDB_SELECTED_BUT_NO_PDB_TEXT"
+
+        # Debug/fallback: PDB failed but sequence exists.
+        if seq_source:
+            hs = fallback_debug_hotspots_from_sequence(seq_source, CONFIG.get("HOTSPOT_WINDOW", 6), CONFIG.get("HOTSPOT_DEBUG_FORCE_TOPK", CONFIG.get("HOTSPOT_TOPK", 5))) if debug else extract_hotspots_from_sequence(seq_source, CONFIG.get("HOTSPOT_WINDOW", 6), CONFIG.get("HOTSPOT_TOPK", 5))
+            CONFIG["_HOTSPOT_STATUS"] = "PDB_FALLBACK_TO_DEBUG_SEQUENCE" if debug else ("PDB_FALLBACK_TO_SEQUENCE" if hs else "PDB_FALLBACK_SEQUENCE_NO_HOTSPOTS")
+            return hs
+        return []
+
+    if not seq_source:
+        CONFIG["_HOTSPOT_STATUS"] = "SEQUENCE_SELECTED_BUT_NO_SEQUENCE"
+        return []
+
+    hs = extract_hotspots_from_sequence(seq_source, CONFIG.get("HOTSPOT_WINDOW", 6), CONFIG.get("HOTSPOT_TOPK", 5))
+    if hs:
+        CONFIG["_HOTSPOT_STATUS"] = "SEQUENCE_HOTSPOTS_EXTRACTED"
+        return hs
+
+    if debug:
+        hs = fallback_debug_hotspots_from_sequence(seq_source, CONFIG.get("HOTSPOT_WINDOW", 6), CONFIG.get("HOTSPOT_DEBUG_FORCE_TOPK", CONFIG.get("HOTSPOT_TOPK", 5)))
+        CONFIG["_HOTSPOT_STATUS"] = "DEBUG_SEQUENCE_FALLBACK_USED" if hs else "DEBUG_SEQUENCE_FALLBACK_FAILED"
+        return hs
+
+    CONFIG["_HOTSPOT_STATUS"] = "SEQUENCE_NO_HOTSPOTS_FOUND"
+    return hs
+
+def apply_hotspots_to_config():
+    hotspots = extract_config_hotspots()
+    CONFIG["_EXTRACTED_HOTSPOTS"] = hotspots
+    if not hotspots:
+        return hotspots
+    motifs = [list(h["motif"]) for h in hotspots if h.get("motif")]
+    if CONFIG.get("HOTSPOT_REPLACE_TARGETS", True):
+        CONFIG["TARGETS"] = motifs
+    if CONFIG.get("HOTSPOT_LOCK_AS_MOTIF", False):
+        existing = ["".join(m) for m in CONFIG.get("LOCKED_MOTIFS", [])]
+        for h in hotspots:
+            m = h.get("motif", "")
+            if m and m not in existing:
+                CONFIG.setdefault("LOCKED_MOTIFS", []).append(list(m))
+                existing.append(m)
+        CONFIG["MOTIF_LOCK"] = True
+    return hotspots
+
+def motif_position_for(motif):
+    m = "".join(motif) if isinstance(motif, (list, tuple)) else str(motif)
+    mp = CONFIG.get("MOTIF_POSITION_MAP", {}) or {}
+    return str(mp.get(m, CONFIG.get("MOTIF_POSITION_MODE", "FREE"))).upper()
+
+def insert_motif_positioned(seq, motif, mode="FREE"):
+    seq = list(seq); motif = list(motif)
+    if not motif:
+        return seq
+    had_nh2 = bool(seq and seq[-1] == "NH2")
+    if had_nh2:
+        seq = seq[:-1]
+    mode = str(mode or "FREE").upper()
+    if mode == "N_TERM":
+        insert_at = 0
+    elif mode == "C_TERM":
+        insert_at = len(seq)
+    elif mode == "CENTER":
+        insert_at = max(0, len(seq)//2 - len(motif)//2)
+    else:
+        insert_at = len(seq)
+    # For positioned motifs, remove previous clean occurrence to avoid duplicates.
+    if mode != "FREE":
+        clean = clean_bases(seq)
+        found = find_clean_motif(clean, motif)
+        if found is not None:
+            count, start_idx, end_idx = 0, None, None
+            for i, tok in enumerate(seq):
+                if base(tok) in AA:
+                    if count == found:
+                        start_idx = i
+                    if count == found + len(motif) - 1:
+                        end_idx = i
+                        break
+                    count += 1
+            if start_idx is not None and end_idx is not None:
+                del seq[start_idx:end_idx+1]
+                if mode == "C_TERM":
+                    insert_at = len(seq)
+                elif mode == "CENTER":
+                    insert_at = max(0, len(seq)//2 - len(motif)//2)
+    seq[insert_at:insert_at] = motif
+    if had_nh2:
+        seq.append("NH2")
+    return seq
+
+def hotspot_match_score(seq):
+    hotspots = CONFIG.get("_EXTRACTED_HOTSPOTS", []) or []
+    if not hotspots:
+        return 0.0
+    clean = "".join(clean_bases(seq))
+    vals = []
+    for h in hotspots:
+        m = h.get("motif", "")
+        if not m:
+            continue
+        if m in clean:
+            vals.append(1.0)
+        else:
+            best = 0
+            for L in range(min(len(m), len(clean)), 2, -1):
+                if any(m[i:i+L] in clean for i in range(len(m)-L+1)):
+                    best = L
+                    break
+            vals.append(best / max(1, len(m)))
+    return float(max(vals) if vals else 0.0)
+
+
+def parse_motif_placement_specs(specs=None, fallback_motifs=None):
+    """Parse motif placement text into [{"motif": list(...), "pos": int|None}].
+
+    Supported input:
+      - "RGD@1, EEMQR@4" for FIXED placement
+      - "RGD, EEMQR" for RANDOM placement
+      - comma, slash, semicolon, or newline separators are also accepted.
+
+    Positions are N-terminal, 1-based residue positions in the clean peptide core.
+    Motif length is not fixed; any user-provided motif length is accepted.
+    """
+    entries = []
+    raw = specs if specs is not None else CONFIG.get("MOTIF_PLACEMENT_SPECS", "")
+    raw = str(raw or "")
+    raw = re.sub(r"[,;/\n]+", ",", raw)
+    for part in [p.strip() for p in raw.split(",") if p.strip()]:
+        pos = None
+        motif_txt = part
+        if "@" in part:
+            motif_txt, pos_txt = part.split("@", 1)
+            motif_txt = motif_txt.strip()
+            pos_txt = pos_txt.strip()
+            if pos_txt:
+                try:
+                    pos = int(pos_txt)
+                except Exception:
+                    raise ValueError(f"Invalid motif position: {part}")
+        motif = [x for x in motif_txt.strip() if x and not x.isspace()]
+        if motif:
+            entries.append({"motif": motif, "pos": pos})
+
+    if not entries and fallback_motifs:
+        for m in fallback_motifs:
+            mm = list(m) if isinstance(m, (list, tuple)) else [x for x in str(m).strip() if x and not x.isspace()]
+            if mm:
+                entries.append({"motif": mm, "pos": None})
+    return entries
+
+
+def motif_placement_entries():
+    mode = str(CONFIG.get("MOTIF_PLACEMENT_MODE", "OFF") or "OFF").upper()
+    if mode == "OFF":
+        return []
+    return parse_motif_placement_specs(CONFIG.get("MOTIF_PLACEMENT_SPECS", ""), CONFIG.get("LOCKED_MOTIFS", []))
+
+
+def motif_required_residue_count():
+    mode = str(CONFIG.get("MOTIF_PLACEMENT_MODE", "OFF") or "OFF").upper()
+    if mode == "FIXED":
+        req = 0
+        for e in motif_placement_entries():
+            if e.get("pos") is not None:
+                req = max(req, int(e["pos"]) + len(e["motif"]) - 1)
+            else:
+                req += len(e["motif"])
+        return req
+    if mode == "RANDOM":
+        return sum(len(e["motif"]) for e in motif_placement_entries())
+    if CONFIG.get("MOTIF_LOCK", True):
+        return sum(len(m) for m in CONFIG.get("LOCKED_MOTIFS", []))
+    return 0
+
+
+def validate_motif_intervals(entries, clean_len):
+    used = set()
+    for e in entries:
+        motif = e.get("motif") or []
+        pos = e.get("pos")
+        if pos is None:
+            raise ValueError("FIXED motif placement requires positions such as RGD@1")
+        pos = int(pos)
+        if pos < 1:
+            raise ValueError(f"Motif position must be 1 or greater: {''.join(motif)}@{pos}")
+        end = pos + len(motif) - 1
+        if end > clean_len:
+            raise ValueError(f"Motif {''.join(motif)}@{pos} exceeds peptide residue length {clean_len}")
+        interval = set(range(pos, end + 1))
+        if used & interval:
+            raise ValueError("Motif placement intervals overlap. Please use non-overlapping positions.")
+        used |= interval
+    return True
+
+
+def assign_random_motif_positions(entries, clean_len, max_attempts=200):
+    entries = [{"motif": list(e.get("motif") or []), "pos": None} for e in entries if e.get("motif")]
+    if sum(len(e["motif"]) for e in entries) > clean_len:
+        raise ValueError("Total motif length exceeds peptide residue length")
+    for _ in range(max_attempts):
+        used = set()
+        placed = []
+        ok = True
+        for e in sorted(entries, key=lambda x: len(x["motif"]), reverse=True):
+            L = len(e["motif"])
+            possible = []
+            for start in range(1, clean_len - L + 2):
+                interval = set(range(start, start + L))
+                if not (used & interval):
+                    possible.append(start)
+            if not possible:
+                ok = False
+                break
+            pos = random.choice(possible)
+            used |= set(range(pos, pos + L))
+            placed.append({"motif": e["motif"], "pos": pos})
+        if ok:
+            return placed
+    raise ValueError("Could not place motifs randomly without overlap")
+
+
+def apply_motif_entries_by_clean_position(seq, entries):
+    seq = list(seq)
+    clean_len = len(clean_bases(seq))
+    max_end = max((int(e["pos"]) + len(e["motif"]) - 1 for e in entries if e.get("pos") is not None), default=0)
+    # If a generated candidate is shorter than the requested motif span, extend it with normal amino acids.
+    had_nh2 = bool(seq and seq[-1] == "NH2")
+    if had_nh2:
+        seq = seq[:-1]
+    while clean_len < max_end:
+        seq.append(rand_aa())
+        clean_len += 1
+    validate_motif_intervals(entries, clean_len)
+
+    start_map = {int(e["pos"]): list(e["motif"]) for e in entries}
+    covered = set()
+    for e in entries:
+        start = int(e["pos"])
+        covered.update(range(start, start + len(e["motif"])))
+
+    out = []
+    clean_idx = 0
+    inserted_at = set()
+    for tok in seq:
+        if base(tok) in AA:
+            clean_idx += 1
+            if clean_idx in start_map and clean_idx not in inserted_at:
+                out.extend(start_map[clean_idx])
+                inserted_at.add(clean_idx)
+            if clean_idx in covered:
+                continue
+            out.append(tok)
+        else:
+            # Preserve terminal/chemical/linker tokens outside clean-residue replacement.
+            # If the token is located between replaced residues, dropping it keeps the motif contiguous.
+            if clean_idx in covered and (clean_idx + 1) in covered:
+                continue
+            out.append(tok)
+    if had_nh2:
+        out.append("NH2")
+    return out
+
+
+def enforce_motif_placement(seq):
+    mode = str(CONFIG.get("MOTIF_PLACEMENT_MODE", "OFF") or "OFF").upper()
+    if mode == "OFF":
+        return list(seq)
+    entries = motif_placement_entries()
+    if not entries:
+        return list(seq)
+    clean_len = len(clean_bases(seq))
+    if mode == "FIXED":
+        # Missing positions are appended after the last fixed interval.
+        next_pos = 1
+        fixed = []
+        for e in entries:
+            motif = list(e.get("motif") or [])
+            pos = e.get("pos")
+            if pos is None:
+                while any(set(range(next_pos, next_pos + len(motif))) & set(range(int(x["pos"]), int(x["pos"]) + len(x["motif"]))) for x in fixed):
+                    next_pos += 1
+                pos = next_pos
+            fixed.append({"motif": motif, "pos": int(pos)})
+            next_pos = max(next_pos, int(pos) + len(motif))
+        return apply_motif_entries_by_clean_position(seq, fixed)
+    if mode == "RANDOM":
+        if clean_len < sum(len(e["motif"]) for e in entries):
+            # Expand before random assignment when the generated core is too short.
+            had_nh2 = bool(seq and seq[-1] == "NH2")
+            seq = list(seq[:-1] if had_nh2 else seq)
+            while len(clean_bases(seq)) < sum(len(e["motif"]) for e in entries):
+                seq.append(rand_aa())
+            if had_nh2:
+                seq.append("NH2")
+            clean_len = len(clean_bases(seq))
+        placed = assign_random_motif_positions(entries, clean_len)
+        return apply_motif_entries_by_clean_position(seq, placed)
+    return list(seq)
+
+
+def enforce_motifs(seq):
+    seq = list(seq)
+    # New placement layer has priority. It supports OFF / FIXED / RANDOM and arbitrary motif lengths/counts.
+    if str(CONFIG.get("MOTIF_PLACEMENT_MODE", "OFF") or "OFF").upper() != "OFF":
+        return enforce_motif_placement(seq)
+    if not CONFIG.get("MOTIF_LOCK", True):
+        return seq
+    for motif in CONFIG.get("LOCKED_MOTIFS", []):
+        mode = motif_position_for(motif)
+        if mode != "FREE":
+            seq = insert_motif_positioned(seq, motif, mode)
+        elif not contains_motif(seq, motif):
+            insert_at = len(seq)-1 if seq and seq[-1] == "NH2" else len(seq)
+            seq[insert_at:insert_at] = list(motif)
+    return seq
+
+def enforce_linker_limit(seq):
+    seq = list(seq)
+    max_l = int(CONFIG.get("MAX_LINKERS", 999))
+    while len(linker_tokens_in_sequence(seq)) > max_l:
+        removed = False
+        for i in range(len(seq)-1, -1, -1):
+            if seq[i] in LINKER_LENGTH:
+                seq.pop(i)
+                removed = True
+                break
+        if not removed:
+            break
+    return seq
+
+def enforce_cterm(seq):
+    seq = [x for x in seq if x != "NH2"]
+    if CONFIG.get("USE_CTERM_NH2", True):
+        seq.append("NH2")
+    return seq
+
+def try_remove_preserving(seq, idx):
+    old = list(seq)
+    if idx < 0 or idx >= len(seq):
+        return seq, False
+    seq = list(seq)
+    seq.pop(idx)
+    if CONFIG.get("MOTIF_LOCK", True):
+        for motif in CONFIG.get("LOCKED_MOTIFS", []):
+            if not contains_motif(seq, motif):
+                return old, False
+    if len(clean_bases(seq)) < int(CONFIG.get("MIN_RESIDUE_COUNT", 4)):
+        return old, False
+    if CONFIG.get("USE_CTERM_NH2", True) and (not seq or seq[-1] != "NH2"):
+        return old, False
+    return seq, True
+
+def trim_to_length(seq):
+    if not CONFIG.get("TRIM_TO_LENGTH", True):
+        return list(seq)
+    seq = list(seq)
+    mn, mx = length_bounds()
+
+    optional_sets = [
+        set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"},
+        set(CONFIG.get("TAG_TYPES", [])),
+        set(CONFIG.get("BASE_CHEM_TYPES", [])),
+        set(CONFIG.get("LINKER_TYPES", [])) | set(LINKER_LENGTH.keys()),
+    ]
+
+    for opt in optional_sets:
+        changed = True
+        while sequence_length(seq) > mx and changed:
+            changed = False
+            for i in range(len(seq)-1, -1, -1):
+                if seq[i] in opt:
+                    seq2, ok = try_remove_preserving(seq, i)
+                    if ok:
+                        seq = seq2
+                        changed = True
+                        break
+
+    while sequence_length(seq) > mx:
+        removed = False
+        for i in range(len(seq)-1, -1, -1):
+            if seq[i] == "NH2":
+                continue
+            if is_residue(seq[i]) and base(seq[i]) not in set(CONFIG.get("LOCK_RESIDUES", [])):
+                seq2, ok = try_remove_preserving(seq, i)
+                if ok:
+                    seq = seq2
+                    removed = True
+                    break
+        if not removed:
+            break
+
+    while sequence_length(seq) < mn:
+        insert_at = len(seq)-1 if seq and seq[-1] == "NH2" else len(seq)
+        seq.insert(insert_at, random.choice(build_pool()))
+        seq = enforce_motifs(enforce_cterm(seq))
+        if sequence_length(seq) > mx:
+            break
+
+    return seq
+
+def repair_sequence(seq):
+    seq = list(seq)
+    seq = enforce_motifs(seq)
+    seq = enforce_linker_limit(seq)
+    seq = enforce_terminal_rules(seq)
+    seq = enforce_cterm(seq)
+    seq = trim_to_length(seq)
+    seq = enforce_terminal_rules(seq)
+    return seq
+
+def generate():
+    mn, mx = length_bounds()
+    target_len = mx if CONFIG.get("LEN_MODE") == "FIX" else random.randint(mn, mx)
+
+    # Length semantics:
+    # TOKEN/EXPANDED: selected chemical/linker/tag/label tokens may occupy construct length.
+    # RESIDUE: length means amino-acid residue count only.
+    # NH2 is never counted as an amino acid or construct length unit.
+    motif_min = motif_required_residue_count()
+    expected_extra = 0
+    if CONFIG.get("LENGTH_COUNT_MODE", "TOKEN") in ["TOKEN", "EXPANDED"]:
+        expected_extra += min(int(CONFIG.get("MAX_LINKERS", 2)), len(CONFIG.get("LINKER_POS", []))) if CONFIG.get("USE_LINKER", True) else 0
+        expected_extra += 1 if CONFIG.get("USE_TAG", True) else 0
+        expected_extra += 1 if CONFIG.get("USE_BASE_CHEM", True) else 0
+        expected_extra += 1 if CONFIG.get("USE_LABEL", True) else 0
+    core_len = max(int(CONFIG.get("MIN_RESIDUE_COUNT", 4)), motif_min, target_len - expected_extra)
+    core_len = min(core_len, max(4, target_len))
+
+    seq = []
+    if CONFIG.get("USE_LABEL", True) and random.random() < 0.45:
+        lab = random.choice(CONFIG.get("LABEL_TYPES", ["NONE"]))
+        if lab != "NONE":
+            seq.append(lab)
+    if CONFIG.get("USE_TAG", True) and random.random() < 0.55:
+        seq.append(random.choice(CONFIG.get("TAG_TYPES", ["His6"])))
+    if CONFIG.get("USE_BASE_CHEM", True) and random.random() < 0.55:
+        seq.append(random.choice(CONFIG.get("BASE_CHEM_TYPES", ["Ac"])))
+
+    linker_count = 0
+    for i in range(core_len):
+        seq.append(random.choice(build_pool()))
+        if CONFIG.get("USE_LINKER", True) and i in CONFIG.get("LINKER_POS", []) and linker_count < int(CONFIG.get("MAX_LINKERS", 2)):
+            if CONFIG.get("LINKER_MODE") == "FIX":
+                append_token_or_list(seq, CONFIG.get("FIX_LINKER_TYPE", "PEG4"))
+            else:
+                append_token_or_list(seq, choose_linker_token())
+            linker_count += 1
+
+    return repair_sequence(seq)
+
+def generate_from_seed(seed):
+    seq = list(seed)
+    if CONFIG.get("USE_LINKER", True):
+        for pos in CONFIG.get("LINKER_POS", []):
+            if pos < len(seq) and random.random() < 0.4 and len(linker_tokens_in_sequence(seq)) < int(CONFIG.get("MAX_LINKERS", 2)):
+                link = choose_linker_token()
+                insert_at = safe_internal_linker_insert_index(seq, pos)
+                if isinstance(link, list):
+                    seq[insert_at:insert_at] = link
+                else:
+                    seq[insert_at:insert_at] = [link]
+    return repair_sequence(seq)
+
+def deduplicate(pop):
+    seen = set()
+    out = []
+    for s in pop:
+        k = tuple(s)
+        if k not in seen:
+            seen.add(k)
+            out.append(s)
+    return out
+
+def init_population():
+    pop = []
+    if CONFIG.get("USE_SEED", True):
+        seeds = CONFIG.get("SEED_SEQS", [])
+        if seeds:
+            nseed = int(CONFIG.get("POP", 200) * CONFIG.get("SEED_INJECT_RATIO", 0.2))
+            for i in range(nseed):
+                pop.append(generate_from_seed(seeds[i % len(seeds)]))
+    while len(pop) < int(CONFIG.get("POP", 200)):
+        pop.append(generate())
+    return deduplicate(pop)
+
+
+# -------------------------
+# Bridge / A-B connector mode
+# -------------------------
+def target_anchors():
+    """Return target-derived anchors for A-B bridge mode."""
+    targets = CONFIG.get("TARGETS", [])
+    if len(targets) < 2:
+        return []
+    L = max(2, int(CONFIG.get("BRIDGE_ANCHOR_LEN", 4)))
+    anchors = []
+    for t in targets[:2]:
+        clean = [base(x) for x in t if base(x) in AA]
+        if not clean:
+            continue
+        anchors.append(clean[:min(L, len(clean))])
+    return anchors
+
+def active_bridge_anchors():
+    """Return anchors only when bridge mode is active.
+
+    This prevents MULTI_TARGET_BINDER results from looking as if bridge anchors
+    were applied. Anchor enforcement and bridge scoring remain BRIDGE-only.
+    """
+    if CONFIG.get("DESIGN_MODE", "MULTI_TARGET_BINDER") != "BRIDGE_LINKER":
+        return []
+    return target_anchors()
+
+def contains_clean_motif(clean, motif):
+    if not motif:
+        return True
+    return any(clean[i:i+len(motif)] == motif for i in range(max(0, len(clean)-len(motif)+1)))
+
+def find_clean_motif(clean, motif):
+    if not motif:
+        return None
+    for i in range(max(0, len(clean)-len(motif)+1)):
+        if clean[i:i+len(motif)] == motif:
+            return i
+    return None
+
+def bridge_score(seq):
+    """Score A-linker-B style bridge design.
+
+    Active only when DESIGN_MODE == BRIDGE_LINKER.
+    Keeps the original multi-target binder behavior unchanged otherwise.
+    """
+    if CONFIG.get("DESIGN_MODE", "MULTI_TARGET_BINDER") != "BRIDGE_LINKER":
+        return 0.0
+    anchors = target_anchors()
+    if len(anchors) < 2:
+        return 0.0
+
+    clean = clean_bases(seq)
+    a, b = anchors[0], anchors[1]
+    pa = find_clean_motif(clean, a)
+    pb = find_clean_motif(clean, b)
+
+    score = 0.0
+    if pa is not None:
+        score += 0.35
+    if pb is not None:
+        score += 0.35
+    if pa is not None and pb is not None:
+        if (not CONFIG.get("BRIDGE_REQUIRE_ORDER", True)) or pa < pb:
+            score += 0.30
+        gap = abs(pb - pa) - min(len(a), len(b))
+        if 3 <= gap <= 18:
+            score += 0.25
+        elif gap > 0:
+            score += 0.10
+    n_link = len(linker_tokens_in_sequence(seq))
+    if n_link > 0:
+        score += min(0.30, 0.15 * n_link)
+    return float(min(score, 1.5))
+
+def enforce_bridge_anchors(seq):
+    """Inject target-derived A/B anchors in bridge mode while preserving old functions."""
+    if CONFIG.get("DESIGN_MODE", "MULTI_TARGET_BINDER") != "BRIDGE_LINKER":
+        return seq
+    anchors = target_anchors()
+    if len(anchors) < 2:
+        return seq
+
+    seq = list(seq)
+    had_nh2 = bool(seq and seq[-1] == "NH2")
+    if had_nh2:
+        seq = seq[:-1]
+
+    a, b = anchors[0], anchors[1]
+    clean = clean_bases(seq)
+    if not contains_clean_motif(clean, a):
+        seq[min(2, len(seq)):min(2, len(seq))] = a
+
+    clean = clean_bases(seq)
+    if not contains_clean_motif(clean, b):
+        seq[len(seq):len(seq)] = b
+
+    if CONFIG.get("USE_LINKER", True) and len(linker_tokens_in_sequence(seq)) == 0 and int(CONFIG.get("MAX_LINKERS", 2)) > 0:
+        mid = max(1, len(seq)//2)
+        link = choose_linker_token()
+        if isinstance(link, list):
+            seq[mid:mid] = link
+        else:
+            seq[mid:mid] = [link]
+
+    if had_nh2 or CONFIG.get("USE_CTERM_NH2", True):
+        seq.append("NH2")
+    return seq
+
+
+# -------------------------
+# Scoring
+# -------------------------
+def target_similarity(seq):
+    c = clean_bases(seq)
+    if not c:
+        return 0.0
+    scores = []
+    for t in CONFIG.get("TARGETS", []):
+        t = [base(x) for x in t]
+        n = max(len(c), len(t), 1)
+        m = min(len(c), len(t))
+        identity = sum(1 for i in range(m) if c[i] == t[i]) / n
+        anchor_overlap = sum(1 for x in c if x in set(t) and x in ANCHOR) / max(1, len(c))
+        scores.append(identity + 0.5 * anchor_overlap)
+    return max(scores) if scores else 0.0
+
+def motif_score(seq):
+    motifs = CONFIG.get("LOCKED_MOTIFS", [])
+    if not motifs:
+        return 0.0
+    return sum(1.0 for m in motifs if contains_motif(seq, m)) / max(1, len(motifs))
+
+def linker_score(seq):
+    if not CONFIG.get("USE_LINKER", True):
+        return 0.0
+    n = len(linker_tokens_in_sequence(seq))
+    max_l = max(1, int(CONFIG.get("MAX_LINKERS", 2)))
+    amount = 1.0 - abs(n - max_l) / max_l
+    eff = effective_linker_length(seq)
+    geom = math.exp(-abs(eff - float(CONFIG.get("TARGET_DISTANCE", 25.0))) / 20.0)
+    return 0.5 * max(0.0, amount) + 0.5 * geom
+
+def hydro_score(seq):
+    h = hydrophobic_ratio(seq)
+    return math.exp(-abs(h - 0.45) / 0.25)
+
+def charge_balance_score(seq):
+    return math.exp(-abs(charge_score(seq)) / 4.0)
+
+def dock_proxy_score(seq):
+    hot = sum(1 for x in clean_bases(seq) if x in ANCHOR)
+    clash = 0.5 * max(0, len(linker_tokens_in_sequence(seq)) - int(CONFIG.get("MAX_LINKERS", 2)))
+    return np.tanh((0.25 * hot + linker_score(seq) - clash) / 3.0) + 1.0
+
+def binder_success_score(seq):
+    anchors = sum(1 for x in clean_bases(seq) if x in ANCHOR)
+    arom = aromatic_ratio(seq)
+    pro = clean_bases(seq).count("P") / max(1, len(clean_bases(seq)))
+    return (
+        0.5 * motif_score(seq) +
+        0.4 * min(1.0, anchors / max(1, CONFIG.get("BINDER_MIN_ANCHORS", 2))) +
+        0.3 * hydro_score(seq) +
+        0.2 * charge_balance_score(seq) -
+        0.2 * max(0.0, arom - CONFIG.get("BINDER_MAX_AROMATIC_RATIO", 0.35)) -
+        0.2 * max(0.0, pro - CONFIG.get("BINDER_MAX_PROLINE_RATIO", 0.25))
+    )
+
+def validation_report(seq):
+    issues = []
+    if not length_ok(seq):
+        mn, mx = length_bounds()
+        issues.append(f"length_out_of_range:{sequence_length(seq)} not in [{mn},{mx}]")
+    if CONFIG.get("MOTIF_LOCK", True):
+        for m in CONFIG.get("LOCKED_MOTIFS", []):
+            if not contains_motif(seq, m):
+                issues.append("missing_motif:" + "".join(m))
+    if len(linker_tokens_in_sequence(seq)) > int(CONFIG.get("MAX_LINKERS", 999)):
+        issues.append("too_many_linkers")
+    if CONFIG.get("DISALLOW_NTERM_LINKER", True) and has_nterm_linker(seq):
+        issues.append("nterm_linker_disallowed")
+    c = clean_bases(seq)
+    n = len(c)
+    if n < int(CONFIG.get("MIN_RESIDUE_COUNT", 4)):
+        issues.append("too_few_residues")
+    if n:
+        d_ratio = sum(1 for x in seq if isinstance(x, str) and x.startswith("d") and base(x) in AA) / n
+        nn_ratio = sum(1 for x in seq if x in NON_NAT) / n
+        cys = c.count("C")
+        h = hydrophobic_ratio(seq)
+        ch = abs(charge_score(seq))
+        if d_ratio > CONFIG.get("MAX_D_RATIO", 0.6):
+            issues.append("excess_d_form")
+        if nn_ratio > CONFIG.get("MAX_NON_NAT_RATIO", 0.5):
+            issues.append("excess_non_natural")
+        if cys > CONFIG.get("MAX_CYS", 2):
+            issues.append("excess_cys")
+        if h < CONFIG.get("MIN_HYDRO_RATIO", 0.15):
+            issues.append("too_hydrophilic")
+        if h > CONFIG.get("MAX_HYDRO_RATIO", 0.75):
+            issues.append("too_hydrophobic")
+        if ch > CONFIG.get("MAX_ABS_CHARGE", 7):
+            issues.append("excess_charge")
+    return {"valid": len(issues) == 0, "issues": issues}
+
+def validation_score(seq):
+    r = validation_report(seq)
+    return 1.0 if r["valid"] else -min(6, len(r["issues"])) / 3.0
+
+def raw_fitness(seq, pop_sample=None):
+    return {
+        "fit_target": target_similarity(seq),
+        "fit_motif": motif_score(seq),
+        "fit_bridge": bridge_score(seq),
+        "fit_length": length_score(seq),
+        "fit_linker": linker_score(seq),
+        "fit_hydro": hydro_score(seq),
+        "fit_charge": charge_balance_score(seq),
+        "fit_dock_proxy": dock_proxy_score(seq),
+        "fit_validation": validation_score(seq),
+        "fit_binder_success": binder_success_score(seq),
+        "fit_docking_ready": docking_readiness_score(seq),
+        "fit_chemistry_presence": chemistry_presence_score(seq),
+        "fit_hotspot_match": hotspot_match_score(seq),
+        "fit_ml_prior": ml_prior_score(seq),
+        "fit_diversity": diversity_score(seq, pop_sample),
+    }
+
+
+def effective_chemistry_bonus_weight():
+    base_w = float(CONFIG.get("CHEMISTRY_BONUS_WEIGHT", 0.35))
+    if CONFIG.get("CHEMISTRY_LONG_TARGET_BALANCE", True):
+        seq_source = hotspot_sequence_source()
+        if len(seq_source) >= 80:
+            return max(base_w, 0.65)
+    return base_w
+
+def weights():
+    return {
+        "fit_target": 1.5,
+        "fit_motif": 1.5,
+        "fit_bridge": float(CONFIG.get("BRIDGE_LINKER_BONUS_WEIGHT", 1.4)),
+        "fit_length": float(CONFIG.get("LENGTH_PENALTY_WEIGHT", 2.0)),
+        "fit_linker": 1.2,
+        "fit_hydro": 1.0,
+        "fit_charge": 0.6,
+        "fit_dock_proxy": 1.0,
+        "fit_validation": 2.0,
+        "fit_binder_success": float(CONFIG.get("BINDER_SUCCESS_WEIGHT", 1.5)),
+        "fit_docking_ready": float(CONFIG.get("DOCKING_READY_BONUS_WEIGHT", 1.0)),
+        "fit_chemistry_presence": effective_chemistry_bonus_weight(),
+        "fit_hotspot_match": float(CONFIG.get("HOTSPOT_BINDING_WEIGHT", 0.8)),
+        "fit_ml_prior": float(CONFIG.get("ML_PRIOR_WEIGHT", 0.45)),
+        "fit_diversity": 0.8,
+    }
+
+
+def chemistry_presence_score(seq):
+    """Soft enrichment score for user-selected chemistry/linker/tag/label.
+    This is not hard forcing. It only reduces the chance that selected options
+    disappear from top-ranked candidates.
+    """
+    score = 0.0
+    if CONFIG.get("USE_LINKER", False) and linker_tokens_in_sequence(seq):
+        score += 0.30
+    if CONFIG.get("USE_TAG", False) and any(x in set(CONFIG.get("TAG_TYPES", [])) for x in seq):
+        score += 0.20
+    if CONFIG.get("USE_BASE_CHEM", False) and any(x in set(CONFIG.get("BASE_CHEM_TYPES", [])) for x in seq):
+        score += 0.25
+    if CONFIG.get("USE_LABEL", False) and any(x in (set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"}) for x in seq):
+        score += 0.25
+    return float(min(1.0, score))
+
+def total_score(seq, pop_sample=None):
+    f = raw_fitness(seq, pop_sample)
+    w = weights()
+    return float(sum(f[k] * w.get(k, 1.0) for k in f))
+
+def deterministic_embedding(seq):
+    c = clean_bases(seq)
+    counts = np.array([c.count(a) / max(1, len(c)) for a in AA], dtype=float)
+    feats = np.array([
+        sequence_length(seq) / 50.0,
+        hydrophobic_ratio(seq),
+        charge_score(seq) / 10.0,
+        aromatic_ratio(seq),
+        len(linker_tokens_in_sequence(seq)) / max(1, CONFIG.get("MAX_LINKERS", 2)),
+        motif_score(seq),
+        linker_score(seq),
+    ], dtype=float)
+    return np.concatenate([counts, feats])
+
+def diversity_score(seq, pop_sample=None):
+    if not pop_sample:
+        return 0.0
+    emb = deterministic_embedding(seq)
+    others = random.sample(pop_sample, min(20, len(pop_sample))) if len(pop_sample) > 1 else pop_sample
+    dists = []
+    for s in others:
+        if s is seq:
+            continue
+        dists.append(float(np.linalg.norm(emb - deterministic_embedding(s))))
+    if not dists:
+        return 0.0
+    return float(np.tanh(np.mean(dists)))
+
+# -------------------------
+# Evolution
+# -------------------------
+def crossover(a, b):
+    a = list(a)
+    b = list(b)
+    if not a or not b:
+        return repair_sequence(a or b or generate())
+    ca = random.randint(0, len(a))
+    cb = random.randint(0, len(b))
+    return repair_sequence(a[:ca] + b[cb:])
+
+def mutate(seq, mode="balanced"):
+    child = list(seq)
+    protected_tokens = (
+        set(CONFIG.get("TAG_TYPES", [])) |
+        set(CONFIG.get("BASE_CHEM_TYPES", [])) |
+        (set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"}) |
+        {"NH2"}
+    )
+    mutable = [
+        i for i, x in enumerate(child)
+        if x not in protected_tokens and base(x) not in set(CONFIG.get("LOCK_RESIDUES", []))
+    ]
+    if not mutable:
+        return repair_sequence(child)
+    rate = 0.10 if mode == "exploit" else 0.25 if mode == "explore" else 0.18
+    n = max(1, int(len(mutable) * rate))
+    for idx in sorted(random.sample(mutable, min(n, len(mutable))), reverse=True):
+        if idx < 0 or idx >= len(child):
+            continue
+        r = random.random()
+        if r < 0.72:
+            child[idx] = random.choice(build_pool())
+        elif r < 0.86 and CONFIG.get("USE_LINKER", True) and len(linker_tokens_in_sequence(child)) < int(CONFIG.get("MAX_LINKERS", 2)):
+            link = choose_linker_token()
+            insert_at = safe_internal_linker_insert_index(child, idx)
+            if isinstance(link, list):
+                child[insert_at:insert_at] = link
+            else:
+                child[insert_at:insert_at] = [link]
+        else:
+            if len(clean_bases(child)) > int(CONFIG.get("MIN_RESIDUE_COUNT", 4)):
+                seq2, ok = try_remove_preserving(child, idx)
+                if ok:
+                    child = seq2
+    return repair_sequence(child)
+
+def evolve(config=None, verbose=True):
+    update_config(config or {})
+    set_global_seed(CONFIG.get("SEED", 42))
+    pop = init_population()
+    progress = []
+    for g in range(int(CONFIG.get("GEN", 20))):
+        scores = np.array([total_score(s, pop) for s in pop], dtype=float)
+        best_idx = int(np.argmax(scores))
+        valid_ratio = np.mean([validation_report(s)["valid"] for s in pop])
+        progress.append({
+            "generation": g,
+            "best_score": float(scores[best_idx]),
+            "mean_score": float(np.mean(scores)),
+            "valid_ratio": float(valid_ratio),
+            "best_sequence": seq_to_string(pop[best_idx]),
+        })
+        if verbose:
+            print(f"[Gen {g:03d}] best={scores[best_idx]:.3f} mean={np.mean(scores):.3f} valid={valid_ratio:.2f}")
+        ranked = [x for _, x in sorted(zip(scores, pop), key=lambda z: z[0], reverse=True)]
+        elite_n = max(2, min(int(CONFIG.get("ELITE_KEEP", 20)), max(2, len(ranked)//5)))
+        elites = ranked[:elite_n]
+        children = elites.copy()
+        while len(children) < int(CONFIG.get("POP", 200)):
+            if CONFIG.get("ENGINE_MODE", "NSGA2") == "NSGA2" and len(elites) >= 2 and random.random() < 0.65:
+                a, b = random.sample(elites, 2)
+                child = crossover(a, b)
+            else:
+                child = generate()
+            mode = "explore" if random.random() < 0.45 else "exploit"
+            children.append(mutate(child, mode))
+        pop = deduplicate(children)
+        while len(pop) < int(CONFIG.get("POP", 200)):
+            pop.append(generate())
+    return pop, progress
+
+
+# -------------------------
+# Advanced docking-readiness / modeling export
+# -------------------------
+def token_class(x):
+    if x in AA:
+        return "L_AA"
+    if isinstance(x, str) and len(x) == 2 and x.startswith("d") and x[1] in AA:
+        return "D_AA"
+    if x in NON_NAT:
+        return "NON_NAT_AA"
+    if x in LINKER_LENGTH:
+        if x in CONFIG.get("CUSTOM_AA_LINKERS", {}):
+            return "AA_LINKER"
+        return "CHEM_LINKER"
+    if x in set(CONFIG.get("TAG_TYPES", [])):
+        return "TAG"
+    if x in set(CONFIG.get("BASE_CHEM_TYPES", [])):
+        return "CHEM_CAP"
+    if x in (set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"}):
+        return "LABEL"
+    if x == "NH2":
+        return "CTERM_AMIDE"
+    return "UNKNOWN"
+
+def surrogate_piece(x):
+    """Return an L-form sequence fragment for fast surrogate docking/export."""
+    if x in AA:
+        return x
+    if isinstance(x, str) and len(x) == 2 and x.startswith("d") and x[1] in AA:
+        return x[1]
+    if x in NON_NAT:
+        return NON_NAT_MAP.get(x, "X")
+    if x in CONFIG.get("CUSTOM_AA_LINKERS", {}):
+        return str(CONFIG["CUSTOM_AA_LINKERS"][x].get("sequence", ""))
+    if x in {"Gly","GG","GGG","GS","GSG","G4S"}:
+        return {"Gly":"G", "GG":"GG", "GGG":"GGG", "GS":"GS", "GSG":"GSG", "G4S":"GGGGSG"}[x]
+    if x in TERMINAL_TAG_SEQUENCE:
+        return TERMINAL_TAG_SEQUENCE[x]
+    return ""
+
+def docking_surrogate_sequence(seq):
+    return "".join(surrogate_piece(x) for x in seq if surrogate_piece(x))
+
+def docking_readiness_report(seq):
+    classes = Counter(token_class(x) for x in seq)
+    param_tokens = []
+    unsupported = []
+    manifest = []
+    for i, x in enumerate(seq):
+        cls = token_class(x)
+        entry = {
+            "index": i,
+            "token": str(x),
+            "class": cls,
+            "base_surrogate": surrogate_piece(x),
+            "base_residue": base(x) if is_residue(x) else "",
+        }
+        if cls in {"D_AA", "NON_NAT_AA", "CHEM_LINKER", "LABEL", "CHEM_CAP", "CTERM_AMIDE"}:
+            param_tokens.append(str(x))
+            entry["requires_parameters"] = True
+        else:
+            entry["requires_parameters"] = False
+        if cls == "UNKNOWN":
+            unsupported.append(str(x))
+        manifest.append(entry)
+
+    direct_lform = is_lform_clean_candidate(seq)
+    surrogate_seq = docking_surrogate_sequence(seq)
+    param_n = len(param_tokens)
+    max_param = int(CONFIG.get("MAX_PARAM_TOKENS", 8))
+
+    if direct_lform:
+        level = "DIRECT_LFORM_DOCKING_READY"
+        route = "CABS-dock / HADDOCK / AlphaFold-Multimer / ColabFold / Rosetta FlexPepDock"
+        warning = "No special residue parameters required."
+    elif unsupported:
+        level = "BLOCKED_UNSUPPORTED_TOKEN"
+        route = "Fix or register unsupported tokens before structural validation."
+        warning = "Unsupported tokens: " + ";".join(unsupported)
+    elif param_n <= max_param:
+        level = "PARAMETERIZED_DOCKING_READY"
+        route = "Rosetta FlexPepDock or HADDOCK/MD with explicit residue/linker/label parameters; use surrogate FASTA only for pre-screening."
+        warning = "Modified candidate: do not claim direct CABS/AF validity without parameterization."
+    else:
+        level = "PARAMETERIZATION_HEAVY"
+        route = "Reduce modification load or perform full small-molecule/peptidomimetic parameterization before docking."
+        warning = f"Parameter tokens {param_n} exceed MAX_PARAM_TOKENS={max_param}."
+
+    if level == "DIRECT_LFORM_DOCKING_READY":
+        score = 1.0
+    elif level == "PARAMETERIZED_DOCKING_READY":
+        score = max(0.25, 0.85 - 0.06 * param_n)
+    elif level == "PARAMETERIZATION_HEAVY":
+        score = 0.15
+    else:
+        score = -1.0
+
+    return {
+        "docking_ready_level": level,
+        "docking_ready_score": float(score),
+        "docking_param_token_count": param_n,
+        "docking_param_tokens": ";".join(param_tokens),
+        "docking_token_classes": ";".join(f"{k}:{v}" for k, v in sorted(classes.items())),
+        "docking_surrogate_sequence": surrogate_seq,
+        "docking_recommended_route": route,
+        "docking_warning": warning,
+        "docking_manifest": manifest,
+    }
+
+def docking_readiness_score(seq):
+    return docking_readiness_report(seq)["docking_ready_score"]
+
+# -------------------------
+# Results / validation routing
+# -------------------------
+def is_lform_clean_candidate(seq):
+    if any(isinstance(x, str) and x.startswith("d") and base(x) in AA for x in seq):
+        return False
+    if any(x in NON_NAT for x in seq):
+        return False
+    if any(x in LINKER_LENGTH for x in seq):
+        return False
+    if any(x in set(CONFIG.get("TAG_TYPES", [])) for x in seq):
+        return False
+    if any(x in set(CONFIG.get("BASE_CHEM_TYPES", [])) for x in seq):
+        return False
+    if any(x in (set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"}) for x in seq):
+        return False
+    return True
+
+def candidate_modeling_policy(seq):
+    readiness = docking_readiness_report(seq)
+    af_eligible = bool(CONFIG.get("AF_LFORM_ONLY", True) and is_lform_clean_candidate(seq))
+    return {
+        "af_eligible": af_eligible,
+        "modeling_reasons": readiness["docking_token_classes"],
+        "modeling_route": readiness["docking_recommended_route"],
+        "docking_stage": CONFIG.get("DOCKING_STAGE", "OFF"),
+        "docking_ready_level": readiness["docking_ready_level"],
+        "docking_ready_score": readiness["docking_ready_score"],
+        "docking_param_token_count": readiness["docking_param_token_count"],
+        "docking_param_tokens": readiness["docking_param_tokens"],
+        "docking_surrogate_sequence": readiness["docking_surrogate_sequence"],
+        "docking_warning": readiness["docking_warning"],
+    }
+
+def candidate_category(seq):
+    if len(linker_tokens_in_sequence(seq)) > 0:
+        return "linker_optimized"
+    if any(x in NON_NAT for x in seq):
+        return "non_natural_modified"
+    if any(isinstance(x, str) and x.startswith("d") for x in seq):
+        return "d_form_modified"
+    return "canonical_or_lightly_modified"
+
+
+def public_design_mode_label():
+    mode = CONFIG.get("DESIGN_MODE", "MULTI_TARGET_BINDER")
+    if mode == "SINGLE_TARGET":
+        return "SINGLE"
+    if mode == "BRIDGE_LINKER":
+        return "BRIDGE"
+    return "MULTI"
+
+def active_target_hotspot_rows():
+    """Return extracted hotspot rows used as target-derived design bias."""
+    return CONFIG.get("_EXTRACTED_HOTSPOTS", []) or []
+
+def active_target_hotspot_sequences():
+    hs = active_target_hotspot_rows()
+    if hs:
+        return [str(h.get("motif", "")) for h in hs if h.get("motif", "")]
+    # Fallback: manual TARGETS are also target references, but not auto-hotspots.
+    return ["".join(t) for t in CONFIG.get("TARGETS", []) if t]
+
+def hotspot_match_label(motif, clean_seq):
+    motif = str(motif or "")
+    clean_seq = str(clean_seq or "")
+    if not motif or not clean_seq:
+        return "NO"
+    if motif in clean_seq:
+        return "YES"
+    best = 0
+    for L in range(min(len(motif), len(clean_seq)), 2, -1):
+        if any(motif[i:i+L] in clean_seq for i in range(len(motif)-L+1)):
+            best = L
+            break
+    if best >= max(3, int(0.5 * len(motif))):
+        return "PARTIAL"
+    return "NO"
+
+def hotspot_peptide_map_string(seq):
+    clean = "".join(clean_bases(seq))
+    hotspots = active_target_hotspot_rows()
+    return "|".join([f"{h.get('motif','')}:{hotspot_match_label(h.get('motif',''), clean)}" for h in hotspots])
+
+def best_matching_hotspot(seq):
+    clean = "".join(clean_bases(seq))
+    hotspots = active_target_hotspot_rows()
+    if not hotspots:
+        return ""
+    def _rank(h):
+        label = hotspot_match_label(h.get("motif",""), clean)
+        label_score = {"YES": 3, "PARTIAL": 2, "NO": 0}.get(label, 0)
+        return (label_score, float(h.get("score", 0)))
+    return max(hotspots, key=_rank).get("motif", "")
+
+
+
+def selected_binding_hotspot_for_seq(seq):
+    """Return the target hotspot most related to this peptide candidate."""
+    clean = "".join(clean_bases(seq))
+    hotspots = active_target_hotspot_rows()
+    if not hotspots:
+        return {}
+    def _rank(h):
+        motif = str(h.get("motif", ""))
+        label = hotspot_match_label(motif, clean)
+        label_score = {"YES": 3, "PARTIAL": 2, "NO": 0}.get(label, 0)
+        # Prefer matched/partially matched, then high hotspot score.
+        return (label_score, float(h.get("score", 0)))
+    return max(hotspots, key=_rank)
+
+
+def hotspot_range_string(h):
+    if not h:
+        return ""
+    start = h.get("start", "")
+    end = h.get("end", "")
+    chain = h.get("chain", "")
+    if start == "" or end == "":
+        return ""
+    prefix = f"{chain}:" if chain not in ["", None] else ""
+    return f"{prefix}{start}-{end}"
+
+def selected_hotspot_region_fields(seq):
+    h = selected_binding_hotspot_for_seq(seq)
+    if not h:
+        return {
+            "binding_target_hotspot_sequence": "",
+            "binding_target_hotspot_start": "",
+            "binding_target_hotspot_end": "",
+            "binding_target_hotspot_range": "",
+            "binding_target_hotspot_chain": "",
+            "binding_target_hotspot_source": "",
+            "binding_target_hotspot_score": "",
+            "binding_target_hotspot_exposure": "",
+        }
+    return {
+        "binding_target_hotspot_sequence": h.get("motif", ""),
+        "binding_target_hotspot_start": h.get("start", ""),
+        "binding_target_hotspot_end": h.get("end", ""),
+        "binding_target_hotspot_range": hotspot_range_string(h),
+        "binding_target_hotspot_chain": h.get("chain", ""),
+        "binding_target_hotspot_source": h.get("source", ""),
+        "binding_target_hotspot_score": h.get("score", ""),
+        "binding_target_hotspot_exposure": h.get("exposure", ""),
+    }
+
+def peptide_target_hotspot_relation(seq):
+    h = selected_binding_hotspot_for_seq(seq)
+    if not h:
+        return ""
+    motif = str(h.get("motif", ""))
+    clean = "".join(clean_bases(seq))
+    return f"{motif}:{hotspot_match_label(motif, clean)}"
+
+def candidate_row(seq, rank=1, pop_sample=None):
+    fit = raw_fitness(seq, pop_sample)
+    rep = validation_report(seq)
+    policy = candidate_modeling_policy(seq)
+    row = {
+        "rank": rank,
+        "sequence": seq_to_string(seq),
+        "clean_sequence": to_esm_seq(seq),
+        "binding_target_hotspot": selected_binding_hotspot_for_seq(seq).get("motif", ""),
+        "binding_target_hotspot_sequence": selected_hotspot_region_fields(seq).get("binding_target_hotspot_sequence", ""),
+        "binding_target_hotspot_start": selected_hotspot_region_fields(seq).get("binding_target_hotspot_start", ""),
+        "binding_target_hotspot_end": selected_hotspot_region_fields(seq).get("binding_target_hotspot_end", ""),
+        "binding_target_hotspot_range": selected_hotspot_region_fields(seq).get("binding_target_hotspot_range", ""),
+        "binding_target_hotspot_chain": selected_hotspot_region_fields(seq).get("binding_target_hotspot_chain", ""),
+        "binding_target_hotspot_source": selected_hotspot_region_fields(seq).get("binding_target_hotspot_source", ""),
+        "binding_target_hotspot_score": selected_hotspot_region_fields(seq).get("binding_target_hotspot_score", ""),
+        "binding_target_hotspot_exposure": selected_hotspot_region_fields(seq).get("binding_target_hotspot_exposure", ""),
+        "peptide_to_target_hotspot": peptide_target_hotspot_relation(seq),
+        "all_target_hotspots_used": ";".join(active_target_hotspot_sequences()),
+        "all_target_hotspot_ranges": ";".join([hotspot_range_string(h) for h in active_target_hotspot_rows()]),
+        "hotspot_status": CONFIG.get("_HOTSPOT_STATUS", ""),
+        "length": sequence_length(seq),
+        "residue_length": residue_length(seq),
+        "expanded_length": expanded_length(seq),
+        "token_length_sum": int(sum(token_length(x) for x in seq)),
+        "length_count_mode": CONFIG.get("LENGTH_COUNT_MODE", "TOKEN"),
+        "length_semantics": "NH2 excluded; TOKEN counts selected construct tokens; RESIDUE counts amino-acid residues only",
+        "length_ok": length_ok(seq),
+        "total_score": total_score(seq, pop_sample),
+        "valid": rep["valid"],
+        "validation_issues": ";".join(rep["issues"]),
+        "category": candidate_category(seq),
+        "design_mode": CONFIG.get("DESIGN_MODE", "MULTI_TARGET_BINDER"),
+        "design_mode_label": public_design_mode_label(),
+        "bridge_mode_active": CONFIG.get("DESIGN_MODE", "MULTI_TARGET_BINDER") == "BRIDGE_LINKER",
+        "binder_mode": CONFIG.get("BINDER_MODE", "BALANCED"),
+        "bridge_anchors": ";".join("".join(a) for a in active_bridge_anchors()),
+        "linker_tokens": ";".join(linker_tokens_in_sequence(seq)),
+        "nterm_tokens": ";".join([x for x in seq if is_terminal_chem_token(x)]),
+        "has_label": any(x in (set(CONFIG.get("LABEL_TYPES", [])) - {"NONE"}) for x in seq),
+        "has_base_chem": any(x in set(CONFIG.get("BASE_CHEM_TYPES", [])) for x in seq),
+        "has_tag": any(x in set(CONFIG.get("TAG_TYPES", [])) for x in seq),
+        "terminal_rules_strict": CONFIG.get("TERMINAL_RULES_STRICT", True),
+        "nterm_linker_disallowed": CONFIG.get("DISALLOW_NTERM_LINKER", True),
+        "has_nterm_linker": has_nterm_linker(seq),
+        "clean_hydrophobic_ratio": hydrophobic_ratio(seq),
+        "clean_charge": charge_score(seq),
+        "aromatic_ratio": aromatic_ratio(seq),
+        "hotspot_match_score": hotspot_match_score(seq),
+        "ml_prior_score": ml_prior_score(seq),
+        "ml_prior_enabled": CONFIG.get("USE_ML_PRIOR", False),
+        "ml_prior_table": CONFIG.get("ML_PRIOR_TABLE_PATH", ""),
+        "best_hotspot": best_matching_hotspot(seq),
+        "extracted_hotspots": ";".join(h.get("motif", "") for h in CONFIG.get("_EXTRACTED_HOTSPOTS", [])),
+        "target_hotspot_sequences": ";".join(active_target_hotspot_sequences()),
+        "target_hotspot_source": CONFIG.get("HOTSPOT_SOURCE", "") if CONFIG.get("AUTO_HOTSPOT", False) else "MANUAL_TARGETS",
+        "hotspot_source_sequence_used": hotspot_sequence_source() if CONFIG.get("AUTO_HOTSPOT", False) and str(CONFIG.get("HOTSPOT_SOURCE", "SEQUENCE")).upper() == "SEQUENCE" else "",
+        "hotspot_used_as_targets": CONFIG.get("AUTO_HOTSPOT", False) and CONFIG.get("HOTSPOT_REPLACE_TARGETS", True),
+        "motif_position_mode": CONFIG.get("MOTIF_POSITION_MODE", "FREE"),
+        "motif_placement_mode": CONFIG.get("MOTIF_PLACEMENT_MODE", "OFF"),
+        "motif_placement_specs": CONFIG.get("MOTIF_PLACEMENT_SPECS", ""),
+        "hotspot_peptide_map": hotspot_peptide_map_string(seq),
+    }
+    row.update(policy)
+    row.update(fit)
+    return row
+
+def population_rows(pop):
+    ranked = sorted(pop, key=lambda s: total_score(s, pop), reverse=True)
+    return [candidate_row(s, i+1, pop) for i, s in enumerate(ranked)]
+
+
+def hotspot_peptide_pair_rows(rows):
+    """Create explicit peptide-hotspot mapping rows for output CSV."""
+    out = []
+    hotspots = active_target_hotspot_rows()
+    if not hotspots:
+        return out
+    for r in rows:
+        clean = str(r.get("clean_sequence", ""))
+        for h in hotspots:
+            motif = str(h.get("motif", ""))
+            out.append({
+                "rank": r.get("rank", ""),
+                "peptide_sequence": r.get("sequence", ""),
+                "clean_peptide_sequence": clean,
+                "target_hotspot_sequence": motif,
+                "hotspot_match": hotspot_match_label(motif, clean),
+                "hotspot_source": h.get("source", CONFIG.get("HOTSPOT_SOURCE", "")),
+                "hotspot_score": h.get("score", ""),
+                "hotspot_start": h.get("start", ""),
+                "hotspot_end": h.get("end", ""),
+                "hotspot_range": hotspot_range_string(h),
+                "hotspot_chain": h.get("chain", ""),
+                "hotspot_exposure": h.get("exposure", ""),
+            })
+    return out
+
+
+def simple_cluster_labels(rows, k=None):
+    k = max(1, min(int(k or CONFIG.get("CLUSTERS", 5)), len(rows)))
+    if not rows:
+        return []
+    # Deterministic round-robin over score-ranked rows as stable fallback.
+    return [i % k for i in range(len(rows))]
+
+def write_csv(path, rows):
+    path = Path(path)
+    if not rows:
+        path.write_text("", encoding="utf-8")
+        return
+    keys = list(rows[0].keys())
+    for r in rows:
+        for k in r.keys():
+            if k not in keys:
+                keys.append(k)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+def write_report(path, rows, progress):
+    top = rows[:min(10, len(rows))]
+    lines = [
+        "# Peptide Design Engine Report",
+        "",
+        "## Summary",
+        f"- Candidates: {len(rows)}",
+        f"- Final top K: {CONFIG.get('FINAL_TOPK', 10)}",
+        f"- Length mode: {CONFIG.get('LEN_MODE')}",
+        f"- Length range: {length_bounds()}",
+        f"- Length count mode: {CONFIG.get('LENGTH_COUNT_MODE')}",
+        f"- Design mode: {CONFIG.get('DESIGN_MODE')}",
+        f"- Docking stage: {CONFIG.get('DOCKING_STAGE')}",
+        "",
+        "## Top candidates",
+        "",
+        "| Rank | Sequence | Clean sequence | Length | Score | Valid | Route |",
+        "|---:|---|---|---:|---:|---|---|",
+    ]
+    for r in top:
+        lines.append(f"| {r['rank']} | `{r['sequence']}` | `{r['clean_sequence']}` | {r['length']} | {r['total_score']:.3f} | {r['valid']} | {r['modeling_route']} |")
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
+
+
+def hotspot_visualization_rows():
+    rows = []
+    for i, h in enumerate(CONFIG.get("_EXTRACTED_HOTSPOTS", []) or [], 1):
+        rows.append({
+            "hotspot_rank": i,
+            "hotspot_sequence": h.get("motif", ""),
+            "source": h.get("source", ""),
+            "start_residue": h.get("start", ""),
+            "end_residue": h.get("end", ""),
+            "chain": h.get("chain", ""),
+            "score": h.get("score", ""),
+            "exposure": h.get("exposure", ""),
+            "status": CONFIG.get("_HOTSPOT_STATUS", ""),
+        })
+    return rows
+
+def save_outputs(pop, progress, outdir=None, top_n=None):
+    out = Path(outdir or ("peptide_outputs_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")))
+    out.mkdir(parents=True, exist_ok=True)
+    rows = population_rows(pop)
+    top_n = int(top_n or CONFIG.get("FINAL_TOPK", 10))
+    top_rows = rows[:top_n]
+
+    write_csv(out / "results_full.csv", rows)
+    write_csv(out / "results_top.csv", top_rows)
+    write_csv(out / "hotspot_peptide_pairs.csv", hotspot_peptide_pair_rows(top_rows) or [{"message": "no hotspots extracted or AUTO_HOTSPOT is off", "hotspot_status": CONFIG.get("_HOTSPOT_STATUS", "")}])
+    write_csv(out / "hotspot_debug_visualization.csv", hotspot_visualization_rows() or [{"message": "no hotspots extracted", "hotspot_status": CONFIG.get("_HOTSPOT_STATUS", "")}])
+
+    clusters = simple_cluster_labels(top_rows, CONFIG.get("CLUSTERS", 5))
+    clustering_rows = []
+    for r, c in zip(top_rows, clusters):
+        rr = dict(r)
+        rr["cluster"] = c
+        clustering_rows.append(rr)
+    write_csv(out / "top_structural_clustering.csv", clustering_rows)
+
+    representatives = []
+    seen = set()
+    for r in clustering_rows:
+        if r["cluster"] not in seen:
+            representatives.append(r)
+            seen.add(r["cluster"])
+    write_csv(out / "final_cluster_representatives.csv", representatives)
+
+    issue_counts = Counter()
+    for r in rows:
+        if r["validation_issues"]:
+            for issue in r["validation_issues"].split(";"):
+                if issue:
+                    issue_counts[issue] += 1
+    write_csv(out / "validation_summary.csv", [{"issue": k, "count": v} for k, v in issue_counts.items()] or [{"issue":"none", "count":0}])
+
+    write_csv(out / "posthoc_validation_plan.csv", [
+        {k: r[k] for k in ["sequence","clean_sequence","length","total_score","af_eligible","modeling_reasons","modeling_route","docking_stage"]}
+        for r in top_rows
+    ])
+    write_csv(out / "posthoc_rescore_plan.csv", [
+        {"sequence": r["sequence"], "recommended_action": r["modeling_route"], "docking_stage": r["docking_stage"]}
+        for r in top_rows
+    ])
+
+    # Advanced docking-ready export bundle.
+    docking_rows = []
+    manifests = []
+    fasta_lines = []
+    for r in top_rows:
+        seq_tokens = r["sequence"].split("-") if r.get("sequence") else []
+        rep = docking_readiness_report(seq_tokens)
+        rr = dict(r)
+        rr.update({k: rep[k] for k in [
+            "docking_ready_level", "docking_ready_score", "docking_param_token_count",
+            "docking_param_tokens", "docking_surrogate_sequence", "docking_recommended_route", "docking_warning"
+        ]})
+        docking_rows.append(rr)
+        manifests.append({"rank": r["rank"], "sequence": r["sequence"], "manifest": rep["docking_manifest"]})
+        if rep["docking_surrogate_sequence"]:
+            fasta_lines.append(f">rank_{r['rank']}|{rep['docking_ready_level']}|surrogate_not_final_structure")
+            fasta_lines.append(rep["docking_surrogate_sequence"])
+    write_csv(out / "docking_ready_candidates.csv", docking_rows)
+    (out / "docking_modeling_manifest.json").write_text(json.dumps(manifests, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "docking_surrogate_sequences.fasta").write_text("\n".join(fasta_lines) + ("\n" if fasta_lines else ""), encoding="utf-8")
+    (out / "DOCKING_README.md").write_text("""# Docking-ready export notes
+
+This bundle preserves D-form, non-natural residues, linkers, tags, labels, and chemical caps.
+
+- `docking_ready_candidates.csv`: ranked candidates plus docking-readiness classification.
+- `docking_modeling_manifest.json`: token-by-token modification manifest for parameterized docking.
+- `docking_surrogate_sequences.fasta`: L-form surrogate sequences for quick pre-screening only. Do not report surrogate docking as final validation for modified candidates.
+
+Recommended interpretation:
+
+1. `DIRECT_LFORM_DOCKING_READY`: can go directly to standard peptide docking tools.
+2. `PARAMETERIZED_DOCKING_READY`: keep the real chemistry, but build explicit residue/linker/label parameters for Rosetta/HADDOCK/MD.
+3. `PARAMETERIZATION_HEAVY`: chemically rich candidate; prioritize only if the score/biology justifies custom parameterization.
+4. `BLOCKED_UNSUPPORTED_TOKEN`: register or remove the token before docking.
+""", encoding="utf-8")
+
+    (out / "methods_config_snapshot.json").write_text(json.dumps(CONFIG, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_report(out / "research_report.md", rows, progress)
+    write_csv(out / "extracted_hotspots.csv", CONFIG.get("_EXTRACTED_HOTSPOTS", []) or [{"motif":"none","score":0,"source":"none"}])
+
+    zip_path = out.with_suffix(".zip")
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in out.rglob("*"):
+            if p.is_file():
+                z.write(p, p.relative_to(out))
+    return {
+        "output_dir": str(out),
+        "full_csv": str(out / "results_full.csv"),
+        "top_csv": str(out / "results_top.csv"),
+        "final_csv": str(out / "final_cluster_representatives.csv"),
+        "validation_plan": str(out / "posthoc_validation_plan.csv"),
+        "rescore_plan": str(out / "posthoc_rescore_plan.csv"),
+        "report": str(out / "research_report.md"),
+        "clustering_csv": str(out / "top_structural_clustering.csv"),
+        "docking_ready_csv": str(out / "docking_ready_candidates.csv"),
+        "docking_manifest": str(out / "docking_modeling_manifest.json"),
+        "docking_surrogate_fasta": str(out / "docking_surrogate_sequences.fasta"),
+        "docking_readme": str(out / "DOCKING_README.md"),
+        "zip": str(zip_path),
+    }
+
+def run(config=None, verbose=True, outdir=None):
+    update_config(config or {})
+    pop, progress = evolve(CONFIG, verbose=verbose)
+    paths = save_outputs(pop, progress, outdir=outdir, top_n=CONFIG.get("FINAL_TOPK", 10))
+    rows = population_rows(pop)
+    return rows, progress, paths
+
+sync_custom_aa_linkers()
+
+
+# =========================================================
+# ULTIMATE_OPTIONAL_ML_AND_PSEUDODOCK_PATCH
+# =========================================================
+
+def _aa_features_from_clean_sequence(clean_seq):
+    aa = "ACDEFGHIKLMNPQRSTVWY"
+    s = "".join([c for c in str(clean_seq) if c in aa])
+    n = max(1, len(s))
+    hydro = set("AILMFWYV"); pos = set("KRH"); neg = set("DE"); polar = set("STNQYC"); arom = set("FWY")
+    return {
+        "ml_len_norm": len(s) / 50.0,
+        "ml_hydro_frac": sum(c in hydro for c in s) / n,
+        "ml_pos_frac": sum(c in pos for c in s) / n,
+        "ml_neg_frac": sum(c in neg for c in s) / n,
+        "ml_polar_frac": sum(c in polar for c in s) / n,
+        "ml_arom_frac": sum(c in arom for c in s) / n,
+        "ml_charge_norm": (sum(c in pos for c in s) - sum(c in neg for c in s)) / 10.0,
+    }
+
+def optional_ml_surrogate_score(row):
+    feat = _aa_features_from_clean_sequence(row.get("clean_sequence", ""))
+    hydro_term = max(0.0, 1.0 - abs(feat["ml_hydro_frac"] - 0.38) / 0.38)
+    charge_term = min(1.0, abs(feat["ml_charge_norm"]) + 0.25)
+    polar_term = min(1.0, feat["ml_polar_frac"] / 0.35)
+    arom_penalty = max(0.0, feat["ml_arom_frac"] - 0.22)
+    return float(max(0.0, min(1.0, 0.42 * hydro_term + 0.26 * charge_term + 0.26 * polar_term - 0.12 * arom_penalty)))
+
+def apply_optional_ml_rerank(rows):
+    if not CONFIG.get("USE_OPTIONAL_ML", False):
+        for r in rows:
+            r["ml_optional_enabled"] = False
+            r["ml_optional_score"] = ""
+            r["ml_blended_score"] = r.get("total_score", 0)
+        return rows
+    weight = float(CONFIG.get("ML_RERANK_WEIGHT", 0.20))
+    max_score = max([float(r.get("total_score", 0)) for r in rows] + [1.0])
+    new_rows = []
+    for r in rows:
+        rr = dict(r)
+        ml = optional_ml_surrogate_score(rr)
+        base_norm = float(rr.get("total_score", 0)) / max_score
+        rr["ml_optional_enabled"] = True
+        rr["ml_optional_score"] = ml
+        rr["ml_blended_score"] = (1.0 - weight) * base_norm + weight * ml
+        new_rows.append(rr)
+    new_rows.sort(key=lambda x: x.get("ml_blended_score", 0), reverse=True)
+    for i, r in enumerate(new_rows, 1):
+        r["ml_rerank_rank"] = i
+    return new_rows
+
+def export_optional_ml_outputs(output_dir, rows):
+    if not CONFIG.get("USE_OPTIONAL_ML", False):
+        return None
+    out = Path(output_dir)
+    reranked = apply_optional_ml_rerank(rows)
+    path = out / "ml_optional_reranked_candidates.csv"
+    write_csv(path, reranked[:int(CONFIG.get("FINAL_TOPK", 10))])
+    (out / "ML_OPTIONAL_README.md").write_text("""# Optional ML reranking\n\nGenerated only when `USE_OPTIONAL_ML=True`. The core engine does not depend on ML. Use real docking or experimental labels for formal ML claims.\n""", encoding="utf-8")
+    return str(path)
+
+def rebuild_output_zip(output_dir):
+    """Rebuild output ZIP after late optional exports are added."""
+    out = Path(output_dir)
+    zip_path = out.with_suffix(".zip")
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in out.rglob("*"):
+            if p.is_file():
+                z.write(p, p.relative_to(out))
+    return str(zip_path)
+
+
+def export_pseudodocking_colab_inputs(output_dir, rows):
+    if not CONFIG.get("PREPARE_PSEUDODOCKING_COLAB", False):
+        return None
+    receptor = str(CONFIG.get("RECEPTOR_SEQUENCE", "")).replace(" ", "").replace("\n", "").strip()
+    if not receptor:
+        return None
+    out = Path(output_dir) / "pseudodocking_colab"
+    out.mkdir(parents=True, exist_ok=True)
+    index_rows = []
+    top_n = int(CONFIG.get("PSEUDODOCKING_TOPK", min(10, len(rows))))
+    for i, r in enumerate(rows[:top_n]):
+        pep = r.get("docking_surrogate_sequence") or r.get("clean_sequence") or ""
+        fasta_name = f"complex_pep_{i+1:04d}.fasta"
+        (out / fasta_name).write_text(f">complex_pep_{i+1:04d}|receptor:peptide|rank={r.get('rank','')}|level={r.get('docking_ready_level','')}\n{receptor}:{pep}\n", encoding="utf-8")
+        index_rows.append({"id": f"complex_pep_{i+1:04d}", "rank": r.get("rank", ""), "sequence": r.get("sequence", ""), "surrogate_sequence": pep, "docking_ready_level": r.get("docking_ready_level", ""), "total_score": r.get("total_score", ""), "fasta_file": fasta_name, "interpretation": "Optional structure-plausibility screen; not final docking validation."})
+    write_csv(out / "pseudodocking_index.csv", index_rows)
+    (out / "PSEUDODOCKING_README.md").write_text("""# Optional Colab pseudo-docking inputs\n\nFASTA files use `receptor:peptide` formatting for AlphaFold/ColabFold-style structure plausibility screening. This is not a substitute for docking, MD, or experimental validation.\n""", encoding="utf-8")
+    return str(out)
+
+_ORIGINAL_RUN_FOR_OPTIONAL_PATCH = run
+
+def run(config=None, verbose=True, outdir=None):
+    update_config(config or {})
+    rows, progress, paths = _ORIGINAL_RUN_FOR_OPTIONAL_PATCH(CONFIG, verbose=verbose, outdir=outdir)
+    try:
+        ml_path = export_optional_ml_outputs(paths["output_dir"], rows)
+        if ml_path: paths["ml_optional_reranked_csv"] = ml_path
+    except Exception as e:
+        paths["ml_optional_error"] = str(e)
+    try:
+        pseudo_dir = export_pseudodocking_colab_inputs(paths["output_dir"], rows)
+        if pseudo_dir:
+            paths["pseudodocking_colab_dir"] = pseudo_dir
+            paths["pseudodocking_index_csv"] = str(Path(pseudo_dir) / "pseudodocking_index.csv")
+    except Exception as e:
+        paths["pseudodocking_error"] = str(e)
+    try:
+        paths["zip"] = rebuild_output_zip(paths["output_dir"])
+    except Exception as e:
+        paths["zip_rebuild_error"] = str(e)
+    return rows, progress, paths

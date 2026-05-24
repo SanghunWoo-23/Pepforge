@@ -1,0 +1,2 @@
+run_id,date,sequence,resin,scale_mmol,product_mw,planned_dmf_mL,actual_dmf_mL,planned_piperidine_mL,actual_piperidine_mL,planned_dcm_mL,actual_dcm_mL,yield_percent,purity_percent,failed,issue_note
+RUN-001,2026-05-16,Ac-EEMQRR-NH2,Amide,400,889.02,304800,,11200,,12000,,,,,

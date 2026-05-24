@@ -1,0 +1,2 @@
+candidate_id,sequence,clean_sequence,target_id,af3_confidence,af3_iptm,af3_ptm,af3_ranking_score,notes
+PDE_0001,ACDEFGHIK,ACDEFGHIK,TargetA,0.72,0.61,0.70,0.68,replace with AF3-derived values

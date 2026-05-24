@@ -1,0 +1,3 @@
+record_name,domain_name,start,end
+small_protein,N_terminal_region,1,250
+small_protein,C_terminal_region,251,585

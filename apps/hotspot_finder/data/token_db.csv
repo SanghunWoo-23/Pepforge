@@ -1,0 +1,178 @@
+token,class,model_token,charge,hydrophobicity,aromaticity,polarity,bulkiness,flexibility,is_terminal_only,is_sidechain_allowed,esm_policy,hotspot_penalty,hotspot_bonus,notes
+A,natural_L_amino_acid,A,0.0,1.8,0,0.0,1.0,0.5,0,1,auto,0.0,0.0,Alanine
+C,natural_L_amino_acid,C,0.0,2.5,0,0.5,1.4,0.3,0,1,auto,0.0,0.08,Cysteine
+D,natural_L_amino_acid,D,-1.0,-3.5,0,1.0,1.3,0.4,0,1,auto,0.0,0.03,Aspartate
+E,natural_L_amino_acid,E,-1.0,-3.5,0,1.0,1.6,0.5,0,1,auto,0.0,0.02,Glutamate
+F,natural_L_amino_acid,F,0.0,2.8,1,0.0,2.0,0.2,0,1,auto,0.0,0.08,Phenylalanine
+G,natural_L_amino_acid,G,0.0,-0.4,0,0.0,0.5,1.0,0,1,auto,0.0,0.0,Glycine
+H,natural_L_amino_acid,H,0.3,-3.2,1,1.0,1.8,0.4,0,1,auto,0.0,0.04,Histidine
+I,natural_L_amino_acid,I,0.0,4.5,0,0.0,1.8,0.2,0,1,auto,0.0,0.0,Isoleucine
+K,natural_L_amino_acid,K,1.0,-3.9,0,1.0,1.8,0.6,0,1,auto,0.0,0.05,Lysine
+L,natural_L_amino_acid,L,0.0,3.8,0,0.0,1.8,0.3,0,1,auto,0.0,0.0,Leucine
+M,natural_L_amino_acid,M,0.0,1.9,0,0.2,1.9,0.4,0,1,auto,0.0,0.0,Methionine
+N,natural_L_amino_acid,N,0.0,-3.5,0,1.0,1.4,0.5,0,1,auto,0.0,0.01,Asparagine
+P,natural_L_amino_acid,P,0.0,-1.6,0,0.0,1.2,0.1,0,1,auto,0.0,0.04,Proline
+Q,natural_L_amino_acid,Q,0.0,-3.5,0,1.0,1.6,0.5,0,1,auto,0.0,0.01,Glutamine
+R,natural_L_amino_acid,R,1.0,-4.5,0,1.0,2.0,0.6,0,1,auto,0.0,0.07,Arginine
+S,natural_L_amino_acid,S,0.0,-0.8,0,1.0,1.0,0.6,0,1,auto,0.0,0.0,Serine
+T,natural_L_amino_acid,T,0.0,-0.7,0,1.0,1.2,0.5,0,1,auto,0.0,0.0,Threonine
+V,natural_L_amino_acid,V,0.0,4.2,0,0.0,1.5,0.25,0,1,auto,0.0,0.0,Valine
+W,natural_L_amino_acid,W,0.0,-0.9,1,0.2,2.5,0.2,0,1,auto,0.0,0.1,Tryptophan
+Y,natural_L_amino_acid,Y,0.0,-1.3,1,1.0,2.1,0.3,0,1,auto,0.0,0.08,Tyrosine
+dA,D_amino_acid,A,0.0,1.8,0,0.0,1.0,0.5,0,1,auto,0.0,0.0,D-alanine
+dC,D_amino_acid,C,0.0,2.5,0,0.5,1.4,0.3,0,1,auto,0.0,0.04,D-cysteine
+dD,D_amino_acid,D,-1.0,-3.5,0,1.0,1.3,0.4,0,1,auto,0.0,0.0,D-aspartate
+dE,D_amino_acid,E,-1.0,-3.5,0,1.0,1.6,0.5,0,1,auto,0.0,0.0,D-glutamate
+dF,D_amino_acid,F,0.0,2.8,1,0.0,2.0,0.2,0,1,auto,0.0,0.05,D-phenylalanine
+dG,D_amino_acid,G,0.0,-0.4,0,0.0,0.5,1.0,0,1,auto,0.0,0.0,D-glycine
+dH,D_amino_acid,H,0.3,-3.2,1,1.0,1.8,0.4,0,1,auto,0.0,0.02,D-histidine
+dI,D_amino_acid,I,0.0,4.5,0,0.0,1.8,0.2,0,1,auto,0.0,0.0,D-isoleucine
+dK,D_amino_acid,K,1.0,-3.9,0,1.0,1.8,0.6,0,1,auto,0.0,0.03,D-lysine
+dL,D_amino_acid,L,0.0,3.8,0,0.0,1.8,0.3,0,1,auto,0.0,0.0,D-leucine
+dM,D_amino_acid,M,0.0,1.9,0,0.2,1.9,0.4,0,1,auto,0.0,0.0,D-methionine
+dN,D_amino_acid,N,0.0,-3.5,0,1.0,1.4,0.5,0,1,auto,0.0,0.0,D-asparagine
+dP,D_amino_acid,P,0.0,-1.6,0,0.0,1.2,0.1,0,1,auto,0.0,0.02,D-proline
+dQ,D_amino_acid,Q,0.0,-3.5,0,1.0,1.6,0.5,0,1,auto,0.0,0.0,D-glutamine
+dR,D_amino_acid,R,1.0,-4.5,0,1.0,2.0,0.6,0,1,auto,0.0,0.04,D-arginine
+dS,D_amino_acid,S,0.0,-0.8,0,1.0,1.0,0.6,0,1,auto,0.0,0.0,D-serine
+dT,D_amino_acid,T,0.0,-0.7,0,1.0,1.2,0.5,0,1,auto,0.0,0.0,D-threonine
+dV,D_amino_acid,V,0.0,4.2,0,0.0,1.5,0.25,0,1,auto,0.0,0.0,D-valine
+dW,D_amino_acid,W,0.0,-0.9,1,0.2,2.5,0.2,0,1,auto,0.0,0.06,D-tryptophan
+dY,D_amino_acid,Y,0.0,-1.3,1,1.0,2.1,0.3,0,1,auto,0.0,0.05,D-tyrosine
+Hyp,non_natural_amino_acid,P,0.0,-1.6,0,0.5,1.3,0.1,0,1,auto,0.0,0.03,Hydroxyproline mapped to P
+Nle,non_natural_amino_acid,L,0.0,3.8,0,0.0,1.8,0.3,0,1,auto,0.0,0.0,Norleucine mapped to L
+Nva,non_natural_amino_acid,V,0.0,4.0,0,0.0,1.6,0.3,0,1,auto,0.0,0.0,Norvaline mapped to V
+Orn,non_natural_amino_acid,K,1.0,-3.0,0,1.0,1.6,0.6,0,1,auto,0.0,0.03,Ornithine mapped to K
+Cit,non_natural_amino_acid,R,0.0,-3.0,0,1.0,1.9,0.5,0,1,auto,0.0,0.02,Citrulline mapped to R
+Aib,non_natural_amino_acid,A,0.0,1.0,0,0.0,1.5,0.1,0,1,auto,0.0,0.03,Aib mapped to A
+bAla,non_natural_amino_acid,A,0.0,0.6,0,0.0,1.1,0.8,0,1,auto,0.0,0.0,Beta-alanine mapped to A
+Sar,non_natural_amino_acid,G,0.0,-0.2,0,0.0,0.8,0.7,0,1,auto,0.0,0.0,Sarcosine mapped to G
+Nal,non_natural_amino_acid,F,0.0,3.0,1,0.0,2.8,0.2,0,1,auto,0.0,0.08,Naphthylalanine mapped to F
+Cha,non_natural_amino_acid,F,0.0,3.3,0,0.0,2.3,0.2,0,1,auto,0.0,0.04,Cyclohexylalanine mapped to F
+Phg,non_natural_amino_acid,F,0.0,2.5,1,0.0,1.9,0.2,0,1,auto,0.0,0.05,Phenylglycine mapped to F
+Dab,non_natural_amino_acid,K,1.0,-2.8,0,1.0,1.4,0.6,0,1,auto,0.0,0.02,Diaminobutyric acid mapped to K
+Dap,non_natural_amino_acid,K,1.0,-2.8,0,1.0,1.3,0.6,0,1,auto,0.0,0.02,Diaminopropionic acid mapped to K
+Ahx,linker,X,0.0,0.0,0,0.0,1.8,1.0,0,0,auto,0.6,0.0,Aminohexanoic acid linker
+AEEA,linker,X,0.0,0.0,0,0.5,2.0,1.0,0,0,auto,0.7,0.0,AEEA linker
+PEG2,linker,X,0.0,0.0,0,0.5,1.5,1.0,0,0,auto,0.75,0.0,PEG2 linker
+PEG4,linker,X,0.0,0.0,0,0.5,2.0,1.0,0,0,auto,0.8,0.0,PEG4 linker
+PEG8,linker,X,0.0,0.0,0,0.5,3.0,1.0,0,0,auto,0.85,0.0,PEG8 linker
+GGGGS,linker,GGGGS,0.0,-0.5,0,0.4,1.0,1.0,0,0,expand:GGGGS,0.15,0.0,Peptide linker expanded as GGGGS
+EAAAK,linker,EAAAK,0.0,0.2,0,0.5,1.5,0.4,0,0,expand:EAAAK,0.1,0.0,Helical peptide linker expanded as EAAAK
+Ac,N_terminal_modification,,0.0,0.0,0,0.0,0.0,0.0,1,0,exclude,0.0,0.0,N-terminal acetylation
+Fmoc,N_terminal_modification,,0.0,0.0,1,0.0,2.5,0.0,1,0,exclude,0.0,0.0,Fmoc group
+Boc,N_terminal_modification,,0.0,0.0,0,0.0,1.5,0.0,1,0,exclude,0.0,0.0,Boc group
+Pal,N_terminal_modification,,0.0,4.5,0,0.0,3.0,0.0,1,0,exclude,0.0,0.0,Palmitoyl group
+Myr,N_terminal_modification,,0.0,4.2,0,0.0,2.8,0.0,1,0,exclude,0.0,0.0,Myristoyl group
+CHS,N_terminal_modification,,0.0,4.5,0,0.0,3.5,0.0,1,0,exclude,0.0,0.0,Cholesteryl hemisuccinate
+Biotin,N_terminal_modification,,0.0,0.5,0,0.5,2.0,0.0,1,0,exclude,0.0,0.0,Biotin terminal tag
+NH2,C_terminal_modification,,0.0,0.0,0,0.0,0.0,0.0,1,0,exclude,0.0,0.0,C-terminal amide
+CONH2,C_terminal_modification,,0.0,0.0,0,0.0,0.0,0.0,1,0,exclude,0.0,0.0,C-terminal amide synonym
+OH,C_terminal_modification,,0.0,0.0,0,0.0,0.0,0.0,1,0,exclude,0.0,0.0,C-terminal hydroxyl/free acid notation
+COOH,C_terminal_modification,,0.0,0.0,0,0.0,0.0,0.0,1,0,exclude,0.0,0.0,C-terminal carboxyl
+FITC,label,,0.0,0.0,1,0.3,3.0,0.0,0,0,exclude,0.0,0.0,FITC label
+FAM,label,,0.0,0.0,1,0.3,2.8,0.0,0,0,exclude,0.0,0.0,FAM label
+Cy3,label,,0.0,0.0,1,0.2,3.2,0.0,0,0,exclude,0.0,0.0,Cy3 label
+Cy5,label,,0.0,0.0,1,0.2,3.5,0.0,0,0,exclude,0.0,0.0,Cy5 label
+TAMRA,label,,0.0,0.0,1,0.2,3.2,0.0,0,0,exclude,0.0,0.0,TAMRA label
+Hse,non_natural_amino_acid,S,0.0,-0.8,0,1.0,1.3,0.5,0,1,auto,0.0,0.01,Homoserine mapped to S
+Hsl,non_natural_amino_acid,S,0.0,-0.8,0,1.0,1.4,0.5,0,1,auto,0.0,0.01,Homoserine lactone-like token mapped to S
+Hyl,non_natural_amino_acid,K,1.0,-3.0,0,1.0,2.0,0.6,0,1,auto,0.0,0.04,Hydroxylysine mapped to K
+Mse,non_natural_amino_acid,M,0.0,1.9,0,0.2,2.0,0.4,0,1,auto,0.0,0.01,Selenomethionine mapped to M
+Sec,non_natural_amino_acid,C,0.0,2.0,0,0.5,1.5,0.3,0,1,auto,0.0,0.06,Selenocysteine mapped to C
+U,non_natural_amino_acid,C,0.0,2.0,0,0.5,1.5,0.3,0,1,auto,0.0,0.06,Selenocysteine one-letter token mapped to C
+Pyl,non_natural_amino_acid,K,1.0,-2.5,0,1.0,2.8,0.5,0,1,auto,0.0,0.05,Pyrrolysine mapped to K
+O,non_natural_amino_acid,K,1.0,-2.5,0,1.0,2.8,0.5,0,1,auto,0.0,0.05,Pyrrolysine one-letter token mapped to K
+MeA,non_natural_amino_acid,A,0.0,1.8,0,0.0,1.2,0.4,0,1,auto,0.0,0.01,N-methyl alanine mapped to A
+MeG,non_natural_amino_acid,G,0.0,-0.4,0,0.0,0.8,0.8,0,1,auto,0.0,0.01,N-methyl glycine/sarcosine-like mapped to G
+MeF,non_natural_amino_acid,F,0.0,2.8,1,0.0,2.2,0.2,0,1,auto,0.0,0.05,N-methyl phenylalanine mapped to F
+MeL,non_natural_amino_acid,L,0.0,3.8,0,0.0,2.0,0.25,0,1,auto,0.0,0.02,N-methyl leucine mapped to L
+MeK,non_natural_amino_acid,K,1.0,-3.5,0,1.0,2.0,0.5,0,1,auto,0.0,0.03,N-methyl lysine-like mapped to K
+MeR,non_natural_amino_acid,R,1.0,-4.0,0,1.0,2.2,0.5,0,1,auto,0.0,0.04,Methyl arginine-like mapped to R
+AcK,non_natural_amino_acid,K,0.0,-2.0,0,1.0,2.1,0.5,0,1,auto,0.0,0.03,Acetyl-lysine residue token mapped to K
+MeK1,non_natural_amino_acid,K,1.0,-3.0,0,1.0,2.0,0.5,0,1,auto,0.0,0.03,Monomethyl lysine mapped to K
+MeK2,non_natural_amino_acid,K,1.0,-2.7,0,1.0,2.1,0.5,0,1,auto,0.0,0.03,Dimethyl lysine mapped to K
+MeK3,non_natural_amino_acid,K,1.0,-2.4,0,1.0,2.2,0.5,0,1,auto,0.0,0.04,Trimethyl lysine mapped to K
+pS,non_natural_amino_acid,S,-2.0,-2.3,0,1.0,1.5,0.5,0,1,auto,0.0,0.06,Phosphoserine token mapped to S
+pT,non_natural_amino_acid,T,-2.0,-2.2,0,1.0,1.7,0.45,0,1,auto,0.0,0.06,Phosphothreonine token mapped to T
+pY,non_natural_amino_acid,Y,-2.0,-2.4,1,1.0,2.5,0.25,0,1,auto,0.0,0.08,Phosphotyrosine token mapped to Y
+TyrP,non_natural_amino_acid,Y,-2.0,-2.4,1,1.0,2.5,0.25,0,1,auto,0.0,0.08,Phosphotyrosine synonym mapped to Y
+Sep,non_natural_amino_acid,S,-2.0,-2.3,0,1.0,1.5,0.5,0,1,auto,0.0,0.06,Phosphoserine synonym mapped to S
+Tpo,non_natural_amino_acid,T,-2.0,-2.2,0,1.0,1.7,0.45,0,1,auto,0.0,0.06,Phosphothreonine synonym mapped to T
+Phe4F,non_natural_amino_acid,F,0.0,3.0,1,0.0,2.1,0.2,0,1,auto,0.0,0.05,4-fluorophenylalanine mapped to F
+Fpa,non_natural_amino_acid,F,0.0,3.0,1,0.0,2.1,0.2,0,1,auto,0.0,0.05,Fluorophenylalanine mapped to F
+Tyr3I,non_natural_amino_acid,Y,0.0,0.2,1,1.0,2.8,0.25,0,1,auto,0.0,0.06,Iodotyrosine-like token mapped to Y
+Igl,non_natural_amino_acid,Y,0.0,0.2,1,1.0,2.8,0.25,0,1,auto,0.0,0.06,Iodotyrosine-like token mapped to Y
+Bip,non_natural_amino_acid,F,0.0,3.5,1,0.0,3.0,0.2,0,1,auto,0.0,0.07,Biphenylalanine mapped to F
+Dpa,non_natural_amino_acid,F,0.0,2.8,1,0.0,2.5,0.2,0,1,auto,0.0,0.05,Diphenylalanine-like token mapped to F
+Tle,non_natural_amino_acid,L,0.0,4.0,0,0.0,2.2,0.2,0,1,auto,0.0,0.02,Tert-leucine mapped to L
+Abu,non_natural_amino_acid,A,0.0,2.0,0,0.0,1.2,0.5,0,1,auto,0.0,0.0,Aminobutyric acid mapped to A
+Aad,non_natural_amino_acid,E,-1.0,-3.0,0,1.0,1.8,0.5,0,1,auto,0.0,0.02,Aminoadipic acid mapped to E
+Gla,non_natural_amino_acid,E,-2.0,-4.0,0,1.0,2.0,0.4,0,1,auto,0.0,0.04,Gamma-carboxyglutamate mapped to E
+Hph,non_natural_amino_acid,F,0.0,2.7,1,0.0,2.0,0.2,0,1,auto,0.0,0.05,Homophenylalanine mapped to F
+hPhe,non_natural_amino_acid,F,0.0,2.7,1,0.0,2.0,0.2,0,1,auto,0.0,0.05,Homophenylalanine mapped to F
+Oic,non_natural_amino_acid,P,0.0,0.8,0,0.0,2.0,0.1,0,1,auto,0.0,0.04,Octahydroindole carboxylic acid mapped to P
+Bzt,non_natural_amino_acid,F,0.0,2.5,1,0.0,2.1,0.2,0,1,auto,0.0,0.05,Benzothienylalanine-like mapped to F
+Thz,non_natural_amino_acid,C,0.0,0.5,0,0.5,1.4,0.2,0,1,auto,0.0,0.04,Thiazolidine carboxylic acid mapped to C
+Sta,non_natural_amino_acid,A,0.0,1.5,0,0.5,2.2,0.4,0,1,auto,0.0,0.03,Statine-like residue approximated as A
+Pra,non_natural_amino_acid,A,0.0,1.2,0,0.0,1.3,0.5,0,1,auto,0.0,0.01,Propargylglycine mapped to A
+Hpg,non_natural_amino_acid,Y,0.0,-1.0,1,1.0,2.0,0.3,0,1,auto,0.0,0.06,Hydroxyphenylglycine mapped to Y
+Dht,non_natural_amino_acid,Y,0.0,-1.2,1,1.0,2.1,0.3,0,1,auto,0.0,0.06,Dihydroxyphenylalanine-like token mapped to Y
+Dopa,non_natural_amino_acid,Y,0.0,-1.2,1,1.0,2.1,0.3,0,1,auto,0.0,0.06,DOPA mapped to Y
+Bpa,non_natural_amino_acid,F,0.0,2.6,1,0.0,2.8,0.2,0,1,auto,0.0,0.07,Benzoylphenylalanine photo-crosslinker mapped to F
+AzF,non_natural_amino_acid,F,0.0,2.5,1,0.0,2.4,0.2,0,1,auto,0.0,0.06,Azidophenylalanine mapped to F
+pAzF,non_natural_amino_acid,F,0.0,2.5,1,0.0,2.4,0.2,0,1,auto,0.0,0.06,p-azidophenylalanine mapped to F
+Aha,non_natural_amino_acid,M,0.0,1.6,0,0.2,1.8,0.5,0,1,auto,0.0,0.01,Azidohomoalanine mapped to M
+HpgAlkyne,non_natural_amino_acid,M,0.0,1.4,0,0.2,1.8,0.5,0,1,auto,0.0,0.01,Homopropargylglycine mapped to M
+dHyp,non_natural_amino_acid,P,0.0,-1.6,0,0.5,1.3,0.1,0,1,auto,0.0,0.02,D-hydroxyproline mapped to P
+dNle,non_natural_amino_acid,L,0.0,3.8,0,0.0,1.8,0.3,0,1,auto,0.0,0.0,D-norleucine mapped to L
+dOrn,non_natural_amino_acid,K,1.0,-3.0,0,1.0,1.6,0.6,0,1,auto,0.0,0.02,D-ornithine mapped to K
+dAib,non_natural_amino_acid,A,0.0,1.0,0,0.0,1.5,0.1,0,1,auto,0.0,0.02,D-Aib approximation mapped to A
+PEG1,linker,X,0.0,0.0,0,0.0,0.8,1.0,0,0,auto,0.65,0.0,PEG1 linker
+PEG3,linker,X,0.0,0.0,0,0.0,1.4,1.0,0,0,auto,0.75,0.0,PEG3 linker
+PEG6,linker,X,0.0,0.0,0,0.0,2.2,1.0,0,0,auto,0.85,0.0,PEG6 linker
+PEG12,linker,X,0.0,0.0,0,0.0,3.5,1.0,0,0,auto,0.9,0.0,PEG12 linker
+PEG16,linker,X,0.0,0.0,0,0.0,4.0,1.0,0,0,auto,0.92,0.0,PEG16 linker
+Aca,linker,X,0.0,0.0,0,0.0,1.8,1.0,0,0,auto,0.6,0.0,Aminocaproic acid linker synonym
+GlyGly,linker,GG,0.0,-0.4,0,0.0,1.0,1.0,0,0,auto,0.1,0.0,Dipeptide linker expanded as GG
+GG,linker,GG,0.0,-0.4,0,0.0,1.0,1.0,0,0,auto,0.1,0.0,Dipeptide linker expanded as GG
+GSG,linker,GSG,0.0,-0.7,0,1.0,1.1,1.0,0,0,auto,0.08,0.0,Peptide linker expanded as GSG
+GGG,linker,GGG,0.0,-0.4,0,0.0,1.1,1.0,0,0,auto,0.1,0.0,Peptide linker expanded as GGG
+GGGS,linker,GGGS,0.0,-0.5,0,0.2,1.2,1.0,0,0,auto,0.1,0.0,Peptide linker expanded as GGGS
+GS,linker,GS,0.0,-0.6,0,0.5,0.9,1.0,0,0,auto,0.08,0.0,Peptide linker expanded as GS
+SGG,linker,SGG,0.0,-0.6,0,0.5,1.1,1.0,0,0,auto,0.08,0.0,Peptide linker expanded as SGG
+G4S,linker,GGGGS,0.0,-0.5,0,0.2,1.3,1.0,0,0,auto,0.08,0.0,G4S linker expanded as GGGGS
+GS4,linker,GSGSGSGS,0.0,-0.6,0,0.5,2.0,1.0,0,0,auto,0.08,0.0,Flexible GS repeat expanded
+GSGSGS,linker,GSGSGS,0.0,-0.6,0,0.5,2.0,1.0,0,0,auto,0.08,0.0,Flexible GS repeat expanded
+AlaAla,linker,AA,0.0,1.8,0,0.0,2.0,0.5,0,0,auto,0.1,0.0,AA linker expanded as AA
+KAPA,linker,KAPA,1.0,-1.0,0,1.0,2.0,0.5,0,0,auto,0.05,0.0,Peptide linker motif
+Ste,N_terminal_modification,,0.0,4.2,0,0.0,3.0,0.2,1,0,exclude,0.0,0.0,Stearoyl N-terminal modification
+Ole,N_terminal_modification,,0.0,4.0,0,0.0,3.0,0.2,1,0,exclude,0.0,0.0,Oleoyl N-terminal modification
+Palm,N_terminal_modification,,0.0,4.2,0,0.0,3.0,0.2,1,0,exclude,0.0,0.0,Palmitoyl synonym
+Lauroyl,N_terminal_modification,,0.0,3.8,0,0.0,2.7,0.2,1,0,exclude,0.0,0.0,Lauroyl N-terminal modification
+Oct,N_terminal_modification,,0.0,3.0,0,0.0,2.2,0.2,1,0,exclude,0.0,0.0,Octanoyl N-terminal modification
+Caf,N_terminal_modification,,0.0,0.5,1,0.5,2.2,0.3,1,0,exclude,0.0,0.02,Caffeic acid-like N-terminal modification
+Nic,N_terminal_modification,,0.0,0.3,1,0.5,1.8,0.3,1,0,exclude,0.0,0.02,Nicotinic acid-like N-terminal modification
+Gal,N_terminal_modification,,0.0,-1.0,0,1.0,2.0,0.6,1,0,exclude,0.0,0.01,Galactose-like terminal modification
+Glc,N_terminal_modification,,0.0,-1.0,0,1.0,2.0,0.6,1,0,exclude,0.0,0.01,Glucose-like terminal modification
+Man,N_terminal_modification,,0.0,-1.0,0,1.0,2.0,0.6,1,0,exclude,0.0,0.01,Mannose-like terminal modification
+Desthiobiotin,N_terminal_modification,,0.0,1.0,0,0.7,2.3,0.4,1,0,exclude,0.0,0.02,Desthiobiotin tag
+Chol,N_terminal_modification,,0.0,4.5,0,0.0,3.5,0.1,1,0,exclude,0.0,0.02,Cholesterol-like terminal modification
+N3,N_terminal_modification,,0.0,0.2,0,0.0,0.7,0.5,1,0,exclude,0.0,0.0,Azide terminal handle
+Alkyne,N_terminal_modification,,0.0,0.4,0,0.0,0.7,0.5,1,0,exclude,0.0,0.0,Alkyne terminal handle
+Azide,N_terminal_modification,,0.0,0.2,0,0.0,0.7,0.5,1,0,exclude,0.0,0.0,Azide terminal handle
+Mal,N_terminal_modification,,0.0,0.5,0,0.5,1.0,0.4,1,0,exclude,0.0,0.0,Maleimide terminal handle
+OMe,C_terminal_modification,,0.0,0.5,0,0.0,0.7,0.4,1,0,exclude,0.0,0.0,C-terminal methyl ester
+OtBu,C_terminal_modification,,0.0,2.0,0,0.0,1.6,0.3,1,0,exclude,0.0,0.0,C-terminal tert-butyl ester
+CO2H,C_terminal_modification,,-1.0,-3.0,0,1.0,1.0,0.5,1,0,exclude,0.0,0.0,C-terminal acid synonym
+Amide,C_terminal_modification,,0.0,-1.0,0,1.0,1.0,0.5,1,0,exclude,0.0,0.0,C-terminal amide synonym
+Cy5.5,label,,0.0,1.5,1,0.5,3.0,0.3,0,0,exclude,0.0,0.02,Cy5.5 fluorescent label
+Cy7,label,,0.0,1.8,1,0.5,3.2,0.3,0,0,exclude,0.0,0.02,Cy7 fluorescent label
+ROX,label,,0.0,1.2,1,0.5,2.8,0.3,0,0,exclude,0.0,0.02,ROX fluorescent label
+Dansyl,label,,0.0,1.5,1,0.3,2.5,0.3,0,0,exclude,0.0,0.02,Dansyl label
+Dabcyl,label,,0.0,1.5,1,0.3,2.5,0.3,0,0,exclude,0.0,0.02,Dabcyl quencher
+NBD,label,,0.0,0.8,1,0.6,1.8,0.4,0,0,exclude,0.0,0.02,NBD label
+BODIPY,label,,0.0,1.5,1,0.3,2.8,0.3,0,0,exclude,0.0,0.02,BODIPY label
+Fluorescein,label,,0.0,0.8,1,0.7,2.4,0.4,0,0,exclude,0.0,0.02,Fluorescein label
+Rhodamine,label,,0.0,1.0,1,0.7,2.7,0.4,0,0,exclude,0.0,0.02,Rhodamine label
+TMR,label,,0.0,1.0,1,0.7,2.7,0.4,0,0,exclude,0.0,0.02,Tetramethylrhodamine label synonym
