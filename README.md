@@ -5,7 +5,6 @@
 **Public Research Release 1.0.0**
 
 **Author:** Sanghun Woo  
-**Affiliation:** Department of Biochemical Engineering, Korea Polytechnic University  
 **Repository:** `https://github.com/poowsh1407/Pepforge`
 
 ---
