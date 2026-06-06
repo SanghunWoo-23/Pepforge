@@ -698,31 +698,81 @@ Public-safe example inputs and outputs.
 
 ## Installation
 
-From the root Pepforge folder:
+Pepforge can be used in two ways:
+
+1. Run from source using Python.
+2. Install the prebuilt Windows installer from the GitHub Releases page.
+
+For most users who only want to try the program, the Windows installer is recommended. For users who want to inspect, modify, or extend the source code, the Python source-based method is recommended.
+
+### Option 1. Run from source
+
+Pepforge can be run directly from source using Python.
+
+First, clone or download this repository and open a terminal in the root Pepforge folder.
+
+Install the required Python packages:
 
 ```bash
 pip install -r requirements.txt
-python main\_launcher.py
 ```
 
-If multiple Python versions are installed:
+Run the main launcher:
 
 ```bash
-py main\_launcher.py
+python main_launcher.py
 ```
 
-Individual module launch examples:
+If multiple Python versions are installed on Windows, use:
 
 ```bash
-python main\_launcher.py --tool design
-python main\_launcher.py --tool spps
-python main\_launcher.py --tool docking
+py main_launcher.py
 ```
-```For users:
-Run from source using Python.
 
-For Windows installer:
-A prebuilt installer will be provided in the GitHub Releases section when available.
+Individual modules can also be launched from the command line:
+
+```bash
+python main_launcher.py --tool design
+python main_launcher.py --tool spps
+python main_launcher.py --tool docking
+```
+
+If the program does not start, check that Python is installed correctly and that all dependencies were installed from `requirements.txt`.
+
+Runtime error logs may be written to:
+
+```text
+outputs/runtime_logs/
+```
+
+### Option 2. Windows installer
+
+A prebuilt Windows installer is provided through the GitHub Releases page.
+
+Download the installer from the latest release:
+
+```text
+Pepforge_Setup_v1.0.0.exe
+```
+
+After downloading the installer, run it and follow the installation wizard.
+
+The installer version is intended for users who want to run Pepforge without manually setting up a Python environment.
+
+Important note:
+
+The installer file is not stored directly inside the source-code repository because installer files can be large. Instead, the installer is attached as a release asset on the GitHub Releases page.
+
+If the installer is not available or does not work on your system, use the source-based Python installation method above.
+
+### Recommended installation choice
+
+Use the Windows installer if you want the easiest way to run Pepforge.
+
+Use the Python source method if you want to inspect the code, modify the workflow, run tests, or contribute to development.
+
+---
+
 ```
 
 \---
