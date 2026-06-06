@@ -718,6 +718,12 @@ python main\_launcher.py --tool design
 python main\_launcher.py --tool spps
 python main\_launcher.py --tool docking
 ```
+```For users:
+Run from source using Python.
+
+For Windows installer:
+A prebuilt installer will be provided in the GitHub Releases section when available.
+```
 
 \---
 
