@@ -1,414 +1,1638 @@
 Pepforge 사용자 매뉴얼
-=====================
+Public Research Release 1.0.0
+MANUAL_KO.txt
+
+펩타이드 연구 워크벤치 Pepforge의 A to Z 실사용 매뉴얼
+
+작성자
+우상훈
+
+프로젝트
+Pepforge: Hotspot 분석, SPPS-aware peptide design, 합성 계획, docking-oriented screening, contact analysis, molecular dynamics validation bridging을 통합한 peptide research workbench
+
+
+================================================================================
+목차
+================================================================================
+
+1. 이 매뉴얼의 목적
+2. Pepforge란 무엇인가
+3. Pepforge가 아닌 것
+4. 권장 사용 흐름
+5. 설치 및 첫 실행
+6. 저장소 및 폴더 구조
+7. Main Launcher
+8. Hotspot Finder
+9. Peptide Design Engine
+10. SPPS Planner
+11. Docking and Molecular Dynamics Workbench
+12. Peptide 표기법
+13. D-form, non-natural amino acid, linker, chemical 표기
+14. Ac 및 NH2 terminal modification 처리
+15. SPPS-aware design logic
+16. Material usage 계산 logic
+17. Docking input logic
+18. Affinity report 해석
+19. Contact analysis 해석
+20. Molecular dynamics screening 해석
+21. All-atom validation bridge
+22. Export folder 및 output 관리
+23. 이전 output folder 불러오기
+24. Citation policy 및 학술 사용
+25. 실전 예시
+26. 문제 해결
+27. GitHub public release 권장 절차
+28. 한계점
+29. 사용 전 체크리스트
+30. 최종 정리
+
+
+================================================================================
+1. 이 매뉴얼의 목적
+================================================================================
+
+이 매뉴얼은 Pepforge를 처음 사용하는 사람이 프로그램을 설치하고, 각 기능을 실행하고, 결과를 해석하고, GitHub 공개 및 학술적 인용까지 이어갈 수 있도록 작성한 실사용 설명서이다.
+
+Pepforge는 단순한 peptide sequence generator가 아니라, peptide research workflow를 하나로 묶기 위한 도구이다. 따라서 이 매뉴얼은 단순 버튼 설명만 하는 것이 아니라 다음 내용을 함께 설명한다.
 
-Integrated Peptide Research Workflow Platform
-Hot Spot Finder / Peptide Design Engine / SPPS Planner
+- 어떤 입력을 넣어야 하는가
+- 어떤 기능을 어떤 순서로 써야 하는가
+- 결과값은 어떻게 해석해야 하는가
+- SPPS material 계산값은 어떤 의미인가
+- Docking Workbench의 Delta G와 Kd는 어떤 수준의 값인가
+- D-form, non-natural amino acid, linker, chemical이 들어간 peptide를 어떻게 다루는가
+- output folder는 어떻게 관리하는가
+- 논문, 발표, 보고서, 포트폴리오에서 Pepforge를 어떻게 인용해야 하는가
 
-1. 개요
--------
+이 매뉴얼은 peptide chemistry, SPPS, docking, molecular dynamics 전체를 이론적으로 완전히 설명하는 교과서는 아니다. 대신 Pepforge를 실제로 사용하면서 사용자가 헷갈릴 수 있는 부분을 최대한 구체적으로 풀어 설명하는 것을 목표로 한다.
 
-Pepforge는 peptide 연구 workflow를 통합적으로 지원하기 위한 연구용 소프트웨어이다. 프로그램은 세 가지 주요 모듈로 구성된다.
 
-1. Hot Spot Finder
-   단백질 sequence에서 hotspot 후보 residue 또는 local hotspot region을 탐색한다.
+================================================================================
+2. Pepforge란 무엇인가
+================================================================================
 
-2. Peptide Design Engine
-   motif, chemistry option, label, tag, linker, non-natural amino acid, D-amino acid, optional ML-prior 등을 고려하여 peptide candidate를 생성한다.
+Pepforge는 peptide 연구를 위한 통합 research workbench이다.
 
-3. SPPS Planner
-   입력한 peptide sequence를 바탕으로 C-terminal에서 N-terminal 방향의 SPPS synthesis table을 생성한다. Coupling cocktail, material usage, deprotection, wash, branch mode, checklist, operation form, ML-ready log 등을 포함한다.
+일반적인 peptide 연구에서는 다음 단계들이 서로 분리되어 있는 경우가 많다.
 
-Pepforge는 단순한 peptide generator가 아니라 sequence analysis, candidate design, synthesis planning, material usage, checklist, experimental logging을 연결하는 design-to-synthesis platform이다.
+1. Target 또는 peptide sequence 분석
+2. Hotspot 또는 motif 후보 탐색
+3. Peptide 후보 생성
+4. 합성 가능성 검토
+5. SPPS reagent 및 solvent 계산
+6. Target-peptide contact 분석
+7. Docking-like screening
+8. Molecular dynamics validation 준비
+9. 결과 정리 및 citation
 
-2. 설치 및 실행
----------------
+Pepforge는 이 흐름을 하나의 프로그램 안에서 가능한 한 자연스럽게 연결하려는 목적으로 만들어졌다.
 
-2.1 설치파일 만들기
+즉, Pepforge의 핵심 질문은 다음과 같다.
 
-Pepforge 폴더 안에서 다음 파일을 실행한다.
+- 이 peptide 후보는 서열상 의미가 있는가?
+- 이 peptide 후보는 SPPS로 합성 가능한가?
+- N-terminal 또는 C-terminal modification이 화학적으로 말이 되는가?
+- Ac, NH2, D-form, non-natural amino acid, linker, label이 제대로 인식되는가?
+- 실제 합성할 때 필요한 amino acid, reagent, solvent는 어느 정도인가?
+- Target과 peptide 사이에 어떤 residue contact가 생기는가?
+- 추정 Delta G와 Kd는 어느 정도이며, 후보 비교에 사용할 수 있는가?
+- 외부 all-atom MD나 실험 검증으로 넘길 수 있는 output이 생성되는가?
+- 학술 작업에 사용할 경우 citation이 보존되는가?
 
-INSTALL_BUILD_TOOLS_AND_BUILD.bat
+Pepforge는 이러한 질문들을 한 번에 다루기 위해 만든 peptide research support tool이다.
 
-성공하면 설치파일이 다음 위치에 생성된다.
 
-installer/output/Pepforge_Setup_v0.1.0.exe
+================================================================================
+3. Pepforge가 아닌 것
+================================================================================
 
-2.2 개발 모드 실행
+Pepforge는 다음을 대체하지 않는다.
 
-개발 또는 테스트 목적이라면 다음 파일을 실행한다.
+- 실제 peptide 합성 실험
+- HPLC 정제
+- LC-MS 또는 MALDI-TOF 확인
+- SPR, ITC, MST, ELISA 등의 결합 실험
+- 세포 실험
+- cryo-EM, NMR, X-ray crystallography
+- full all-atom molecular dynamics
+- AutoDock Vina, PRODIGY, GROMACS, AMBER, NAMD 같은 전문 외부 도구
+- 실험적으로 검증된 binding affinity
+- 임상적 의사결정
 
-RUN_SOURCE_DEV.bat
+Pepforge의 docking 및 molecular dynamics 관련 결과는 screening 및 triage 목적이다. 프로그램에서 Delta G와 Kd를 출력하더라도, 이는 실험값이 아니라 내부 contact-based estimate이다.
 
-또는 다음 명령을 사용할 수 있다.
+따라서 Pepforge 결과를 논문이나 최종 연구 주장에 사용할 경우, 외부 all-atom MD, docking server, 또는 실험적 검증이 필요하다.
 
-python main_launcher.py
 
-2.3 설치 후 실행
+================================================================================
+4. 권장 사용 흐름
+================================================================================
 
-설치 후 바탕화면 또는 시작 메뉴에서 Pepforge를 실행한다. 메인 런처에서 다음 모듈 중 하나를 선택한다.
+Pepforge를 사용하는 권장 순서는 다음과 같다.
 
-Hot Spot Finder
-Peptide Design Engine
-SPPS Planner
+1단계. Target 정보 준비
+    Target protein sequence, FASTA, PDB, mmCIF 중 하나를 준비한다.
 
-3. Hot Spot Finder
-------------------
+2단계. Hotspot 후보 확인
+    Hotspot Finder를 사용하여 interaction에 중요할 가능성이 있는 residue 또는 motif 후보를 확인한다.
 
-3.1 목적
+3단계. Peptide 후보 생성 또는 평가
+    Peptide Design Engine을 사용하여 candidate peptide를 생성하거나 기존 후보를 평가한다.
 
-Hot Spot Finder는 protein sequence에서 candidate hotspot residue 또는 local hotspot region을 찾는 전용 모듈이다. 이 결과는 Peptide Design Engine에서 motif 또는 constraint 후보로 사용할 수 있다.
+4단계. SPPS 가능성 확인
+    SPPS-aware filter를 통해 합성상 문제가 큰 후보를 거른다.
 
-3.2 입력
+5단계. 합성 계획 수립
+    SPPS Planner를 사용하여 synthesis plan, material usage, checklist를 만든다.
 
-Protein sequence를 입력한다. FASTA header가 있거나 순수 sequence만 있어도 사용할 수 있다.
+6단계. 구조 기반 screening
+    Docking Workbench를 사용하여 target-peptide contact, estimated Delta G, estimated Kd, interaction class를 확인한다.
 
-3.3 출력
+7단계. 결과 export
+    CSV, PDB, citation notice, validation package 등을 output folder로 저장한다.
 
-출력 예:
+8단계. 외부 검증
+    실제 논문급 affinity 또는 구조 검증이 필요하면 GROMACS, AMBER, NAMD, PRODIGY, 실험 검증으로 이어간다.
 
-(14K), (17Y), (19R)
+9단계. Citation
+    Pepforge를 사용한 결과가 보고서, 논문, 학위논문, 포스터, 발표, 소프트웨어에 들어간다면 repository와 release를 인용한다.
 
-14는 N-terminal 기준 1부터 센 residue position이고, K는 해당 위치의 amino acid이다.
 
-Local hotspot region 예:
+================================================================================
+5. 설치 및 첫 실행
+================================================================================
 
-(158W), (161Y), (163Y), (167R), (168R)
+권장 환경:
 
-이는 local window 안에서 hotspot-like context를 가진 대표 residue들을 의미한다.
+- Windows 10 또는 Windows 11
+- Python 3.10 이상
+- pip
+- Git 또는 GitHub Desktop
+- 가능하면 virtual environment 사용
 
-3.4 해석
+기본 설치 방법:
 
-Hot Spot Finder score는 상대적 우선순위 신호이다. 실험적으로 검증된 binding residue라고 해석하면 안 된다. 구조 정보, docking, conservation, 실험 결과와 함께 검토하는 것이 좋다.
+1. GitHub에서 Pepforge repository를 clone하거나 ZIP을 다운로드한다.
+2. Pepforge 폴더에서 터미널을 연다.
+3. 필요한 패키지를 설치한다.
 
-4. Peptide Design Engine
-------------------------
+명령어:
 
-4.1 목적
+    pip install -r requirements.txt
 
-Peptide Design Engine은 사용자가 지정한 length, motif, chemistry, constraint 조건에 따라 peptide candidate를 생성한다.
+실행:
 
-4.2 Length mode
+    python main_launcher.py
 
-Fixed mode:
-지정 길이의 peptide를 생성한다.
+Python이 여러 개 설치되어 있으면 다음 명령어가 더 잘 동작할 수 있다.
 
-Random mode:
-최소/최대 길이 범위 안에서 peptide를 생성한다.
+    py main_launcher.py
 
-4.3 Motif constraint
+개별 모듈 실행 예시:
 
-Motif는 생성 peptide 안에 반드시 포함시키고 싶은 sequence pattern이다.
+    python main_launcher.py --tool design
+    python main_launcher.py --tool spps
+    python main_launcher.py --tool docking
 
-예:
+실행 오류가 발생하면 다음 폴더를 확인한다.
 
-RGD
-EEMQR
-KLV
+    outputs/runtime_logs/
 
-Fixed placement:
+이 폴더에는 런타임 에러 로그가 저장될 수 있다.
 
-RGD@1, EEMQR@4
 
-의미:
-1번 위치부터 RGD
-4번 위치부터 EEMQR
+================================================================================
+6. 저장소 및 폴더 구조
+================================================================================
 
-위치는 N-terminal 기준 1부터 센다.
+일반적인 Pepforge public release 폴더 구조는 다음과 같다.
 
-4.4 Motif hide/show
+README.md
+README_KO.md
+MANUAL_EN.txt
+MANUAL_KO.txt
+CITATION.cff
+CITATION_NOTICE.txt
+LICENSE
+VERSION.txt
+requirements.txt
+environment.yml
+main_launcher.py
+apps/
+assets/
+docs/
+installer/
+peptiforg_core/
+suite_gui/
+tests/
 
-Motif option을 체크 해제하면 motif preset, motif input, placement mode, position input이 숨겨진다. 또한 내부 CONFIG에서도 motif constraint가 꺼진다.
+각 파일 및 폴더의 의미:
 
-4.5 Chemistry option
+README.md
+    GitHub 첫 화면에 보이는 영어 프로젝트 설명서이다.
 
-각 chemistry option은 checkbox로 제어된다.
+README_KO.md
+    한국어 프로젝트 설명서이다.
 
-예:
-D-amino acid
-non-natural amino acid
-label
-tag
-linker
-base chemistry
-motif
-bridge constraint
+MANUAL_EN.txt
+    영어 상세 사용 매뉴얼이다.
 
-체크 해제하면 해당 옵션은 candidate generation에 적용되지 않는다.
+MANUAL_KO.txt
+    한국어 상세 사용 매뉴얼이다.
 
-4.6 N-terminal modifier와 linker 구분
+CITATION.cff
+    GitHub가 인식하는 citation metadata 파일이다.
 
-N-terminal modifier로 허용되는 예:
+CITATION_NOTICE.txt
+    학술 사용 시 인용 요청 및 citation notice를 담은 파일이다.
 
-Ac
-Pal
-Myr
-Biotin
-FITC
-FAM
-TAMRA
-CY dyes
+LICENSE
+    사용 조건 및 citation 관련 조건을 담은 파일이다.
 
-N-terminal modifier로 랜덤 배치하지 않는 linker-only 예:
+VERSION.txt
+    release tracking용 버전 파일이다. 프로그램 내부 UI에는 버전을 표시하지 않는 것을 권장한다.
 
-PEG4
-PEG8
-AEEA
-Ahx
-G4S
-SMCC
-DSS
+main_launcher.py
+    Pepforge 메인 실행 파일이다.
 
-bAla와 gAla는 linker-only가 아니라 amino-acid-like unit으로 볼 수 있다.
+apps/
+    각 기능별 application code가 들어 있다.
 
-5. SPPS Planner
----------------
+suite_gui/
+    GUI 구성 요소가 들어 있다.
 
-5.1 목적
+peptiforg_core/
+    공통 core utility가 들어 있다.
 
-SPPS Planner는 peptide sequence를 입력하면 C-terminal에서 N-terminal 방향으로 synthesis plan을 생성한다.
+docs/
+    추가 문서가 들어 있다.
 
-예:
+tests/
+    기능 검증용 test code가 들어 있다.
 
-Ac-EEMQRR-NH2
+installer/
+    installer 또는 build 관련 파일이 들어 있다.
+
+
+================================================================================
+7. Main Launcher
+================================================================================
+
+Main Launcher는 Pepforge의 시작 화면이다.
+
+일반적으로 다음 기능을 실행할 수 있다.
+
+- Hotspot Finder
+- Peptide Design Engine
+- SPPS Planner
+- Docking Workbench
+
+권장 사용법:
+
+1. main_launcher.py를 실행한다.
+2. 필요한 모듈을 선택한다.
+3. 모듈 작업을 마친 뒤 닫는다.
+4. 다시 Launcher에서 다른 모듈을 실행한다.
+
+문제가 발생할 경우:
+
+- Python dependency가 설치되어 있는지 확인한다.
+- 터미널에서 실행하여 error message를 확인한다.
+- outputs/runtime_logs/ 폴더를 확인한다.
+- 개별 실행 옵션을 사용한다.
+
+예시:
+
+    python main_launcher.py --tool spps
+
+
+================================================================================
+8. Hotspot Finder
+================================================================================
+
+Hotspot Finder는 sequence 기반으로 중요 후보 위치를 탐색하는 모듈이다.
+
+입력 가능한 것:
+
+- protein sequence
+- peptide sequence
+- FASTA 형식 sequence
+
+예시:
+
+    >Target
+    MSEQNNTEMTFQIQRIYTKDISFEAPNAPHVFQKDW...
+
+출력 예시:
+
+- hotspot position
+- residue score
+- ranking
+- candidate region
+
+해석 방법:
+
+Hotspot score가 높다고 해서 해당 residue가 실험적으로 반드시 중요한 것은 아니다. Hotspot Finder는 mutation 실험이나 구조 실험을 대체하지 않는다.
+
+권장 사용:
+
+- peptide motif 후보 찾기
+- target sequence에서 중요한 부분 추정
+- design 시작점 정하기
+- Peptide Design Engine에 넣을 motif 또는 region 선정
+
+비권장 사용:
+
+- hotspot score만으로 binding site 확정
+- 실험 검증 없이 논문에서 결정적 근거로 사용
+
+
+================================================================================
+9. Peptide Design Engine
+================================================================================
+
+Peptide Design Engine은 peptide 후보를 생성하거나 평가하는 모듈이다.
+
+주요 목적:
+
+- peptide candidate 생성
+- motif 기반 candidate 생성
+- D-form 또는 non-natural residue 고려
+- linker 또는 chemical modification 고려
+- SPPS 가능성 필터링
+- candidate ranking
+- output CSV 저장
+
+입력할 수 있는 정보:
+
+- target sequence
+- peptide length
+- fixed motif
+- allowed amino acids
+- D-form 사용 여부
+- non-natural amino acid 사용 여부
+- linker 사용 여부
+- terminal modification
+- SPPS filter 설정
+
+중요 output column:
+
+SPPS_status
+    PASS 또는 FAIL로 표시된다.
+
+SPPS_reason
+    왜 통과했는지 또는 왜 거절되었는지를 설명한다.
+
+Nterm_available
+    N-terminal free amine이 남아 있는지 여부이다.
+
+Cterm_mode
+    C-terminal acid, amide 등의 상태를 나타낸다.
+
+modification_validity
+    modification logic이 내부 규칙상 타당한지 표시한다.
+
+중요 개념:
+
+Peptide Design Engine은 단순히 점수가 높은 peptide를 만드는 것이 아니라, 실제 SPPS에서 문제가 적은 후보를 우선적으로 남기도록 설계되어야 한다.
+
+예를 들어 N-terminus가 Ac로 막혀 있으면 N-terminal amine-dependent modification은 추가로 붙일 수 없다고 보는 것이 일반적이다. 이런 후보는 flag 또는 rejection 대상이 된다.
+
+
+================================================================================
+10. SPPS Planner
+================================================================================
+
+SPPS Planner는 solid-phase peptide synthesis 계획을 세우는 모듈이다.
+
+주요 기능:
+
+- peptide sequence 기반 synthesis plan 생성
+- amino acid usage 계산
+- reagent/base/catalyst usage 계산
+- solvent usage 계산
+- checklist 생성
+- log 기록
+- output folder export
+- 이전 output folder load
+
+화면 구성:
+
+Project
+    프로젝트 이름과 sequence 입력 영역이다.
+
+Resin / Coupling / Base / Solvent Defaults
+    resin, scale, loading, coupling reagent, base, solvent, deprotection 조건을 설정한다.
+
+Branch mode / side-chain arm
+    branched peptide 또는 side-chain modification을 설정할 수 있다.
+
+Plan
+    단계별 합성 계획을 보여준다.
+
+Materials
+    material usage를 category별로 보여준다.
+
+Project
+    project metadata를 보여준다.
+
+Checklist
+    실험 진행 체크리스트를 보여준다.
+
+Log
+    계산 또는 작업 기록을 보여준다.
+
+주요 버튼:
+
+Build/Rebuild
+    현재 입력 조건으로 plan과 material table을 새로 만든다.
+
+Load Project
+    저장된 project를 불러온다.
+
+Load Output
+    이전 output folder를 불러온다.
+
+Recalculate
+    수정된 plan을 기반으로 다시 계산한다.
+
+Export
+    현재 결과를 output folder로 저장한다.
+
+Materials tab의 보기 버튼:
+
+Step full
+    Step Material Usage table을 크게 보여준다.
+
+AA full
+    Amino Acid / Unit Usage table을 크게 보여준다.
+
+Reagent full
+    Reagent / Base / Catalyst Usage table을 크게 보여준다.
+
+Solvent full
+    Solvent Usage table을 크게 보여준다.
+
+Balanced
+    여러 material table을 균형 있게 다시 보여준다.
+
+실제 사용 흐름:
+
+1. Sequence에 peptide를 입력한다.
+2. Resin type/family를 선택한다.
+3. Resin scale을 입력한다.
+4. Loading 값을 입력한다.
+5. Coupling reagent와 catalyst/additive를 확인한다.
+6. Deprotection 조건을 확인한다.
+7. Build/Rebuild를 누른다.
+8. Plan tab에서 step을 확인한다.
+9. Materials tab에서 사용량을 확인한다.
+10. Checklist tab에서 실험 진행표를 확인한다.
+11. Export를 눌러 output folder를 생성한다.
+
+예시:
+
+Sequence:
+    Ac-EEMQRR-NH2
+
+Resin:
+    Amide
+
+Scale:
+    400 mmol
+
+Loading:
+    0.8 mmol/g
+
+Coupling reagent:
+    DIC
+
+Catalyst/Additive:
+    HOBt
+
+Deprotection:
+    20 percent piperidine in DMF
+
+주의:
+
+SPPS Planner의 material usage는 planning estimate이다. 실제 실험에서는 resin swelling, peptide hydrophobicity, coupling efficiency, vessel volume, wash protocol, lab-specific SOP에 따라 조정이 필요하다.
+
+
+================================================================================
+11. Docking and Molecular Dynamics Workbench
+================================================================================
+
+Docking Workbench는 target-peptide interaction을 screening하는 모듈이다.
+
+탭 구조:
+
+1. Input
+2. Results
+3. Contacts
+4. Molecular Dynamics
+5. Export / Import
+
+기본 흐름:
+
+1. Target 입력
+2. Peptide 입력
+3. Analyze 클릭
+4. Run 클릭
+5. Results 확인
+6. Contacts 확인
+7. Molecular Dynamics 확인
+8. Export 실행
+
+입력 가능한 target:
+
+- protein sequence
+- FASTA
+- PDB
+- mmCIF
+
+입력 가능한 peptide:
+
+- peptide sequence
+- modified peptide notation
+- peptide PDB
+
+예시 peptide:
+
+    Ac-EEMQRR-NH2
+
+또는 alias:
+
+    AHP-8
+
+AHP-8은 다음과 같이 해석된다.
+
+    Ac-EEMQRR-NH2
+
+Terminal state:
+
+N-terminal:
+    Ac
 
 Core sequence:
+    EEMQRR
 
-EEMQRR
+C-terminal:
+    NH2
 
-Synthesis direction:
+중요:
 
-R → R → Q → M → E → E → Ac
+PDB 파일에는 Ac 또는 NH2 terminal cap 정보가 명확하게 들어 있지 않을 수 있다. 이 경우 Pepforge는 사용자가 입력한 peptide notation에서 terminal metadata를 보존하려고 한다.
 
-5.2 Sequence 입력
+Analyze 버튼:
 
-지원 예:
+- 입력이 sequence인지 PDB인지 확인한다.
+- peptide terminal state를 확인한다.
+- D-form, non-natural residue, linker, chemical token을 분류한다.
+- workflow 가능성을 점검한다.
 
-EEMQRR
-EEMQRR-NH2
--EEMQRR-NH2
-Ac-EEMQRR-NH2
-AcEEMQRR-NH2
-FITC-EEMQRR-NH2
-Biotin-EEMQRR-NH2
+Run 버튼:
 
-EEMQRR-NH2는 앞에 '-'를 붙이지 않아도 core peptide로 인식되어야 한다.
+- Analyze
+- docking-oriented screening
+- affinity report
+- contact analysis
+- molecular dynamics screening
 
-5.3 상단 입력부
+흐름을 한 번에 실행한다.
 
-주요 입력 항목:
 
-Sequence
-Resin type / family
-Resin scale
-Loading
-Default unit eq
-Default unit repeat
-Coupling reagent 1
-Coupling reagent 1 eq
-Coupling reagent 1 count
-Coupling reagent 2 / catalyst
-Coupling reagent 2 / catalyst eq
-Coupling reagent 2 / catalyst count
-Coupling base
-Coupling base eq
-Coupling base count
-Default coupling cocktail solvent
-mL per mmol
-Deprotection base
-Deprotection ratio
-Deprotection count
-Solvent 1
-Solvent 1 count
-Solvent 2
-Solvent 2 count
-Final MeOH wash count
-Output folder
+================================================================================
+12. Peptide 표기법
+================================================================================
 
-5.4 버튼
+Pepforge는 실험자가 실제로 사용하는 peptide notation을 최대한 보존하는 방향으로 설계되어 있다.
 
-Build Table:
-sequence를 parsing하고 editable table을 만든다.
+기본 peptide:
 
-Recalculate Usage:
-사용량을 다시 계산한다.
+    EEMQRR
 
-Export CSV/XLSX:
-결과 파일을 저장한다.
+N-terminal acetylation과 C-terminal amidation이 있는 peptide:
 
-Open Output Folder:
-결과 폴더를 연다.
+    Ac-EEMQRR-NH2
 
-Append row:
-새 row를 추가한다.
+의미:
 
-Delete selected row:
-선택 row를 삭제한다.
+- Ac: N-terminal acetylation
+- EEMQRR: core peptide sequence
+- NH2: C-terminal amidation
 
-Reset column widths:
-사용자가 조절한 column width를 초기화한다.
+Alias:
 
-5.5 Resin logic
+    AHP-8
 
-2-CTC / Trityl resin:
-swell solvent = DCM
-loading solvent = DCM-rich condition
-default loading cocktail solvent = 90% DCM / 10% DMF
-initial Fmoc deprotection 없음
+의미:
 
-Amide / Rink / Wang resin:
-swell solvent = DMF
-coupling solvent = DMF 중심
-Fmoc resin으로 취급
-initial deprotection 가능
+    AHP-8 = Ac-EEMQRR-NH2
 
-5.6 Coupling cocktail
+D-form 예시:
 
-Coupling step은 하나의 coupling cocktail로 취급한다.
+    Ac-dK-EEMQRR-NH2
 
-구성:
+Linker 예시:
 
-amino acid 또는 modifier
-coupling reagent 1
-coupling reagent 2 / catalyst / additive
-coupling base
-coupling cocktail solvent
+    Ac-EEMQRR-PEG2-NH2
 
-예:
+Label 예시:
 
-Fmoc-AA-OH + DIC + HOBt + DMF
+    FITC-EEMQRR-NH2
+
+복합 modification 예시:
+
+    Ac-dK-Aib-PEG2-FAM-R-NH2
+
+주의:
+
+모든 token이 all-atom force field에서 자동으로 지원되는 것은 아니다. Pepforge 내부에서는 가능한 범위에서 screening을 진행하지만, 외부 all-atom MD에서는 parameter가 필요할 수 있다.
+
+
+================================================================================
+13. D-form, non-natural amino acid, linker, chemical 표기
+================================================================================
+
+Pepforge는 다양한 peptide modification을 고려할 수 있도록 설계되었다.
+
+Canonical amino acids:
+
+    A, R, N, D, C, Q, E, G, H, I, L, K, M, F, P, S, T, W, Y, V
+
+D-form residue 예시:
+
+    dA, dR, dK, dE
+
+Non-natural amino acid 예시:
+
+    Aib, Nle, Orn, Cit, Hyp, Dab, Cha, Nal
+
+Linker 예시:
+
+    PEG2, PEG4, PEG8, Ahx, AEEA, bAla, gAla
+
+Chemical label 또는 moiety 예시:
+
+    FITC, FAM, TAMRA, Biotin, Pal, Myr, DOTA, NOTA
+
+Terminal cap:
+
+    Ac, NH2
+
+처리 방식:
+
+- canonical residue는 직접 처리한다.
+- D-form residue는 D-form flag와 함께 screening에 반영한다.
+- non-natural residue는 가능한 경우 surrogate property로 처리한다.
+- linker는 flexible spacer로 처리한다.
+- bulky label은 approximate chemical bead로 처리할 수 있다.
+- unknown token은 review required로 표시될 수 있다.
+
+중요:
+
+D-form, non-natural amino acid, linker, chemical이 포함된 peptide는 외부 all-atom MD에서 parameterization이 필요할 수 있다.
+
+
+================================================================================
+14. Ac 및 NH2 terminal modification 처리
+================================================================================
+
+Ac-EEMQRR-NH2는 다음을 의미한다.
+
+- N-terminal Ac cap
+- core sequence EEMQRR
+- C-terminal NH2 amidation
+
+이것은 EEMQRR과 다르다.
+
+EEMQRR은 terminal cap이 명시되지 않은 peptide이다.
+
+왜 중요한가?
+
+1. Ac는 N-terminal free amine을 막는다.
+2. NH2는 C-terminal carboxylate가 아니라 amide 상태를 의미한다.
+3. N-terminal free amine이 필요한 반응은 Ac-capped peptide에서는 불가능할 수 있다.
+4. C-terminal state는 resin 선택과 최종 peptide 형태에 영향을 준다.
+
+예시:
+
+Ac-EEMQRR-NH2에서 N-terminal amine-dependent modification을 다시 붙이는 것은 일반적으로 맞지 않는다. 단, Lys side-chain 같은 별도 reactive handle이 명시되어 있다면 다른 logic으로 처리할 수 있다.
+
+
+================================================================================
+15. SPPS-aware design logic
+================================================================================
+
+SPPS-aware design은 computational score뿐 아니라 실제 합성 가능성을 고려하는 design 방식이다.
+
+Pepforge는 다음 요소를 확인하거나 flag할 수 있다.
+
+- peptide 길이
+- hydrophobic burden
+- aggregation risk
+- Cys 개수 및 위치
+- D-form 또는 non-natural residue 과다 사용
+- linker 과다 사용
+- bulky label 과다 사용
+- N-terminal modification compatibility
+- C-terminal resin compatibility
+- protecting group 및 SPPS 조건
+
+예시:
+
+N-terminus가 이미 Ac로 막혀 있는데 N-terminal succinylation을 추가하려고 하면, N-terminal free amine이 없기 때문에 block 또는 warning이 필요하다.
+
+또 다른 예시:
+
+너무 많은 hydrophobic residue가 연속되면 synthesis, solubility, purification에서 문제가 될 수 있으므로 warning이 필요하다.
+
+
+================================================================================
+16. Material usage 계산 logic
+================================================================================
+
+SPPS Planner는 editable Plan을 기준으로 material usage를 계산한다.
+
+기본 계산 개념:
+
+planned_mmol = resin_scale_mmol x equivalent x repeat_count
+
+gram 계산:
+
+calculated_g = planned_mmol x MW / 1000
+
+여기서:
+
+- planned_mmol은 mmol
+- MW는 g/mol
+- calculated_g는 g
+
+예시:
+
+Resin scale:
+    400 mmol
+
+Amino acid equivalent:
+    5 eq
+
+Repeat count:
+    1
+
+planned_mmol:
+
+    400 x 5 x 1 = 2000 mmol
+
+MW가 648.77 g/mol이면:
+
+    2000 x 648.77 / 1000 = 1297.54 g
+
+Solvent 계산은 설정된 mL per mmol, wash count, step count에 따라 달라진다.
+
+주의:
+
+실제 실험에서는 scale 단위가 mmol인지 umol인지 반드시 확인해야 한다. 프로그램 입력 단위와 실제 실험 단위를 혼동하면 사용량이 크게 달라질 수 있다. 실험 전 반드시 연구자가 직접 검토해야 한다.
+
+
+================================================================================
+17. Docking input logic
+================================================================================
+
+Docking Workbench는 입력 조합을 자동으로 해석하려고 한다.
+
+가능한 조합:
+
+Target sequence + Peptide sequence
+    Sequence 기반 screening 또는 구조 생성 준비에 사용한다.
+
+Target sequence + Peptide PDB
+    Target은 coarse 또는 외부 구조 생성이 필요하고, peptide PDB는 pose 후보로 보존한다.
+
+Target PDB + Peptide sequence
+    Target 구조를 기준으로 peptide를 approximate screening한다.
+
+Target PDB + Peptide PDB
+    가장 직접적인 structure-based contact analysis가 가능하다.
+
+Complex PDB
+    Target과 peptide chain이 같은 구조 파일에 있으면 chain을 구분하여 contact를 분석할 수 있다.
+
+입력이 잘못 인식될 때 확인할 점:
+
+- FASTA header가 올바른가?
+- Sequence에 숫자나 공백이 섞여 있지 않은가?
+- PDB 경로가 실제 파일 경로인가?
+- peptide notation에서 Ac와 NH2가 올바르게 적혀 있는가?
+- PDB chain ID가 존재하는가?
+
+
+
+================================================================================
+17A. Docking Workbench에서 modified peptide 처리 방식
+================================================================================
+
+Docking Workbench는 D-form residue, 일부 non-natural amino acid, linker, chemical label, lipid-like moiety, terminal cap이 포함된 peptide도 분석 흐름에서 유지하도록 설계되어 있다.
+
+다만 이것은 모든 modified residue를 내부에서 완전한 all-atom parameter로 처리한다는 뜻은 아니다. Pepforge는 modified peptide를 **token-preserving, screening-level surrogate handling** 방식으로 처리한다.
+
+이 방식의 목적은 다음과 같다.
+
+1. modified peptide notation을 잃어버리지 않는다.
+2. peptide에 D-form 또는 non-natural unit이 있다고 해서 workflow가 바로 끊기지 않게 한다.
+3. contact 및 affinity-style screening을 가능한 범위에서 수행한다.
+4. 외부 all-atom validation에 필요한 parameter 요구사항을 명확히 남긴다.
+
+입력 예시:
+
+    Ac-dK-Aib-PEG2-FAM-R-NH2
+    FITC-dK-Ahx-EEMQRR-NH2
+    Ac-E-dM-Q-Orn-R-NH2
+
+내부 screening 해석 예시:
+
+    dK
+        Lysine 계열 side-chain 성질과 D-form flag를 함께 유지한다.
+        전하 및 contact tendency를 보존하는 데 사용된다.
+        외부 all-atom validation에서는 D-residue topology와 chirality 검토가 필요하다.
+
+    dE
+        Glutamate 계열 acidic side-chain 성질과 D-form flag를 함께 유지한다.
+        외부 all-atom validation에서는 D-residue topology와 chirality 검토가 필요하다.
+
+    Aib
+        compact neutral non-natural residue로 근사 처리한다.
+        외부 all-atom validation에서는 non-standard residue parameter가 필요할 수 있다.
+
+    Orn
+        Lys-like cationic side-chain으로 근사 처리한다.
+        외부 all-atom validation에서는 custom topology가 필요할 수 있다.
+
+    Cit
+        polar neutral side-chain으로 근사 처리한다.
+        외부 all-atom validation에서는 custom parameter가 필요할 수 있다.
+
+    Nle
+        hydrophobic aliphatic residue-like unit으로 근사 처리한다.
+        외부 all-atom validation에서는 non-standard residue parameter가 필요할 수 있다.
+
+    Hyp
+        Pro-like constrained residue로 근사 처리한다.
+        외부 all-atom validation에서는 별도 residue definition이 필요할 수 있다.
+
+    PEG2 / PEG4 / PEG8
+        flexible linker-like unit으로 처리한다.
+        외부 all-atom validation에서는 linker topology가 필요하다.
+
+    Ahx / AEEA
+        flexible spacer-like unit으로 처리한다.
+        외부 all-atom validation에서는 linker 또는 spacer parameter가 필요하다.
+
+    FAM / FITC / TAMRA
+        bulky aromatic 또는 fluorescent label-like unit으로 처리한다.
+        외부 all-atom validation에서는 small-molecule 또는 dye parameter가 필요하다.
+
+    Pal / Myr
+        hydrophobic lipid-tail-like unit으로 처리한다.
+        외부 all-atom validation에서는 lipid-like tail parameter가 필요하다.
+
+    Ac
+        N-terminal acetyl cap으로 처리한다.
+        외부 all-atom validation에서는 terminal patch 처리가 필요할 수 있다.
+
+    NH2
+        C-terminal amide로 처리한다.
+        외부 all-atom validation에서는 terminal patch 처리가 필요할 수 있다.
+
+Docking Workbench에서 modified peptide에 대해 가능한 것:
+
+- modified peptide notation parsing
+- Ac 및 NH2 terminal metadata 보존
+- D-form 및 non-natural token 분류
+- linker 및 label token 보존
+- contact-oriented screening
+- residue/proxy contact report 생성
+- estimated Delta G 및 Kd screening report 생성
+- embedded molecular-dynamics screening
+- 구조가 있거나 생성된 경우 best_docking_complex.pdb export
+- contact_annotated_complex.pdb export
+- token_parameter_requirements.csv export
+- all_atom_validation_package export
+
+내부에서 보장하지 않는 것:
+
+- 모든 non-natural residue의 정확한 all-atom geometry
+- 모든 modified token의 force-field-ready topology
+- 모든 chemical label의 정확한 partial charge
+- 실험값 수준의 Delta G 또는 Kd
+- 외부 검증 없는 논문급 MD 정확도
+
+권장 해석:
+
+    Modified peptide workflow support:
+        지원함.
+
+    Screening-level contact 및 affinity estimation:
+        지원함.
+
+    Full all-atom quantitative accuracy:
+        내부에서 보장하지 않음.
+
+    External parameterization:
+        D-form, non-natural, linker, label, lipid-like, unknown token에는 권장됨.
+
+정리하면 Docking Workbench는 modified peptide workflow가 끊기지 않도록 설계되어 있다. 따라서 후보 비교, 1차 screening, contact 해석, validation package 준비에는 사용할 수 있다. 하지만 D-form 또는 non-natural residue가 포함된 peptide의 최종 정량적 결론을 내리려면 외부 all-atom parameterization 및 validation이 필요하다.
+
+
+================================================================================
+18. Affinity report 해석
+================================================================================
+
+Docking Workbench의 Results tab에는 affinity report가 표시된다.
+
+주요 항목:
+
+estimated_Delta_G 또는 estimated_ΔG
+    추정 binding free energy이다.
+    단위는 kcal/mol이다.
+
+estimated_Kd
+    추정 dissociation constant이다.
+    값의 크기에 따라 nM, uM, mM, M 중 하나의 대표 단위로 표시된다.
+
+interface_residue_contacts
+    target과 peptide 사이 residue-level contact 수이다.
+
+hydrogen_bond_contacts
+    hydrogen-bond proxy contact 수이다.
+
+hydrophobic_contacts
+    hydrophobic contact 수이다.
+
+charged_contacts
+    charged 또는 salt-bridge-like contact 수이다.
+
+steric_clashes
+    너무 가까운 거리로 인한 clash 수이다.
+
+minimum_distance
+    가장 가까운 contact distance이다.
+    단위는 Angstrom이다.
+
+confidence
+    정성적 confidence label이다.
+
+method_scope
+    이 결과가 screening estimate라는 점을 설명한다.
+
+Delta G와 Kd 관계식:
+
+    Delta G = RT ln(Kd)
+    Kd = exp(Delta G / RT)
+
+상수:
+
+    R = 0.001987204 kcal mol^-1 K^-1
+    T = 298.15 K
+
+중요:
+
+Pepforge의 Delta G는 실험값이 아니다. 내부 contact-based score를 일반적으로 통용되는 Delta G/Kd 형식으로 변환한 screening estimate이다.
+
+해석 기준:
+
+- Delta G가 더 음수일수록 결합이 강한 후보로 해석할 수 있다.
+- Kd가 낮을수록 결합이 강한 후보로 해석할 수 있다.
+- Contact 수가 많고 clash가 적으면 일반적으로 더 좋은 후보일 수 있다.
+- 그러나 최종 결론은 외부 검증이 필요하다.
+
+
+================================================================================
+19. Contact analysis 해석
+================================================================================
+
+Contacts tab은 target과 peptide의 상호작용을 보여준다.
+
+주요 표:
+
+Residue contacts
+    residue-level interaction을 보여준다.
+
+Atom contacts
+    atom-level 또는 proxy atom-level contact를 보여준다.
+
+Peptide residue map
+    peptide position과 residue class를 보여준다.
+
+Residue label 예시:
+
+    4Q
+
+의미:
+
+    peptide 4번 residue가 Q라는 뜻이다.
+
+Target label 예시:
+
+    A:134D
+
+의미:
+
+    target chain A의 134번 residue가 D라는 뜻이다.
+
+상호작용 class:
+
+contact
+    일반 contact이다.
+
+hydrogen_bond_proxy
+    hydrogen bond 가능성이 있는 heavy atom distance 기반 proxy contact이다.
+
+hydrophobic
+    소수성 contact이다.
+
+salt_bridge_like
+    전하 상호작용 또는 salt bridge 가능성이 있는 contact이다.
+
+clash_or_covalent_range
+    너무 가까운 거리로 인해 steric clash 또는 비현실적 geometry 가능성이 있는 contact이다.
+
+거리 기준:
+
+hydrogen-bond donor-acceptor proxy:
+    약 3.9 Angstrom
+
+hydrophobic contact:
+    약 5.0 Angstrom
+
+generic interface contact:
+    약 5.0 Angstrom
+
+steric clash:
+    약 2.0 Angstrom
+
+주의:
+
+PDB 파일에 hydrogen atom이 없으면 정확한 hydrogen bond angle을 판단할 수 없다. 따라서 Pepforge는 hydrogen_bond_proxy라는 표현을 사용한다.
+
+
+================================================================================
+20. Molecular dynamics screening 해석
+================================================================================
+
+Pepforge에는 embedded molecular dynamics screening이 포함되어 있다.
+
+이 기능은 full all-atom MD가 아니다. 내부적으로 빠르게 pose 안정성, contact persistence, clash tendency 등을 확인하기 위한 lightweight screening이다.
+
+주요 항목:
+
+RMSD
+    구조 변화 정도를 나타내는 지표이다.
+
+contact_count
+    유지되는 contact 수이다.
+
+clash_count
+    문제가 되는 너무 가까운 contact 수이다.
+
+energy_proxy
+    내부 energy-like score이다.
+
+contact_persistence
+    contact가 screening 과정에서 얼마나 유지되는지 나타낸다.
+
+해석:
+
+- RMSD가 낮으면 pose가 상대적으로 안정적일 수 있다.
+- contact persistence가 높으면 contact가 유지되는 경향이 있다는 뜻이다.
+- clash_count가 높으면 pose가 좋지 않을 수 있다.
+- 이 결과는 screening 용도이며, 논문급 MD 결과를 대체하지 않는다.
+
+
+================================================================================
+21. All-atom validation bridge
+================================================================================
+
+Pepforge는 외부 all-atom validation으로 이어갈 수 있는 package를 export할 수 있다.
+
+예시 구조:
+
+all_atom_validation_package/
+    README_ALL_ATOM_VALIDATION.txt
+    token_parameter_requirements.csv
+    complex_candidate.pdb
+    target_input.pdb
+    peptide_input.pdb
+    gromacs/
+    amber/
+    namd/
+
+목적:
+
+- 외부 MD 준비
+- parameter 필요성 정리
+- complex PDB 저장
+- peptide modification 정보 보존
+- 외부 결과 재import 준비
+
+token_parameter_requirements.csv에는 다음 정보가 들어갈 수 있다.
+
+- token
+- type
+- internal screening handling
+- all-atom requirement
+- status
+
+예시:
+
+dK
+    D-form residue
+    external topology/chirality check required
+
+Aib
+    non-natural amino acid
+    force-field parameter required
+
+PEG2
+    linker
+    linker topology required
+
+FAM
+    chemical label
+    small-molecule parameter required
+
+Ac
+    terminal cap
+    terminal patch check required
+
+NH2
+    terminal amide
+    terminal patch check required
+
+
+================================================================================
+22. Export folder 및 output 관리
+================================================================================
+
+Pepforge는 output folder를 생성하여 결과 추적성을 높인다.
+
+일반적인 output file:
+
+OUTPUT_MANIFEST.txt
+CITATION_NOTICE.txt
+affinity_scoring_summary.csv
+molecular_dynamics_summary.csv
+molecular_dynamics_frames.csv
+best_docking_complex.pdb
+contact_annotated_complex.pdb
+material_usage.csv
+spps_plan.csv
+checklist.csv
+
+권장 관리법:
+
+- output folder를 삭제하지 않는다.
+- 실험 날짜 또는 project name과 함께 보관한다.
+- 논문 또는 보고서에 사용한 output folder를 따로 보존한다.
+- citation notice를 같이 보관한다.
+- PDB export 파일은 PyMOL, ChimeraX, VMD 등에서 확인한다.
+
+PDB export:
+
+best_docking_complex.pdb
+    가장 좋은 후보 pose 또는 complex를 저장한다.
+
+contact_annotated_complex.pdb
+    contact 정보를 REMARK로 포함한 PDB이다.
+
+예시 REMARK:
+
+    REMARK CONTACT 4Q -> A:134D dist=3.14A interaction=contact;hydrogen_bond_proxy
+
+
+================================================================================
+23. 이전 output folder 불러오기
+================================================================================
+
+Load Output 기능은 이전에 export한 결과를 다시 확인할 때 사용한다.
+
+사용 상황:
+
+- 이전 SPPS plan 다시 확인
+- 이전 material table 다시 확인
+- docking 결과 재검토
+- contact table 다시 보기
+- output folder를 논문 작성 중 다시 열기
+
+사용 방법:
+
+1. 해당 모듈을 연다.
+2. Load Output을 누른다.
+3. 이전 output folder를 선택한다.
+4. table 또는 summary가 복원되는지 확인한다.
+
+불러오기가 안 될 때:
+
+- CSV 파일명이 바뀌었는지 확인한다.
+- output folder 내부 구조가 유지되어 있는지 확인한다.
+- 다른 버전에서 생성한 output인지 확인한다.
+
+
+================================================================================
+24. Citation policy 및 학술 사용
+================================================================================
+
+Pepforge는 학술 사용 시 citation을 요구하도록 citation notice를 포함한다.
+
+다음에 해당하면 Pepforge를 인용해야 한다.
+
+- 논문
+- 학위논문
+- 포스터
+- 학회 발표
+- 보고서
+- grant 문서
+- 연구용 software
+- Pepforge output을 기반으로 한 분석
+
+권장 citation:
+
+Woo, S. Pepforge: An Integrated Peptide Research Workbench. Public Research Release 1.0.0. GitHub repository.
+
+BibTeX:
+
+@software{woo_pepforge_2026,
+  author = {Woo, Sanghun},
+  title = {Pepforge: An Integrated Peptide Research Workbench},
+  year = {2026},
+  version = {1.0.0},
+  url = {https://github.com/poowsh1407/Pepforge}
+}
+
+DOI가 발급된 경우 DOI-linked release를 우선 인용한다.
+
+권장 methods 문장:
+
+Peptide candidates and synthesis planning outputs were generated and analyzed using Pepforge, a public research workbench for hotspot analysis, SPPS-aware peptide design, synthesis planning, docking-oriented screening, contact analysis, and molecular dynamics validation bridging.
+
+
+================================================================================
+25. 실전 예시
+================================================================================
+
+--------------------------------------------------------------------------------
+예시 1. AHP-8의 SPPS planning
+--------------------------------------------------------------------------------
+
+목표:
+    AHP-8 peptide의 SPPS material usage를 계산한다.
+
+Peptide:
+
+    AHP-8 = Ac-EEMQRR-NH2
+
+실행:
+
+1. Pepforge를 실행한다.
+2. SPPS Planner를 연다.
+3. Sequence에 입력한다.
+
+    Ac-EEMQRR-NH2
+
+4. Resin family를 Amide로 선택한다.
+5. Resin scale을 입력한다.
+
+    400 mmol
+
+6. Loading을 입력한다.
+
+    0.8 mmol/g
+
+7. Coupling reagent를 확인한다.
+
+    DIC
+
+8. Catalyst/additive를 확인한다.
+
+    HOBt
+
+9. Deprotection 조건을 확인한다.
+
+    Piperidine, 20 percent in DMF
+
+10. Build/Rebuild를 누른다.
+11. Plan tab을 확인한다.
+12. Materials tab을 연다.
+13. AA full, Reagent full, Solvent full을 눌러 category별 사용량을 확인한다.
+14. Export를 누른다.
+15. Output folder를 확인한다.
+
+해석:
+
+Material table은 planning estimate이다. 실제 실험에서는 scale, vessel, resin swelling, peptide hydrophobicity, protecting group, lab SOP에 따라 조정해야 한다.
+
+--------------------------------------------------------------------------------
+예시 2. AHP-8과 YKT6 receptor의 Docking Workbench screening
+--------------------------------------------------------------------------------
+
+목표:
+    AHP-8과 Synaptobrevin homolog YKT6 receptor의 contact 가능성을 screening한다.
+
+Target:
+
+    Synaptobrevin homolog YKT6 sequence 또는 PDB
+
+Peptide:
+
+    AHP-8
 
 또는:
 
-Fmoc-AA-OH + HBTU + HOBt + DIEA + DMF
+    Ac-EEMQRR-NH2
 
-Material Usage에서는 각각의 시약량을 따로 계산하지만, operation logic은 하나의 coupling cocktail로 표시한다.
+실행:
 
-5.7 일반 STD cycle
+1. Docking Workbench를 연다.
+2. Input tab에서 target sequence 또는 PDB를 넣는다.
+3. Peptide input에 AHP-8을 입력한다.
+4. Analyze를 누른다.
+5. Terminal state를 확인한다.
 
-일반 중간 Fmoc-AA cycle:
+    N-terminal = Ac
+    Core = EEMQRR
+    C-terminal = NH2
 
-deprotection ×2
-→ DMF wash ×6
-→ coupling cocktail
-→ DMF wash ×2
-→ next cycle
+6. Run을 누른다.
+7. Results tab을 확인한다.
+8. estimated Delta G와 estimated Kd를 확인한다.
+9. Contacts tab을 연다.
+10. 4Q -> A:134D 같은 residue contact를 확인한다.
+11. Molecular Dynamics tab에서 screening 결과를 확인한다.
+12. Export를 누른다.
+13. best_docking_complex.pdb와 contact_annotated_complex.pdb를 확인한다.
 
-5.8 Last Fmoc-AA coupling
+해석:
 
-마지막에 붙이는 unit이 Fmoc-AA라면:
+결과는 screening estimate이다. 실제 binding claim을 하려면 외부 all-atom MD 또는 실험 검증이 필요하다.
 
-pre-coupling deprotection
-→ DMF wash ×6
-→ last Fmoc-AA coupling cocktail
-→ DMF wash ×2
-→ final Fmoc deprotection
-→ DMF wash ×3
-→ DCM wash ×3
-→ optional MeOH wash
+--------------------------------------------------------------------------------
+예시 3. D-form 및 non-natural amino acid 포함 peptide
+--------------------------------------------------------------------------------
 
-Final deprotection 후에는 DMF wash ×6을 다시 넣지 않는다.
+입력:
 
-5.9 Ac / chemical / tag / label / modifier
+    Ac-dK-Aib-PEG2-FAM-R-NH2
 
-Ac, chemical, tag, label, modifier는 Fmoc-AA가 아니므로 해당 row 자체에는 deprotection이 없다.
+의미:
 
-예:
+- Ac: N-terminal cap
+- dK: D-form lysine
+- Aib: non-natural amino acid
+- PEG2: linker
+- FAM: fluorescent label
+- R: arginine
+- NH2: C-terminal amidation
 
-Ac
-FITC
-Biotin
-FAM
-TAMRA
-CY dyes
-Pal
-Myr
-DOTA
-NOTA
+Pepforge 내부 처리:
 
-이 경우:
+- dK는 D-form residue로 표시된다.
+- Aib는 non-natural residue로 표시된다.
+- PEG2는 linker로 표시된다.
+- FAM은 chemical label로 표시된다.
+- NH2는 C-terminal amide로 표시된다.
 
-modifier coupling
-→ post-modifier deprotection 없음
-→ final wash DMF ×3
-→ final wash DCM ×3
-→ optional MeOH wash
+주의:
 
-만약 modifier를 붙이기 전에 Fmoc 제거가 필요하다면, 그 deprotection은 modifier row가 아니라 직전 Fmoc-AA step에 귀속된다.
+외부 all-atom MD에서는 dK, Aib, PEG2, FAM 각각의 parameter가 필요할 수 있다.
 
-5.10 Acetylation
 
-표시명:
+================================================================================
+26. 문제 해결
+================================================================================
 
-Ac
+문제:
+    Main Launcher가 열리지 않는다.
 
-실제 사용 시약:
+해결:
+    pip install -r requirements.txt 실행
+    Python 버전 확인
+    터미널에서 python main_launcher.py 실행
+    outputs/runtime_logs 확인
 
-Acetic anhydride
-Ac2O
+문제:
+    Peptide Design Engine이 열리지 않는다.
 
-기준값:
+해결:
+    runtime log 확인
+    requirements 설치 확인
+    main_launcher.py에서 개별 실행 시도
 
-MW = 102.09 g/mol
-density = 1.08 g/mL
+문제:
+    SPPS Planner의 Materials가 비어 있다.
 
-계산식:
+해결:
+    Build/Rebuild를 눌렀는지 확인
+    Sequence가 올바른지 확인
+    resin scale과 loading이 비어 있지 않은지 확인
+    Balanced view를 눌러본다
+    Export 후 CSV가 생성되는지 확인
 
-Ac2O volume (mL) = resin scale (mmol) × Ac eq × 102.09 / 1000 / 1.08
+문제:
+    Ac 또는 NH2가 인식되지 않는다.
 
-5.11 Branch mode
+해결:
+    peptide를 Ac-EEMQRR-NH2처럼 명확히 입력한다
+    AHP-8 alias를 쓴 경우 terminal state table을 확인한다
+    PDB만 넣지 말고 peptide notation도 함께 넣는다
 
-Branch mode는 side-chain branch peptide planning을 위한 기능이다.
+문제:
+    Docking contact가 비어 있다.
 
-기본값:
+가능한 원인:
+    구조 정보가 부족함
+    target 또는 peptide가 sequence-only임
+    chain ID가 없음
+    contact cutoff 안에 들어오는 residue가 없음
+    PDB가 잘못 읽힘
 
-Branch mode OFF
+해결:
+    target PDB 사용
+    peptide PDB 사용
+    chain ID 확인
+    Input tab과 Results tab 확인
+    PDB export 확인
 
-Branch mode ON 시 입력:
+문제:
+    estimated Kd가 이상해 보인다.
 
-Branch point
-Branch arm sequence
-Protecting group
-Branch deprotection condition
+설명:
+    Kd는 estimated Delta G에서 계산된다.
+    Delta G 자체가 contact-based estimate이므로 절대값이 실험값과 다를 수 있다.
+    후보 간 상대 비교용으로 사용하는 것이 적절하다.
 
-예:
+문제:
+    GitHub 업로드가 잘 안 된다.
 
-Main sequence: Ac-EEMQKRR-NH2
-Branch point: K5
-Branch arm sequence: RGD
-Protecting group: Mtt
+해결:
+    웹 업로드 대신 GitHub Desktop 또는 Git CLI 사용
+    __pycache__, .pyc, .pytest_cache 제거
+    ZIP은 release asset으로 따로 업로드
 
-5.12 Material Usage Table
 
-Material Usage Table은 실제 사용 순서에 가깝게 process order로 표시된다.
+================================================================================
+27. GitHub public release 권장 절차
+================================================================================
 
-포함 항목:
+추천 repository 이름:
 
-resin
-amino acid
-coupling reagent
-catalyst/additive
-base
-coupling cocktail solvent
-deprotection base
-deprotection solvent
-post-coupling wash solvent
-final wash solvent
-modifier reagent
-branch reagent
+    Pepforge
 
-5.13 Export
+추천 release 이름:
 
-Export CSV/XLSX를 누르면 output folder에 결과가 저장된다.
+    Pepforge Public Research Release 1.0.0
 
-예상 파일:
+추천 tag:
 
-spps_editable_plan.csv
-material_usage_table.csv
-operation_form.csv
-printable_synthesis_checklist.csv
-spps_ml_ready_log.csv
-spps_plan.xlsx
+    v1.0.0
 
-5.14 주의사항
+업로드 전 확인:
 
-Pepforge는 연구 및 계획 보조용 도구이다. 실험 전에 반드시 시약 form, hydrate/salt 여부, density, purity, vendor specification, resin loading, scale conversion, 실험실 protocol, chemical compatibility, branch protecting group compatibility, 안전 규정을 확인해야 한다.
+- README.md
+- MANUAL_EN.txt
+- MANUAL_KO.txt
+- CITATION.cff
+- CITATION_NOTICE.txt
+- LICENSE
+- requirements.txt
+- main_launcher.py
+- apps/
+- suite_gui/
+- peptiforg_core/
+- docs/
+- tests/
+
+불필요한 것 제거:
+
+- __pycache__/
+- *.pyc
+- .pytest_cache/
+- 개발용 임시 파일
+- 불필요한 BAT 파일
+- 오래된 patch note
+
+Git 명령어 예시:
+
+    git init
+    git branch -M main
+    git add .
+    git commit -m "Initial public research release of Pepforge"
+    git remote add origin https://github.com/poowsh1407/Pepforge.git
+    git push -u origin main
+
+Release 생성:
+
+1. GitHub repository에서 Releases 클릭
+2. Draft a new release 클릭
+3. tag를 v1.0.0으로 입력
+4. title을 Pepforge Public Research Release 1.0.0으로 입력
+5. ZIP 파일을 release asset으로 첨부
+6. Publish release 클릭
+
+Zenodo DOI를 원할 경우:
+
+1. GitHub repository를 public으로 설정
+2. Zenodo에서 GitHub 연동
+3. Pepforge repository 활성화
+4. GitHub Release 생성
+5. Zenodo DOI 확인
+6. DOI를 CITATION.cff와 README.md에 반영
+
+
+================================================================================
+28. 한계점
+================================================================================
+
+Pepforge의 한계는 명확히 이해해야 한다.
+
+과학적 한계:
+
+- estimated Delta G는 실험값이 아니다.
+- estimated Kd는 실험값이 아니다.
+- contact-based score는 approximate이다.
+- embedded MD screening은 full all-atom MD가 아니다.
+- non-natural residue는 외부 parameter가 필요할 수 있다.
+- SPPS material usage는 planning estimate이다.
+- 실제 합성 조건은 실험실마다 다르다.
+
+소프트웨어적 한계:
+
+- 입력 형식이 너무 복잡하면 사용자가 직접 정리해야 할 수 있다.
+- PDB 파일에 terminal cap 정보가 없을 수 있다.
+- chain ID 인식은 사용자가 검토해야 할 수 있다.
+- 매우 큰 구조는 느릴 수 있다.
+- unknown token은 approximate 처리될 수 있다.
+
+사용자 책임:
+
+Pepforge output은 연구자의 판단을 대체하지 않는다. 실험 전, 논문 작성 전, 외부 공유 전에는 반드시 사용자가 직접 검토해야 한다.
+
+
+================================================================================
+29. 사용 전 체크리스트
+================================================================================
+
+Pepforge 결과를 보고서나 논문에 사용하기 전:
+
+[ ] peptide notation 확인
+[ ] Ac, NH2 terminal state 확인
+[ ] D-form residue 확인
+[ ] non-natural amino acid 확인
+[ ] linker 및 chemical label 확인
+[ ] SPPS_status 확인
+[ ] SPPS material table 검토
+[ ] output folder export 확인
+[ ] CITATION_NOTICE.txt 포함 여부 확인
+[ ] Docking Results 확인
+[ ] estimated Delta G/Kd를 screening estimate로 해석
+[ ] Contacts tab 확인
+[ ] contact_annotated_complex.pdb 확인
+[ ] 외부 검증 필요 여부 판단
+[ ] Pepforge citation 포함
+
+GitHub 공개 전:
+
+[ ] README.md 확인
+[ ] MANUAL_EN.txt 확인
+[ ] MANUAL_KO.txt 확인
+[ ] CITATION.cff 확인
+[ ] LICENSE 확인
+[ ] 불필요한 cache 제거
+[ ] tests 실행
+[ ] release tag 생성
+[ ] ZIP release asset 첨부
+
+
+================================================================================
+30. 최종 정리
+================================================================================
+
+Pepforge는 peptide design, SPPS planning, docking-oriented screening, contact analysis, molecular dynamics validation bridging을 연결하기 위한 public research workbench이다.
+
+가장 강력한 사용 방식은 Pepforge를 black-box predictor로 쓰는 것이 아니라, 연구 흐름을 정리하고 후보를 비교하고 합성 계획을 세우고 외부 검증으로 이어가는 workbench로 사용하는 것이다.
+
+Pepforge는 다음을 돕는다.
+
+- peptide 후보 생성
+- 합성 가능성 검토
+- SPPS material planning
+- terminal modification 확인
+- D-form 및 non-natural token 보존
+- docking-oriented contact screening
+- estimated Delta G/Kd report
+- PDB export
+- all-atom validation package export
+- output folder 기반 결과 관리
+- citation 보존
+
+학술 작업에 Pepforge를 사용했다면 repository와 release를 인용해야 한다.
+
+End of MANUAL_KO.txt

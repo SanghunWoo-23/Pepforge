@@ -7,7 +7,7 @@
 **Author:** Sanghun Woo  
 **Repository:** `https://github.com/poowsh1407/Pepforge`
 
----
+\---
 
 ## Citation Notice
 
@@ -23,7 +23,7 @@ Public Research Release 1.0.0. GitHub repository.
 BibTeX:
 
 ```bibtex
-@software{woo_pepforge_2026,
+@software{woo\_pepforge\_2026,
   author  = {Woo, Sanghun},
   title   = {Pepforge: An Integrated Peptide Research Workbench},
   year    = {2026},
@@ -38,7 +38,7 @@ Suggested methods sentence:
 Peptide candidates and synthesis planning outputs were generated and analyzed using Pepforge, a public research workbench for hotspot analysis, SPPS-aware peptide design, synthesis planning, docking-oriented screening, contact analysis, and molecular dynamics validation bridging.
 ```
 
----
+\---
 
 ## Overview
 
@@ -48,20 +48,20 @@ Pepforge was developed to bridge the gap between computational peptide ideation 
 
 Pepforge is especially useful for workflows involving:
 
-- canonical L-amino acids,
-- D-form residues,
-- selected non-natural amino acids,
-- linkers and spacer units,
-- N-terminal and C-terminal modifications,
-- chemical labels and lipid-like moieties,
-- SPPS-compatible synthesis logic,
-- peptide-target contact interpretation,
-- traceable output folders for research documentation,
-- exported validation packages for external all-atom MD or experimental follow-up.
+* canonical L-amino acids,
+* D-form residues,
+* selected non-natural amino acids,
+* linkers and spacer units,
+* N-terminal and C-terminal modifications,
+* chemical labels and lipid-like moieties,
+* SPPS-compatible synthesis logic,
+* peptide-target contact interpretation,
+* traceable output folders for research documentation,
+* exported validation packages for external all-atom MD or experimental follow-up.
 
 This release is intended as a **public research and portfolio-oriented edition**. It is designed for transparent inspection, local execution, extension, and academic citation.
 
----
+\---
 
 ## Core Modules
 
@@ -84,9 +84,9 @@ Hotspot analysis
 → export and citation
 ```
 
----
+\---
 
-## 1. Hot Spot Finder
+## 1\. Hot Spot Finder
 
 **Hot Spot Finder** performs sequence-based hotspot prioritization. It reports compact residue-index outputs such as:
 
@@ -104,42 +104,42 @@ Hotspot scores are relative sequence-derived prioritization scores. They should 
 
 Typical use cases include:
 
-- scanning a protein or peptide sequence,
-- ranking candidate hotspot positions,
-- identifying residues useful for motif design,
-- selecting regions for downstream peptide generation,
-- preparing design hypotheses before structure-oriented screening.
+* scanning a protein or peptide sequence,
+* ranking candidate hotspot positions,
+* identifying residues useful for motif design,
+* selecting regions for downstream peptide generation,
+* preparing design hypotheses before structure-oriented screening.
 
----
+\---
 
-## 2. Peptide Design Engine
+## 2\. Peptide Design Engine
 
 The **Peptide Design Engine** generates or evaluates peptide candidates under user-defined constraints. It supports sequence-level, chemistry-aware, and SPPS-aware design rules.
 
 Supported design features include:
 
-- fixed or random length generation,
-- motif constraints,
-- bridge-style constraints,
-- optional D-amino acid handling,
-- optional non-natural amino acids,
-- linkers and spacer tokens,
-- N-terminal and C-terminal chemistry,
-- labels and tags,
-- candidate ranking,
-- SPPS-aware pass/fail filtering,
-- exportable result tables.
+* fixed or random length generation,
+* motif constraints,
+* bridge-style constraints,
+* optional D-amino acid handling,
+* optional non-natural amino acids,
+* linkers and spacer tokens,
+* N-terminal and C-terminal chemistry,
+* labels and tags,
+* candidate ranking,
+* SPPS-aware pass/fail filtering,
+* exportable result tables.
 
 A central principle of the Peptide Design Engine is that peptide candidates should not only look good computationally, but should also remain plausible for practical synthesis.
 
 Important output fields may include:
 
 ```text
-SPPS_status
-SPPS_reason
-Nterm_available
-Cterm_mode
-modification_validity
+SPPS\_status
+SPPS\_reason
+Nterm\_available
+Cterm\_mode
+modification\_validity
 ```
 
 Example supported peptide notation:
@@ -204,9 +204,9 @@ Ac-EEMQRR-NH2
 
 has an N-terminal Ac cap and should not be treated as having a free N-terminal amine.
 
----
+\---
 
-## 3. SPPS Planner
+## 3\. SPPS Planner
 
 The **SPPS Planner** generates editable C-terminal to N-terminal synthesis plans for solid-phase peptide synthesis.
 
@@ -224,29 +224,29 @@ and parses the N-terminal modifier, core peptide, and C-terminal terminus separa
 
 The SPPS Planner can generate:
 
-- editable synthesis plan,
-- material usage tables,
-- amino acid / unit usage,
-- reagent / base / catalyst usage,
-- solvent usage,
-- printable synthesis checklist,
-- project metadata table,
-- log table,
-- output folder with export files,
-- citation notice.
+* editable synthesis plan,
+* material usage tables,
+* amino acid / unit usage,
+* reagent / base / catalyst usage,
+* solvent usage,
+* printable synthesis checklist,
+* project metadata table,
+* log table,
+* output folder with export files,
+* citation notice.
 
 ### Editable Unit Concept
 
 The editable SPPS table uses a unified **Unit** concept. A Unit may be:
 
-- canonical amino acid,
-- D-amino acid,
-- non-natural amino acid,
-- chemical modifier,
-- label,
-- tag,
-- linker,
-- terminal cap.
+* canonical amino acid,
+* D-amino acid,
+* non-natural amino acid,
+* chemical modifier,
+* label,
+* tag,
+* linker,
+* terminal cap.
 
 Core editable fields include:
 
@@ -337,23 +337,23 @@ DCM wash ×3
 
 If a laboratory additionally uses methanol washing, the final MeOH wash count can be set manually.
 
----
+\---
 
-## 4. Docking and Molecular Dynamics Workbench
+## 4\. Docking and Molecular Dynamics Workbench
 
 The **Docking and Molecular Dynamics Workbench** is a structure-oriented screening and interpretation module.
 
 It is not a full replacement for AutoDock Vina, PRODIGY, GROMACS, AMBER, NAMD, AlphaFold, or experimental assays. Instead, it provides an integrated screening environment that can:
 
-- parse target and peptide inputs,
-- interpret terminal modifications such as `Ac` and `NH2`,
-- handle peptide sequence or peptide PDB input,
-- generate contact-oriented docking summaries,
-- estimate contact-based affinity metrics,
-- report estimated Delta G and Kd using conventional thermodynamic units,
-- classify residue and atom contacts,
-- export PDB files with contact annotations,
-- create validation folders for external all-atom workflows.
+* parse target and peptide inputs,
+* interpret terminal modifications such as `Ac` and `NH2`,
+* handle peptide sequence or peptide PDB input,
+* generate contact-oriented docking summaries,
+* estimate contact-based affinity metrics,
+* report estimated Delta G and Kd using conventional thermodynamic units,
+* classify residue and atom contacts,
+* export PDB files with contact annotations,
+* create validation folders for external all-atom workflows.
 
 ### Simplified Tab Structure
 
@@ -419,7 +419,58 @@ C-terminal = NH2
 
 If a peptide PDB does not explicitly encode terminal cap information, Pepforge attempts to preserve terminal metadata from the peptide notation.
 
----
+
+### Modified Peptide Handling in Docking Workbench
+
+The Docking and Molecular Dynamics Workbench is designed to preserve and analyze modified peptide notation whenever possible. This includes D-form residues, selected non-natural amino acids, linkers, chemical labels, lipid-like moieties, and terminal caps.
+
+Examples include:
+
+```text
+Ac-dK-Aib-PEG2-FAM-R-NH2
+FITC-dK-Ahx-EEMQRR-NH2
+Ac-E-dM-Q-Orn-R-NH2
+```
+
+Pepforge handles these tokens using **token-preserving, screening-level surrogate logic**. In practice, this means that modified units are not simply discarded during Docking Workbench analysis. Instead, Pepforge attempts to classify them by their approximate screening role:
+
+```text
+D-form residue       → native side-chain class + D-form flag
+Aib                  → compact neutral non-natural residue approximation
+Orn                  → Lys-like cationic side-chain approximation
+Cit                  → polar neutral side-chain approximation
+Nle                  → hydrophobic aliphatic approximation
+Hyp                  → Pro-like constrained residue approximation
+PEG / Ahx / AEEA     → flexible linker-like unit
+FAM / FITC / TAMRA   → bulky aromatic or label-like unit
+Pal / Myr            → hydrophobic lipid-tail-like unit
+Ac / NH2             → terminal state metadata
+```
+
+With this approach, modified peptides can still be used for:
+
+- input parsing,
+- terminal-state recognition,
+- contact screening,
+- residue and atom/proxy contact reporting,
+- estimated Delta G and Kd screening reports,
+- molecular-dynamics screening,
+- PDB export,
+- all-atom validation package export.
+
+However, these modified units are **not treated as fully parameterized all-atom residues inside Pepforge**. Publication-grade all-atom simulation of D-form residues, non-natural amino acids, linkers, and chemical labels requires external force-field parameterization and validation. Pepforge therefore reports these cases as screening-compatible but validation-dependent.
+
+Recommended interpretation:
+
+```text
+Modified peptide workflow support: yes
+Screening-level contact and affinity estimation: yes
+Final all-atom accuracy without external parameters: no
+External parameterization and validation: recommended for quantitative claims
+```
+
+
+\---
 
 ## Affinity Report Interpretation
 
@@ -462,19 +513,19 @@ The reported Delta G is an internal contact-based screening estimate. It is not 
 
 Appropriate use:
 
-- candidate comparison,
-- early triage,
-- ranking,
-- identifying candidates with poor contact or excessive clash,
-- preparing external validation.
+* candidate comparison,
+* early triage,
+* ranking,
+* identifying candidates with poor contact or excessive clash,
+* preparing external validation.
 
 Inappropriate use:
 
-- claiming experimental binding affinity,
-- reporting final Kd without validation,
-- replacing all-atom MD or binding assays.
+* claiming experimental binding affinity,
+* reporting final Kd without validation,
+* replacing all-atom MD or binding assays.
 
----
+\---
 
 ## Contact Analysis Interpretation
 
@@ -513,7 +564,7 @@ This means:
 peptide residue 4Q contacts target chain A residue 134D
 ```
 
----
+\---
 
 ## Output Folders
 
@@ -522,29 +573,29 @@ Pepforge modules generate output folders to support traceability.
 Typical Docking Workbench export files include:
 
 ```text
-affinity_scoring_summary.csv
-molecular_dynamics_summary.csv
-molecular_dynamics_frames.csv
-best_docking_complex.pdb
-contact_annotated_complex.pdb
-OUTPUT_MANIFEST.txt
-CITATION_NOTICE.txt
-all_atom_validation_package/
+affinity\_scoring\_summary.csv
+molecular\_dynamics\_summary.csv
+molecular\_dynamics\_frames.csv
+best\_docking\_complex.pdb
+contact\_annotated\_complex.pdb
+OUTPUT\_MANIFEST.txt
+CITATION\_NOTICE.txt
+all\_atom\_validation\_package/
 ```
 
 Typical SPPS Planner export files may include:
 
 ```text
-editable_spps_plan.csv
-material_usage_from_editable_plan.csv
-printable_synthesis_checklist.csv
-spps_ml_ready_log_from_editable_plan.csv
-spps_plan.xlsx
-OUTPUT_MANIFEST.txt
-CITATION_NOTICE.txt
+editable\_spps\_plan.csv
+material\_usage\_from\_editable\_plan.csv
+printable\_synthesis\_checklist.csv
+spps\_ml\_ready\_log\_from\_editable\_plan.csv
+spps\_plan.xlsx
+OUTPUT\_MANIFEST.txt
+CITATION\_NOTICE.txt
 ```
 
----
+\---
 
 ## All-Atom Validation Bridge
 
@@ -553,12 +604,12 @@ Pepforge can export an all-atom validation package to support external validatio
 A typical validation package may include:
 
 ```text
-all_atom_validation_package/
-├── README_ALL_ATOM_VALIDATION.txt
-├── token_parameter_requirements.csv
-├── complex_candidate.pdb
-├── target_input.pdb
-├── peptide_input.pdb
+all\_atom\_validation\_package/
+├── README\_ALL\_ATOM\_VALIDATION.txt
+├── token\_parameter\_requirements.csv
+├── complex\_candidate.pdb
+├── target\_input.pdb
+├── peptide\_input.pdb
 ├── gromacs/
 ├── amber/
 └── namd/
@@ -576,7 +627,7 @@ FAM/FITC/TAMRA: small-molecule parameter may be required
 Ac/NH2: terminal patch check may be required
 ```
 
----
+\---
 
 ## Repository Structure
 
@@ -587,21 +638,21 @@ Pepforge/
 ├── README.md
 ├── LICENSE
 ├── CITATION.cff
-├── CITATION_NOTICE.txt
-├── MANUAL_EN.txt
-├── MANUAL_KO.txt
+├── CITATION\_NOTICE.txt
+├── MANUAL\_EN.txt
+├── MANUAL\_KO.txt
 ├── requirements.txt
 ├── environment.yml
-├── main_launcher.py
+├── main\_launcher.py
 ├── assets/
-│   ├── Pepforge_Icon.png
-│   └── Pepforge_Icon.ico
+│   ├── Pepforge\_Icon.png
+│   └── Pepforge\_Icon.ico
 ├── apps/
-│   ├── hotspot_finder/
-│   ├── peptide_design_engine/
-│   └── spps_planner_app/
-├── suite_gui/
-├── peptiforg_core/
+│   ├── hotspot\_finder/
+│   ├── peptide\_design\_engine/
+│   └── spps\_planner\_app/
+├── suite\_gui/
+├── peptiforg\_core/
 ├── docs/
 ├── tests/
 ├── installer/
@@ -610,55 +661,40 @@ Pepforge/
 
 ### Directory Description
 
-- `README.md`  
-  Main public-facing project document describing Pepforge, its modules, installation, usage, outputs, limitations, and citation policy.
+* `README.md`  
+Main public-facing project document describing Pepforge, its modules, installation, usage, outputs, limitations, and citation policy.
+* `LICENSE`  
+License file for the public research release.
+* `CITATION.cff`  
+GitHub-compatible citation metadata.
+* `CITATION\_NOTICE.txt`  
+Human-readable citation notice.
+* `MANUAL\_EN.txt` and `MANUAL\_KO.txt`  
+Detailed user manuals.
+* `requirements.txt`  
+Python package requirements.
+* `environment.yml`  
+Optional Conda environment definition.
+* `main\_launcher.py`  
+Main desktop launcher.
+* `assets/`  
+Program icons and visual resources.
+* `apps/`  
+Module-specific application code.
+* `suite\_gui/`  
+Shared GUI components.
+* `peptiforg\_core/`  
+Shared core utilities and common logic.
+* `docs/`  
+Technical documentation and method notes.
+* `tests/`  
+Regression and validation tests.
+* `installer/`  
+Installer configuration files.
+* `examples/`  
+Public-safe example inputs and outputs.
 
-- `LICENSE`  
-  License file for the public research release.
-
-- `CITATION.cff`  
-  GitHub-compatible citation metadata.
-
-- `CITATION_NOTICE.txt`  
-  Human-readable citation notice.
-
-- `MANUAL_EN.txt` and `MANUAL_KO.txt`  
-  Detailed user manuals.
-
-- `requirements.txt`  
-  Python package requirements.
-
-- `environment.yml`  
-  Optional Conda environment definition.
-
-- `main_launcher.py`  
-  Main desktop launcher.
-
-- `assets/`  
-  Program icons and visual resources.
-
-- `apps/`  
-  Module-specific application code.
-
-- `suite_gui/`  
-  Shared GUI components.
-
-- `peptiforg_core/`  
-  Shared core utilities and common logic.
-
-- `docs/`  
-  Technical documentation and method notes.
-
-- `tests/`  
-  Regression and validation tests.
-
-- `installer/`  
-  Installer configuration files.
-
-- `examples/`  
-  Public-safe example inputs and outputs.
-
----
+\---
 
 ## Installation
 
@@ -666,24 +702,24 @@ From the root Pepforge folder:
 
 ```bash
 pip install -r requirements.txt
-python main_launcher.py
+python main\_launcher.py
 ```
 
 If multiple Python versions are installed:
 
 ```bash
-py main_launcher.py
+py main\_launcher.py
 ```
 
 Individual module launch examples:
 
 ```bash
-python main_launcher.py --tool design
-python main_launcher.py --tool spps
-python main_launcher.py --tool docking
+python main\_launcher.py --tool design
+python main\_launcher.py --tool spps
+python main\_launcher.py --tool docking
 ```
 
----
+\---
 
 ## Validation and Testing
 
@@ -691,16 +727,16 @@ Pepforge public releases are tested using the included test suite.
 
 Typical validation includes:
 
-- launch path checks,
-- peptide parser checks,
-- terminal modification parsing,
-- SPPS planner output generation,
-- material table generation,
-- docking input parsing,
-- contact report generation,
-- PDB export generation,
-- citation notice generation,
-- cache cleanup.
+* launch path checks,
+* peptide parser checks,
+* terminal modification parsing,
+* SPPS planner output generation,
+* material table generation,
+* docking input parsing,
+* contact report generation,
+* PDB export generation,
+* citation notice generation,
+* cache cleanup.
 
 Users can run tests with:
 
@@ -716,7 +752,7 @@ python -m pytest
 
 A passing test suite does not imply biological validation. It means the software functions are operating according to the included programmatic checks.
 
----
+\---
 
 ## Recommended GitHub Release Workflow
 
@@ -726,7 +762,7 @@ For public release:
 2. Use repository release tags for version tracking.
 3. Use `v1.0.0` for the first public research release.
 4. Include `CITATION.cff`.
-5. Include `CITATION_NOTICE.txt`.
+5. Include `CITATION\_NOTICE.txt`.
 6. Create a GitHub Release.
 7. Attach the ZIP release asset.
 8. Optionally connect GitHub to Zenodo to obtain a DOI.
@@ -743,7 +779,7 @@ Recommended tag:
 v1.0.0
 ```
 
----
+\---
 
 ## Suggested GitHub Description
 
@@ -765,7 +801,7 @@ drug-discovery
 research-software
 ```
 
----
+\---
 
 ## Limitations
 
@@ -773,22 +809,22 @@ Pepforge should be interpreted as a research-support and screening workbench.
 
 Known limitations:
 
-- contact-based docking scores are approximate,
-- embedded molecular dynamics screening is not equivalent to full all-atom MD,
-- non-natural amino acids and chemical labels may require external parameterization,
-- estimated Delta G and Kd values are not experimental measurements,
-- SPPS material usage should be reviewed by a trained researcher before laboratory execution,
-- reagent equivalents and solvent volumes may need adjustment depending on laboratory protocol, resin, scale, peptide hydrophobicity, and protecting groups.
+* contact-based docking scores are approximate,
+* embedded molecular dynamics screening is not equivalent to full all-atom MD,
+* non-natural amino acids and chemical labels may require external parameterization,
+* estimated Delta G and Kd values are not experimental measurements,
+* SPPS material usage should be reviewed by a trained researcher before laboratory execution,
+* reagent equivalents and solvent volumes may need adjustment depending on laboratory protocol, resin, scale, peptide hydrophobicity, and protecting groups.
 
 Pepforge is intended to help organize and accelerate research reasoning, not to remove the need for expert review.
 
----
+\---
 
 ## Disclaimer
 
 Pepforge is provided for research, educational, and planning purposes. The software does not guarantee biological activity, binding affinity, synthesis success, purity, yield, or experimental safety. Users are responsible for validating designs, calculations, reagent conditions, and laboratory procedures according to institutional and chemical safety standards.
 
----
+\---
 
 ## Author
 
@@ -799,3 +835,4 @@ Korea Polytechnic University
 GitHub: `https://github.com/poowsh1407`
 
 Project: **Pepforge**
+
