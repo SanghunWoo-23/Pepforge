@@ -1,5 +1,5 @@
 
-# 📊 Peptide Design Engine — Auto Analysis Script
+#  Peptide Design Engine - Auto Analysis Script
 
 import pandas as pd
 import matplotlib.pyplot as plt

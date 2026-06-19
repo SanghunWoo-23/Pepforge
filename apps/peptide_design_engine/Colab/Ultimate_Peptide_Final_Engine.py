@@ -1,6 +1,6 @@
 
 # =========================================================
-# Peptide Design Engine — VERIFIED LENGTH-ONLY FINAL
+# Peptide Design Engine - VERIFIED LENGTH-ONLY FINAL
 # Length means final total token/expanded length:
 # peptide + linker + tag + label + chemistry + NH2
 # =========================================================

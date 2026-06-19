@@ -1,23 +1,25 @@
 #define MyAppName "Pepforge"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "Pepforge Project"
 #define MyAppExeName "Pepforge.exe"
 
 [Setup]
 AppId={{7A8B6BA7-9E5E-4C3B-8B0F-AE10BEE70100}}
-AppName={#MyAppName}
-AppVersion={#MyAppVersion}
+AppName=Pepforge
+AppVersion=2.0.0
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output
-OutputBaseFilename=Pepforge_Setup_v0.1.0
+OutputBaseFilename=Pepforge_Setup_v2.0.0
 SetupIconFile=..\assets\Pepforge_Icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
+CloseApplications=yes
+RestartIfNeededByRun=no
 ArchitecturesInstallIn64BitMode=x64compatible
 
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -32,7 +34,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
 WelcomeLabel1=Welcome to the Pepforge Setup Wizard
-WelcomeLabel2=This will install Pepforge, an integrated peptide hotspot analysis, design, and SPPS planning suite.
+WelcomeLabel2=This will install Pepforge, an integrated peptide research workbench for hotspot analysis, SPPS-aware design, synthesis planning, docking screening, and molecular dynamics validation workflows.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:";

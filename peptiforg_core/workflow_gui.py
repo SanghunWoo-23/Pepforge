@@ -50,7 +50,7 @@ class WorkflowApp:
         main = ttk.Frame(self.root, padding=18)
         main.pack(fill="both", expand=True)
         ttk.Label(main, text="Pepforge Workflow Mode", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(main, text="Standalone 모듈은 그대로 유지하고, Workflow Mode에서는 project.json + CSV로 Hotspot → Design → SPPS를 추적 가능하게 연결합니다.", wraplength=830).pack(anchor="w", pady=(6, 14))
+        ttk.Label(main, text="Standalone modules remain available. Workflow Mode connects Hotspot -> Design -> Docking -> SPPS using project/session files and exported tables.", wraplength=830).pack(anchor="w", pady=(6, 14))
 
         proj = ttk.LabelFrame(main, text="1. Project / Session", padding=12)
         proj.pack(fill="x", pady=6)
@@ -73,12 +73,12 @@ class WorkflowApp:
 
         steps = ttk.LabelFrame(main, text="3. Connected Workflow Actions", padding=12)
         steps.pack(fill="x", pady=6)
-        ttk.Label(steps, text="Hot Spot Finder → Peptide Design Engine", style="Sec.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(steps, text="Hot Spot Finder -> Peptide Design Engine", style="Sec.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Button(steps, text="Run Hotspot and save outputs", command=self.run_hotspot).grid(row=1, column=0, sticky="ew", padx=4, pady=4)
         ttk.Button(steps, text="Create selected_hotspots_for_design.csv", command=self.create_hotspot_transfer).grid(row=1, column=1, sticky="ew", padx=4, pady=4)
         ttk.Button(steps, text="Open standalone Hot Spot Finder", command=lambda: self.launch_tool("hotspot")).grid(row=1, column=2, sticky="ew", padx=4, pady=4)
 
-        ttk.Label(steps, text="Peptide Design Engine → SPPS Planner", style="Sec.TLabel").grid(row=2, column=0, sticky="w", pady=(10,0))
+        ttk.Label(steps, text="Peptide Design Engine -> Docking Workbench -> SPPS Planner", style="Sec.TLabel").grid(row=2, column=0, sticky="w", pady=(10,0))
         self.candidate_var = tk.StringVar(value="Ac-EEMQRR-NH2")
         ttk.Entry(steps, textvariable=self.candidate_var, width=38).grid(row=3, column=0, sticky="ew", padx=4, pady=4)
         ttk.Button(steps, text="Save selected candidate", command=self.save_candidate).grid(row=3, column=1, sticky="ew", padx=4, pady=4)

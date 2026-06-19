@@ -260,6 +260,10 @@ def _modifier_defaults(unit: str, lookup: dict[str, dict[str, Any]], inp: PlanIn
             "reagent_eq_source": "modifier_default_ac",
             "note_add": "N-terminal acetylation. Display as Ac; actual reagent is Acetic anhydride (Ac2O, MW 102.09 g/mol, density 1.08 g/mL) unless user overrides SOP."
         }
+    if "MANUAL_REQUIRED" in profile:
+        return {"coupling_reagent": reagent_name or "Manual required", "catalyst": "", "additive": "MANUAL REQUIRED: select exact vendor form/CoA before material calculation", "base": "", "reaction_solvent": "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "manual_required", "note_add": "Manual-required generic token: product/reagent MW may be excluded until a form-specific row is selected."}
+    if cls == "tag" or "MACRO_SEQUENCE" in profile:
+        return {"coupling_reagent": reagent_name or "Tag macro", "catalyst": "", "additive": "MACRO TAG: product MW included; material usage requires expanded residues or prebuilt reagent", "base": "", "reaction_solvent": "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "macro_sequence_manual_materials", "note_add": "Tag macro: final product MW includes tag residue mass, but reagent MW/material usage is manual unless expanded residue-by-residue."}
     if "NHS" in profile or t.endswith("-NHS") or "NHS" in t:
         return {"coupling_reagent": reagent_name, "catalyst": "", "additive": "activated ester; verify reagent form", "base": "DIEA", "reaction_solvent": "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "modifier_default_nhs", "note_add": "NHS/activated ester default; no DIC/HOBt unless actual reagent form requires it."}
     if "FITC" in t or "ISOTHIOCYANATE" in profile:
@@ -269,8 +273,8 @@ def _modifier_defaults(unit: str, lookup: dict[str, dict[str, Any]], inp: PlanIn
     if any(x in t for x in ["CY5", "CY3", "FAM", "TAMRA", "DABCYL", "BHQ", "DOTA", "NOTA"]):
         return {"coupling_reagent": reagent_name or "Activated label / chelator reagent", "catalyst": "", "additive": "protect from light; verify label reagent form", "base": "DIEA", "reaction_solvent": "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "modifier_default_label", "note_add": "Label/chelator default is conservative; exact chemistry depends on reagent form."}
     if token in {"Pal", "Myr", "Nic", "Caf", "Gal", "Stear", "Ole"} or "ACID" in profile or "CARBOXYLIC" in profile:
-        return {"coupling_reagent": inp.default_coupling_reagent or "DIC", "catalyst": inp.default_catalyst or "HOBt", "additive": "", "base": inp.default_base or "", "reaction_solvent": inp.default_reaction_solvent or "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "modifier_default_acid", "note_add": "Acid-like modifier/label/linker default follows selected coupling system; override as needed."}
-    if cls in {"label", "base chem", "chemical", "modifier", "n-term modifier", "linker"} or "SPECIAL" in profile:
+        return {"coupling_reagent": inp.default_coupling_reagent or "DIC", "catalyst": inp.default_catalyst or "HOBt", "additive": "", "base": inp.default_base or "", "reaction_solvent": inp.default_reaction_solvent or "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "modifier_default_acid", "note_add": "Acid-like modifier/label/cap default follows selected coupling system; override as needed."}
+    if cls in {"label", "base chem", "chemical", "modifier", "n-term modifier"} or "SPECIAL" in profile:
         return {"coupling_reagent": reagent_name or "Selected modifier reagent; verify form", "catalyst": "", "additive": "VERIFY chemistry", "base": "DIEA", "reaction_solvent": "DMF", "reagent_eq": inp.ac_eq, "coupling_repeat": inp.default_modifier_repeats, "reagent_eq_source": "modifier_default_verify", "note_add": "Generic modifier default; override based on actual reagent/SOP."}
     return None
 
@@ -331,8 +335,11 @@ def _make_step(step_no: int, unit: str, phase: str, chemistry: str, depro: int, 
     if ov:
         defaults.update({k: v for k, v in ov.items() if k not in {"override_source"}})
         source = str(ov.get("override_source") or "manual_override")
-    old_rxn = max(1, int(rxn or 1))
-    rep = _parse_repeat(defaults.get("coupling_repeat", rxn)) or old_rxn
+    old_rxn = max(0, int(rxn or 0))
+    if old_rxn == 0:
+        rep = 0
+    else:
+        rep = _parse_repeat(defaults.get("coupling_repeat", rxn)) or old_rxn
     if rep != old_rxn:
         # Reaction solvent volume scales with the number of coupling/reaction repeats.
         # Deprotection and wash volumes are unchanged.
@@ -383,29 +390,53 @@ def generate_step_matrix(inp: PlanInput, compounds: pd.DataFrame | None = None, 
     if family == "Amide":
         depro = int(rules.get("amide_loading_depro", 2)); wash = int(rules.get("amide_loading_dmf_wash", 6)); rxn = int(rules.get("amide_loading_synthesis", 1)); post = int(rules.get("amide_loading_post_dmf_wash", 2)); dmf_swell = int(rules.get("amide_loading_dmf_swell", 1))
         dmf = vol * (dmf_swell + depro * dmf_ratio + wash + rxn + post); pip = vol * (depro * pip_ratio); dcm = 0.0
-        note = "Amide loading: DMF swell 1 → depro 2 → DMF wash 6 → synthesis 1 → DMF wash 2"
+        note = "Amide loading: DMF swell 1 -> depro 2 -> DMF wash 6 -> synthesis 1 -> DMF wash 2"
         steps.append(_make_step(step_no, cterm_unit, "Loading", "Amide loading", depro, wash, rxn, post, 0, 1.0, 0.0, dmf, pip, dcm, note, inp, overrides, lookup, 1, n))
     else:
         swell = int(rules.get("ctc_loading_dcm_swell", 1)); rxn = int(rules.get("ctc_loading_synthesis", 1)); dmf_frac = float(rules.get("ctc_loading_synthesis_dmf_fraction", 0.1)); dcm_frac = float(rules.get("ctc_loading_synthesis_dcm_fraction", 0.9))
         dmf = vol * (rxn * dmf_frac); dcm = vol * (swell + rxn * dcm_frac)
-        note = "CTC/Trityl loading: DCM swell 1 → synthesis 1 with 90% DCM + 10% DMF"
+        note = "CTC/Trityl loading: DCM swell 1 -> synthesis 1 with 90% DCM + 10% DMF"
         steps.append(_make_step(step_no, cterm_unit, "Loading", "CTC/Trityl loading", 0, 0, rxn, 0, swell, dmf_frac, dcm_frac, dmf, 0.0, dcm, note, inp, overrides, lookup, 1, n))
     step_no += 1
     for idx, aa in enumerate(reversed(tokens[:-1]), start=2):
-        depro = int(rules.get("regular_depro", 2)); wash = int(rules.get("regular_dmf_wash_after_depro", 2)); rxn = int(rules.get("regular_coupling", 1)); post = int(rules.get("regular_post_dmf_wash", 6))
+        depro = int(rules.get("regular_depro", 2)); wash = int(rules.get("regular_dmf_wash_after_depro", 6)); rxn = int(rules.get("regular_coupling", 1)); post = int(rules.get("regular_post_dmf_wash", 2))
         dmf = vol * (depro * dmf_ratio + wash + rxn + post); pip = vol * (depro * pip_ratio)
-        note = "Regular: depro 2 → DMF wash 2 → coupling 1 or user-defined repeat → DMF wash 6"
+        note = "Regular: depro 2 -> DMF wash 6 -> coupling 1 or user-defined repeat -> DMF wash 2"
         pos_cterm = idx; pos_nterm = n - idx + 1
         steps.append(_make_step(step_no, aa, "Regular AA coupling", _profile_for(aa, lookup), depro, wash, rxn, post, 0, 1.0, 0.0, dmf, pip, 0.0, note, inp, overrides, lookup, pos_cterm, pos_nterm))
         step_no += 1
+    # v2.0.0 hotfix: the editable Plan table must show synthesis units from the
+    # user-entered peptide notation only.  Fmoc removal is an operation/checklist
+    # event, not a synthetic unit row.  Therefore Ac-EEMQRR-NH2 ends with Ac,
+    # not an extra "Fmoc removal" row.
     if parsed.nterm:
         token = parsed.nterm
-        depro = int(rules.get("last_depro", 2)); wash = int(rules.get("last_dmf_wash_after_depro", 6)); rxn = int(rules.get("last_reaction", 1)); post = int(rules.get("last_post_dmf_wash", 3)); dcmx = int(rules.get("last_dcm_wash", 3))
-        dmf = vol * (depro * dmf_ratio + wash + rxn + post); pip = vol * (depro * pip_ratio); dcm = vol * dcmx
+        rxn = int(rules.get("last_reaction", 1))
+        # v2.0.0 label/linker generalization:
+        # Any explicit N-terminal chemical, label, cap, or tag is treated as
+        # the final coupling/capping unit, similar to an amino-acid coupling row.
+        # The editable Plan shows only the real sequence unit. The practical
+        # Operation/Checklist flow is:
+        #   final Fmoc removal -> DMF wash x6 -> terminal unit reaction
+        #   -> last wash: DMF x3 first, then DCM x3.
+        # Linkers are kept in the core sequence as AA-like units.
+        depro = int(rules.get("last_depro", 2))
+        wash = int(rules.get("pre_modifier_dmf_wash_after_depro", 6))
+        post = int(rules.get("last_post_dmf_wash", 3))
+        dcmx = int(rules.get("last_dcm_wash", 3))
+        dmf = vol * (depro * dmf_ratio + wash + rxn + post)
+        pip = vol * (depro * pip_ratio)
+        dcm = vol * dcmx
         chem = _profile_for(token, lookup)
-        if token in {"Ac", "Acetic acid", "Acetyl"}: chem = "Ac/capping"
-        note = "Last/cap/modifier: depro 2 → DMF wash 6 → modifier/label reaction → DMF wash 3 → DCM wash 3"
+        if token in {"Ac", "Acetic acid", "Acetyl"}:
+            chem = "Ac/capping"
+        note = "Final N-terminal chemical/label/tag/cap unit. Linkers are not handled here; linkers remain core AA-like coupling units. Flow: final Fmoc removal -> DMF wash x6 -> terminal chemical reaction -> last wash DMF x3 then DCM x3."
         steps.append(_make_step(step_no, token, "Last / N-term cap", chem, depro, wash, rxn, post, dcmx, 1.0, 0.0, dmf, pip, dcm, note, inp, overrides, lookup, n+1, 0))
+    else:
+        # No separate Fmoc-removal row in the editable Plan.  Final deprotection
+        # and final DMF/DCM wash are generated from the last Fmoc-AA row by the
+        # GUI operation/checklist/material builders.
+        pass
     return pd.DataFrame([asdict(s) for s in steps])
 
 
@@ -440,7 +471,8 @@ def generate_detailed_operations(inp: PlanInput, compounds: pd.DataFrame | None 
                 "operation_group": group, "operation_detail": detail, "repeat_no": repeat_no, "solution_note": solution, "planned_reagent_g_operation": reagent_g,
                 "dmf_mL": dmf, "piperidine_mL": pip, "dcm_mL": dcm, "status": "To do", "actual_amount": "", "actual_eq": "", "operator_time": "", "note": ""
             }); line += 1
-        add("Reagent/resin", "Prepare resin or reagent", 1, reagent_g=s.planned_reagent_g)
+        if str(s.unit).lower() != "fmoc removal":
+            add("Reagent/resin", "Prepare resin or reagent", 1, reagent_g=s.planned_reagent_g)
         if s.phase == "Loading" and family == "Amide": add("Swell", "DMF swell 1", 1, dmf=vol, solution="DMF 100%")
         if s.phase == "Loading" and family == "CTC/Trityl": add("Swell", "DCM swell 1", 1, dcm=vol, solution="DCM 100%")
         for i in range(1, int(s.depro_x) + 1): add("Deprotection", f"Deprotection {i}", i, dmf=vol*dmf_ratio, pip=vol*pip_ratio, solution="20% piperidine + 80% DMF")
@@ -474,6 +506,8 @@ def generate_materials(inp: PlanInput, compounds: pd.DataFrame | None = None, ru
         agg[key]["planned_mmol"] += planned_mmol; agg[key]["planned_g"] += planned_g; agg[key]["planned_mg"] += planned_g*1000
     for _, s in step_plan.iterrows():
         unit_token = str(s.get("unit", "")).strip(); total_eq = float(s.get("total_reagent_eq") or s.get("reagent_eq") or inp.coupling_eq); req_mmol = inp.scale_mmol * total_eq
+        if unit_token.lower() == "fmoc removal" or int(float(s.get("coupling_repeat") or 0)) == 0:
+            continue
         row = lookup.get(unit_token, {}); mw = float(row.get("Reagent MW (g/mol)") or 0); planned_g = req_mmol * mw / 1000 if mw else 0.0
         add_agg(unit_token, str(row.get("Class", "coupling unit")), str(row.get("Reagent/protected form", unit_token)), req_mmol, planned_g, "g", f"step {int(s.step)} unit total_eq={total_eq} source={s.get('reagent_eq_source','')}")
         for material, cls in [(s.get("coupling_reagent", ""), "coupling/modifier reagent"), (s.get("catalyst", ""), "catalyst/additive"), (s.get("additive", ""), "additive"), (s.get("base", ""), "base")]:
@@ -524,7 +558,7 @@ def generate_printable_checklist(inp: PlanInput, compounds: pd.DataFrame | None 
             "Coupling system": f"{s.get('coupling_reagent','')} / {s.get('catalyst','')} / {s.get('base','')}",
             "Repeat": s.get("coupling_repeat", ""),
             "Date": "",
-            "Checked": "□",
+            "Checked": "No",
             "Note": "",
         })
     return pd.DataFrame(rows)

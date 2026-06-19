@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Peptide Design Engine — Desktop GUI / EXE-ready launcher
+Peptide Design Engine - Desktop GUI / EXE-ready launcher
 
 Design goals
 - Preserve the original engine: this GUI calls peptide_engine.run() directly.
@@ -43,6 +43,21 @@ except Exception:
 THIS_FILE = Path(__file__).resolve()
 PYTHON_DIR = THIS_FILE.parent
 ROOT_DIR = PYTHON_DIR.parent
+PROJECT_ROOT = PYTHON_DIR.parents[2] if len(PYTHON_DIR.parents) >= 3 else ROOT_DIR
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    from peptiforg_core.ui_helpers import set_pepforge_icon  # noqa: E402
+except Exception:
+    def set_pepforge_icon(window) -> None:
+        try:
+            icon = PROJECT_ROOT / "assets" / "Pepforge_Icon.png"
+            if icon.exists():
+                img = tk.PhotoImage(file=str(icon))
+                window.iconphoto(True, img)
+                setattr(window, "_pepforge_icon_img", img)
+        except Exception:
+            pass
 
 def resource_path(relative: str) -> Path:
     """Return a path that works both in source mode and PyInstaller onefile mode."""
@@ -166,7 +181,8 @@ class QueueWriter:
 class PeptideDesktopGUI(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Peptide Design Engine")
+        self.title("Pepforge Peptide Design Engine")
+        set_pepforge_icon(self)
         self.geometry("1180x820")
         self.minsize(1040, 720)
         self._app_icon_img = None
@@ -350,8 +366,8 @@ class PeptideDesktopGUI(tk.Tk):
         footer = ttk.Frame(self, padding=(10, 6))
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(2, weight=1)
-        ttk.Button(footer, text="▶ Run Engine", command=self.run_engine).grid(row=0, column=0, padx=4)
-        ttk.Button(footer, text="■ Stop requested", command=self.stop_requested).grid(row=0, column=1, padx=4)
+        ttk.Button(footer, text="Run Engine", command=self.run_engine).grid(row=0, column=0, padx=4)
+        ttk.Button(footer, text="Stop requested", command=self.stop_requested).grid(row=0, column=1, padx=4)
         ttk.Label(footer, textvariable=self.var_outdir).grid(row=0, column=2, sticky="ew", padx=8)
         ttk.Button(footer, text="Open Output Folder", command=self.open_output).grid(row=0, column=3, padx=4)
         ttk.Button(footer, text="Open ZIP", command=self.open_zip).grid(row=0, column=4, padx=4)
@@ -525,6 +541,7 @@ class PeptideDesktopGUI(tk.Tk):
         self._toggle_widget_grid(self.chem_sections["non_nat"], show_non_nat)
         self._toggle_widget_grid(self.chem_sections["base_chem"], show_base)
         self._toggle_widget_grid(self.chem_sections["base_info"], show_base)
+        self._toggle_widget_grid(getattr(self, "motif_frame", None), bool(self.var_motif_lock.get()))
 
     def _tab_chemistry(self) -> None:
         tab = ttk.Frame(self.nb)
@@ -564,7 +581,7 @@ class PeptideDesktopGUI(tk.Tk):
 
         hidden_note = ttk.Label(
             inner,
-            text="세부 선택 라이브러리는 위 Feature toggles에서 해당 기능을 체크하면 표시됩니다.",
+            text="Detailed option libraries are shown only when their feature toggle is enabled.",
             foreground="#555",
             wraplength=980
         )
@@ -647,26 +664,30 @@ class PeptideDesktopGUI(tk.Tk):
             "base_info": base_info,
         }
 
-        ttk.Label(inner, text="Motif / bridge constraints", font=("Segoe UI", 11, "bold")).grid(row=r, column=0, columnspan=4, sticky="w", padx=6, pady=(10, 4))
+        self.motif_frame = ttk.LabelFrame(inner, text="Motif / bridge constraints", padding=8)
+        self.motif_frame.grid(row=r, column=0, columnspan=4, sticky="ew", padx=6, pady=(10, 8))
+        self.motif_frame.columnconfigure(1, weight=1)
+        mf = self.motif_frame
+        mr = 0
+        ttk.Label(mf, text="Motif preset").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
+        ttk.Combobox(mf, textvariable=self.var_motif_preset, values=["Custom", "RGD integrin-like", "PXXP SH3-like", "LXXLL nuclear-receptor-like", "KLV hydrophobic anchor-like", "RGD + acidic patch example", "Short cationic anchor example"], width=32, state="readonly").grid(row=mr, column=1, sticky="ew", padx=6, pady=4)
+        ttk.Button(mf, text="Apply preset", command=self._apply_motif_preset).grid(row=mr, column=2, sticky="w", padx=6, pady=4)
+        mr += 1
+        ttk.Label(mf, text="Locked motifs").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
+        ttk.Entry(mf, textvariable=self.var_locked_motifs, width=50).grid(row=mr, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        mr += 1
+        ttk.Label(mf, text="Motif placement").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
+        ttk.Combobox(mf, textvariable=self.var_motif_placement_mode, values=["OFF", "FIXED", "RANDOM"], width=22, state="readonly").grid(row=mr, column=1, sticky="ew", padx=6, pady=4)
+        ttk.Label(mf, text="Bridge anchor length").grid(row=mr, column=2, sticky="w", padx=6, pady=4)
+        ttk.Entry(mf, textvariable=self.var_bridge_anchor_len, width=12).grid(row=mr, column=3, sticky="w", padx=6, pady=4)
+        mr += 1
+        ttk.Label(mf, text="Motif specs").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
+        ttk.Entry(mf, textvariable=self.var_motif_placement_specs, width=50).grid(row=mr, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(mf, text="OFF disables motif placement. FIXED: RGD@1, EEMQR@4 or RGD@1 / EEMQR@4   |   RANDOM: RGD, EEMQR or RGD / EEMQR", foreground="#666666").grid(row=mr+1, column=1, columnspan=3, sticky="w", padx=6, pady=(0,4))
+        mr += 2
+        ttk.Label(mf, text="Legacy position mode").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
+        ttk.Combobox(mf, textvariable=self.var_motif_pos_mode, values=["FREE", "N_TERM", "CENTER", "C_TERM"], width=22, state="readonly").grid(row=mr, column=1, sticky="ew", padx=6, pady=4)
         r += 1
-        ttk.Label(inner, text="Motif preset").grid(row=r, column=0, sticky="w", padx=6, pady=4)
-        ttk.Combobox(inner, textvariable=self.var_motif_preset, values=["Custom", "RGD integrin-like", "PXXP SH3-like", "LXXLL nuclear-receptor-like", "KLV hydrophobic anchor-like", "RGD + acidic patch example", "Short cationic anchor example"], width=32, state="readonly").grid(row=r, column=1, sticky="ew", padx=6, pady=4)
-        ttk.Button(inner, text="Apply preset", command=self._apply_motif_preset).grid(row=r, column=2, sticky="w", padx=6, pady=4)
-        r += 1
-        ttk.Label(inner, text="Locked motifs").grid(row=r, column=0, sticky="w", padx=6, pady=4)
-        ttk.Entry(inner, textvariable=self.var_locked_motifs, width=50).grid(row=r, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        r += 1
-        ttk.Label(inner, text="Motif placement").grid(row=r, column=0, sticky="w", padx=6, pady=4)
-        ttk.Combobox(inner, textvariable=self.var_motif_placement_mode, values=["OFF", "FIXED", "RANDOM"], width=22, state="readonly").grid(row=r, column=1, sticky="ew", padx=6, pady=4)
-        ttk.Label(inner, text="Bridge anchor length").grid(row=r, column=2, sticky="w", padx=6, pady=4)
-        ttk.Entry(inner, textvariable=self.var_bridge_anchor_len, width=12).grid(row=r, column=3, sticky="w", padx=6, pady=4)
-        r += 1
-        ttk.Label(inner, text="Motif specs").grid(row=r, column=0, sticky="w", padx=6, pady=4)
-        ttk.Entry(inner, textvariable=self.var_motif_placement_specs, width=50).grid(row=r, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(inner, text="OFF disables motif placement. FIXED: RGD@1, EEMQR@4 or RGD@1 / EEMQR@4   |   RANDOM: RGD, EEMQR or RGD / EEMQR", foreground="#666666").grid(row=r+1, column=1, columnspan=3, sticky="w", padx=6, pady=(0,4))
-        r += 2
-        ttk.Label(inner, text="Legacy position mode").grid(row=r, column=0, sticky="w", padx=6, pady=4)
-        ttk.Combobox(inner, textvariable=self.var_motif_pos_mode, values=["FREE", "N_TERM", "CENTER", "C_TERM"], width=22, state="readonly").grid(row=r, column=1, sticky="ew", padx=6, pady=4)
 
         self._update_chemistry_visibility()
 
@@ -725,8 +746,8 @@ class PeptideDesktopGUI(tk.Tk):
         for i in range(4):
             import_box.columnconfigure(i, weight=1)
         ttk.Button(import_box, text="Import prepared CSVs", command=self.import_training_data).grid(row=0, column=0, sticky="ew", padx=4, pady=4)
-        ttk.Button(import_box, text="Parse AF3 folder → Import", command=self.parse_import_af3_folder).grid(row=0, column=1, sticky="ew", padx=4, pady=4)
-        ttk.Button(import_box, text="Parse PRODIGY txt/csv/folder → Import", command=self.parse_import_prodigy).grid(row=0, column=2, sticky="ew", padx=4, pady=4)
+        ttk.Button(import_box, text="Parse AF3 folder -> Import", command=self.parse_import_af3_folder).grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Button(import_box, text="Parse PRODIGY txt/csv/folder -> Import", command=self.parse_import_prodigy).grid(row=0, column=2, sticky="ew", padx=4, pady=4)
         ttk.Button(import_box, text="Open training DB", command=self.open_training_db).grid(row=0, column=3, sticky="ew", padx=4, pady=4)
 
         ml_box = ttk.LabelFrame(top, text="Train / Rerank", padding=8)
@@ -977,6 +998,15 @@ class PeptideDesktopGUI(tk.Tk):
             cfg["HOTSPOT_PDB_TEXT"] = Path(pdb_file).read_text(encoding="utf-8")
             cfg["HOTSPOT_SOURCE"] = "PDB"
 
+        # Motif lock is the user-facing master switch. If it is off, motif
+        # placement must be disabled internally as well, even if old/preset
+        # values remain in hidden fields.
+        if not bool(self.var_motif_lock.get()):
+            cfg["LOCKED_MOTIFS"] = []
+            cfg["MOTIF_PLACEMENT_MODE"] = "OFF"
+            cfg["MOTIF_PLACEMENT_SPECS"] = ""
+            cfg["MOTIF_POSITION_MODE"] = "FREE"
+
         adv = self.advanced_text.get("1.0", "end").strip()
         if adv:
             cfg.update(json.loads(adv))
@@ -1104,8 +1134,8 @@ class PeptideDesktopGUI(tk.Tk):
                     write_rows(rerank_path, rows[:int(cfg.get("FINAL_TOPK", 10))])
                     paths["trained_ml_reranked_csv"] = str(rerank_path)
                     paths["zip"] = rebuild_output_zip(Path(paths["output_dir"]))
-                    print(f"✅ trained ML reranking saved: {rerank_path}")
-                print("\n✅ DONE")
+                    print(f"[OK] trained ML reranking saved: {rerank_path}")
+                print("\n[OK] DONE")
                 print(f"Output ZIP: {paths.get('zip', '')}")
             self.msg_q.put(("done", rows, paths))
         except Exception:
@@ -1125,7 +1155,7 @@ class PeptideDesktopGUI(tk.Tk):
         for item in self.training_tree.get_children():
             self.training_tree.delete(item)
         if not path.exists():
-            self.var_training_status.set(f"Training DB: not found yet — {path}")
+            self.var_training_status.set(f"Training DB: not found yet - {path}")
             return
         try:
             with path.open("r", newline="", encoding="utf-8-sig") as f:
@@ -1164,7 +1194,7 @@ class PeptideDesktopGUI(tk.Tk):
             return
         path = Path(path_text).expanduser()
         if not path.exists():
-            self.var_model_status.set(f"Model status: not found — {path}")
+            self.var_model_status.set(f"Model status: not found - {path}")
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -1196,7 +1226,7 @@ class PeptideDesktopGUI(tk.Tk):
         }]
         write_rows(Path(path), rows)
         self.var_mapping_csv.set(path)
-        self._log(f"✅ mapping template saved: {path}\n")
+        self._log(f"[OK] mapping template saved: {path}\n")
         messagebox.showinfo("Mapping template", f"Saved:\n{path}")
 
     def open_training_db(self) -> None:
@@ -1218,7 +1248,7 @@ class PeptideDesktopGUI(tk.Tk):
             return
         try:
             result = data_manager.append_training_csvs(list(files), self.var_training_db.get())
-            self._log(f"✅ training data updated: {result['training_db']} | added={result['added']} | total={result['total']}\n")
+            self._log(f"[OK] training data updated: {result['training_db']} | added={result['added']} | total={result['total']}\n")
             self.refresh_training_preview()
             messagebox.showinfo("Import complete", f"Added {result['added']} rows. Total: {result['total']}")
         except Exception as e:
@@ -1237,8 +1267,8 @@ class PeptideDesktopGUI(tk.Tk):
             mapping = self.var_mapping_csv.get().strip() or None
             result = external_parsers.parse_and_import_af3(folder, db, parsed_csv=parsed_csv, mapping_csv=mapping)
             pr, ap = result["parse"], result["append"]
-            self._log(f"✅ AF3 parsed: {pr['rows']} rows → {pr['output_csv']}\n")
-            self._log(f"✅ AF3 imported: added={ap['added']} | total={ap['total']} | db={ap['training_db']}\n")
+            self._log(f"[OK] AF3 parsed: {pr['rows']} rows -> {pr['output_csv']}\n")
+            self._log(f"[OK] AF3 imported: added={ap['added']} | total={ap['total']} | db={ap['training_db']}\n")
             self.refresh_training_preview()
             messagebox.showinfo("AF3 parse/import complete", f"Parsed {pr['rows']} rows.\nAdded {ap['added']} rows.\nTotal: {ap['total']}")
         except Exception as e:
@@ -1263,8 +1293,8 @@ class PeptideDesktopGUI(tk.Tk):
             mapping = self.var_mapping_csv.get().strip() or None
             result = external_parsers.parse_and_import_prodigy(path, db, parsed_csv=parsed_csv, mapping_csv=mapping)
             pr, ap = result["parse"], result["append"]
-            self._log(f"✅ PRODIGY parsed: {pr['rows']} rows → {pr['output_csv']}\n")
-            self._log(f"✅ PRODIGY imported: added={ap['added']} | total={ap['total']} | db={ap['training_db']}\n")
+            self._log(f"[OK] PRODIGY parsed: {pr['rows']} rows -> {pr['output_csv']}\n")
+            self._log(f"[OK] PRODIGY imported: added={ap['added']} | total={ap['total']} | db={ap['training_db']}\n")
             self.refresh_training_preview()
             messagebox.showinfo("PRODIGY parse/import complete", f"Parsed {pr['rows']} rows.\nAdded {ap['added']} rows.\nTotal: {ap['total']}")
         except Exception as e:
@@ -1278,7 +1308,7 @@ class PeptideDesktopGUI(tk.Tk):
             model_path = ml_trainer.train_from_csv(self.var_training_db.get(), self.var_models_dir.get(), label_col=self.var_ml_label.get())
             self.var_trained_model.set(str(model_path))
             self.update_model_status()
-            self._log(f"✅ surrogate model saved: {model_path}\n")
+            self._log(f"[OK] surrogate model saved: {model_path}\n")
             messagebox.showinfo("ML training complete", f"Saved model:\n{model_path}")
         except Exception as e:
             messagebox.showerror("ML training error", str(e))
@@ -1300,7 +1330,7 @@ class PeptideDesktopGUI(tk.Tk):
                     self._log("Run finished.\n")
                 elif tag == "error":
                     self._set_buttons_running(False)
-                    self._log("\n❌ ERROR\n" + item[1] + "\n")
+                    self._log("\n[ERROR] ERROR\n" + item[1] + "\n")
                     messagebox.showerror("Run error", item[1][-3000:])
         except queue.Empty:
             pass

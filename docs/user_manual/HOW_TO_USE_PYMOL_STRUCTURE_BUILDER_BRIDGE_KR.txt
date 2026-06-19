@@ -1,0 +1,36 @@
+PyMOL Structure Builder Bridge란?
+=================================
+
+Bridge는 '구조 생성 결과를 다음 단계로 넘기기 위한 연결 패키지'다.
+즉 Pepforge가 Pal-dG-dH-dK-NH2 같은 modified peptide를 입력받아 SDF/PDB/PML/metadata를 만들고,
+그 결과를 PyMOL 확인, 외부 docking, 외부 MD, 외부 검증으로 이어갈 수 있게 파일 묶음을 생성한다는 뜻이다.
+
+버튼별 사용법
+1. Analyze
+   - 입력 sequence token을 해석한다.
+   - Pal, dK, FITC, AEEA, Biotin 같은 token이 residue인지 chemical modifier인지 확인한다.
+
+2. Build SDF/PDB/PML
+   - PyMOL에서 열어볼 구조 파일을 만든다.
+   - 우선 이 버튼으로 SDF/PDB/PML이 정상 생성되는지 본다.
+
+3. Simulation Bridge
+   - 저사양 PC에서 가능한 conformer/geometry sanity check를 수행한다.
+   - conformer_metrics.csv, parameter_requirements.csv, evidence_report.txt/json을 만든다.
+   - 실패해도 bridge_diagnostics 폴더에 diagnostic 파일을 남긴다.
+
+4. Docking Bridge
+   - AutoDock Vina/Smina/Gnina 같은 외부 docking으로 넘기기 위한 template/config/import schema를 만든다.
+   - Pepforge 내부에서 최종 docking을 증명하는 기능이 아니라 외부 실행 준비 파일이다.
+
+5. MD Prep Bridge
+   - GROMACS/OpenMM/AMBER 같은 외부 MD 준비 파일을 만든다.
+   - modified token은 force-field parameter와 charge 검토가 필요하다.
+
+6. MD Result Import
+   - 외부에서 돌린 MD 결과를 Pepforge로 다시 가져오기 위한 import template을 만든다.
+
+분석 오류 발견됨의 의미
+- 입력 token, 구조 생성, template, dependency, validation 중 문제가 감지됐다는 뜻이다.
+- 완전 실패일 수도 있지만, 일부 출력 파일은 만들어졌을 수 있다.
+- output/bridge_diagnostics 안의 *_diagnostic.txt/json/csv를 확인한다.

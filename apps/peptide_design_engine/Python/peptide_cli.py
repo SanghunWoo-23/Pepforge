@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Peptide Design Engine — EXE-ready CLI
+Peptide Design Engine - EXE-ready CLI
 - Preserves the original engine and outputs.
 - Adds stable preset layering, target-mode shortcut, continual-learning CSV import,
   lightweight ML training, and optional trained-model reranking.
@@ -98,7 +98,7 @@ def write_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Peptide Design Engine — EXE-ready continual-learning CLI")
+    p = argparse.ArgumentParser(description="Peptide Design Engine - EXE-ready continual-learning CLI")
     p.add_argument("--config", default=None)
     p.add_argument("--target", default=None)
     p.add_argument("--preset", choices=["fast", "paper", "exploration", "hotspot_only"], default=None,
@@ -260,7 +260,7 @@ def main() -> None:
         parsed_af3 = parsed_dir / "parsed_af3_latest.csv"
         result = external_parsers.parse_af3_folder(args.parse_af3_folder, parsed_af3, mapping_csv=args.candidate_map)
         parsed_inputs.append(str(parsed_af3))
-        print(f"✅ AF3 parsed: {result['rows']} rows -> {result['output_csv']}")
+        print(f"[OK] AF3 parsed: {result['rows']} rows -> {result['output_csv']}")
 
     if args.parse_prodigy:
         if external_parsers is None:
@@ -268,20 +268,20 @@ def main() -> None:
         parsed_prod = parsed_dir / "parsed_prodigy_latest.csv"
         result = external_parsers.parse_prodigy_path(args.parse_prodigy, parsed_prod, mapping_csv=args.candidate_map)
         parsed_inputs.append(str(parsed_prod))
-        print(f"✅ PRODIGY parsed: {result['rows']} rows -> {result['output_csv']}")
+        print(f"[OK] PRODIGY parsed: {result['rows']} rows -> {result['output_csv']}")
 
     import_inputs = list(args.import_training_data or []) + parsed_inputs
     if import_inputs:
         if data_manager is None:
             raise RuntimeError("data_manager.py could not be imported.")
         result = data_manager.append_training_csvs(import_inputs, args.training_db)
-        print(f"✅ training data updated: {result['training_db']} | added={result['added']} | total={result['total']}")
+        print(f"[OK] training data updated: {result['training_db']} | added={result['added']} | total={result['total']}")
 
     if args.train_ml:
         if ml_trainer is None:
             raise RuntimeError("ml_trainer.py could not be imported.")
         model_path = ml_trainer.train_from_csv(args.training_db, args.models_dir, label_col=args.ml_label)
-        print(f"✅ surrogate model saved: {model_path}")
+        print(f"[OK] surrogate model saved: {model_path}")
 
     if args.no_run:
         return
@@ -307,9 +307,9 @@ def main() -> None:
         paths["zip"] = str(zip_path)
         rows = reranked
 
-    print("\n✅ DONE")
+    print("\n[OK] DONE")
     print(f"Output ZIP: {paths.get('zip', '')}")
-    print("\n🏆 Top candidates")
+    print("\n[TOP] Top candidates")
     for r in rows[:int(cfg.get("FINAL_TOPK", 10))]:
         print(f"{int(r.get('rank', 0)):>3} | score={float(r.get('total_score', 0)):.3f} | length={r.get('length')} | valid={r.get('valid')} | dock={r.get('docking_ready_level','NA')} | {r.get('sequence','')}")
 

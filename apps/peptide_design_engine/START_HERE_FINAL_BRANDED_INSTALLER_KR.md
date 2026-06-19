@@ -18,7 +18,7 @@ assets/PeptideDesignEngine_Splash.png
 
 ```text
 App Name: Peptide Design Engine
-Version: 1.0.0
+Version: 2.1.0
 Publisher: Sanghun Woo
 GitHub URL: https://github.com/SanghunWoo-23/peptide-design-engine
 ```

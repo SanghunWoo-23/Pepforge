@@ -1,9 +1,11 @@
+from pathlib import Path
+APP_DIR = Path(__file__).resolve().parents[1]
 import pandas as pd
 from sequence_hotspot_finder.parser import parse_sequence
 
 
 def test_modified_parser():
-    db = pd.read_csv('data/token_db.csv')
+    db = pd.read_csv(APP_DIR / 'data/token_db.csv')
     df, model = parse_sequence('Ac-K-dA-Ahx-W-FITC', db)
     assert model == 'KAXW'
     assert df.loc[2, 'is_d_form'] == 1
@@ -12,7 +14,7 @@ def test_modified_parser():
 
 
 def test_sidechain_parser():
-    db = pd.read_csv('data/token_db.csv')
+    db = pd.read_csv(APP_DIR / 'data/token_db.csv')
     df, model = parse_sequence('K[Biotin]-dR-W-NH2', db)
     assert df.loc[0, 'sidechain_mod'] == 'Biotin'
     assert model == 'KRW'

@@ -1,9 +1,11 @@
+from pathlib import Path
+APP_DIR = Path(__file__).resolve().parents[1]
 import pandas as pd
 from sequence_hotspot_finder.validation import validate_token_db, validate_config
 
 
 def test_token_db_validation():
-    df = pd.read_csv('data/token_db.csv')
+    df = pd.read_csv(APP_DIR / 'data/token_db.csv')
     assert isinstance(validate_token_db(df), list)
 
 

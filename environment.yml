@@ -1,0 +1,17 @@
+name: pepforge
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pandas
+  - numpy
+  - scikit-learn
+  - openpyxl
+  - matplotlib
+  - pyyaml
+  - pip:
+      - pyinstaller
+      - xgboost
+      - joblib

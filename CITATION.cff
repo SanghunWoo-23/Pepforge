@@ -1,0 +1,30 @@
+cff-version: "1.2.0"
+title: "Pepforge: An Integrated Peptide Research Workbench"
+message: "If you use Pepforge, Pepforge-generated outputs, or Pepforge-derived workflows in academic work, please cite this repository and the corresponding release DOI when available."
+type: software
+authors:
+  - family-names: "Woo"
+    given-names: "Sanghun"
+    email: "poowsh1407@tukorea.ac.kr"
+repository-code: "https://github.com/poowsh1407/Pepforge"
+url: "https://github.com/poowsh1407/Pepforge"
+version: "2.0.0"
+date-released: "2026-06-19"
+abstract: "Pepforge is an integrated peptide research workbench for hotspot analysis, SPPS-aware peptide design, synthesis planning, modified-peptide structure generation, docking-oriented screening, external validation bridging, and publication-oriented evidence reporting."
+keywords:
+  - peptide design
+  - SPPS
+  - docking
+  - molecular dynamics
+  - peptide synthesis
+  - bioinformatics
+license: "LicenseRef-Pepforge-Academic-Citation-Required"
+preferred-citation:
+  type: software
+  title: "Pepforge: An Integrated Peptide Research Workbench"
+  authors:
+    - family-names: "Woo"
+      given-names: "Sanghun"
+  version: "2.0.0"
+  repository-code: "https://github.com/poowsh1407/Pepforge"
+  url: "https://github.com/poowsh1407/Pepforge"

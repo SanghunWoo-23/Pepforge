@@ -1,0 +1,26 @@
+Pepforge Public Academic Citation License
+Version 1.0
+
+Copyright (c) 2026 Sanghun Woo
+
+Permission is granted to use, copy, modify, and distribute this software and its documentation for academic, educational, research, portfolio-review, and non-commercial purposes, subject to the following conditions:
+
+1. Copyright Notice
+   The above copyright notice and this license notice must be included in all copies or substantial portions of the software.
+
+2. Academic Citation Requirement
+   If Pepforge, Pepforge-generated results, Pepforge-derived workflows, or modified versions of Pepforge are used in academic work, including journal articles, preprints, theses, dissertations, posters, presentations, reports, grant documents, or research-derived software, the user must cite Pepforge and the corresponding release DOI when available.
+
+   Recommended citation:
+   Woo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version 8.8. https://github.com/poowsh1407/Pepforge
+
+3. Result Attribution
+   Output folders, generated analysis packages, docking/contact reports, SPPS planning outputs, and derived figures or tables should retain or reproduce the Pepforge citation notice.
+
+4. No Warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. THE AUTHOR SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+5. Scientific Scope
+   Embedded docking, affinity, and molecular dynamics outputs are intended for screening and prioritization. Quantitative binding claims should be validated using external all-atom molecular dynamics and/or experimental assays.
+
+Note: This is a custom public-source license with an academic citation requirement. If you need OSI-approved open-source compatibility, contact the author before redistribution under a different license.

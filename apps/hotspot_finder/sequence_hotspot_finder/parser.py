@@ -9,7 +9,7 @@ SIDECHAIN_RE = re.compile(r"^([A-Za-z0-9.]+)\[([A-Za-z0-9_.+\-]+)\]$")
 
 
 def normalize_sequence(seq: str) -> str:
-    return str(seq).strip().replace(" ", "").replace("\t", "").replace("–", "-").replace("—", "-")
+    return str(seq).strip().replace(" ", "").replace("\t", "").replace("-", "-").replace("-", "-")
 
 
 def split_sequence(seq: str) -> list[str]:

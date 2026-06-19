@@ -1,6 +1,6 @@
 
 # =========================================================
-# Peptide Design Engine — VERIFIED COLAB UI
+# Peptide Design Engine - VERIFIED COLAB UI
 # =========================================================
 from IPython.display import display, Markdown
 import ipywidgets as widgets
@@ -12,7 +12,7 @@ seed_input = widgets.IntText(value=42, description="Seed")
 engine_mode = widgets.Dropdown(options=["NSGA2","GA"], value="NSGA2", description="Engine")
 design_mode = widgets.Dropdown(options=["SINGLE","MULTI","BRIDGE"], value="MULTI", description="TargetMode")
 bridge_anchor_len = widgets.IntSlider(value=4, min=2, max=10, description="BridgeAnchor")
-bridge_require_order = widgets.Checkbox(value=True, description="Bridge A→B")
+bridge_require_order = widgets.Checkbox(value=True, description="Bridge A->B")
 
 len_mode = widgets.Dropdown(options=["RANGE","FIX"], value="RANGE", description="LenMode")
 fix_len = widgets.IntSlider(value=24, min=8, max=80, description="FixLen")
@@ -448,7 +448,7 @@ def build_config():
     return _normalize_length_config(cfg)
 
 def display_ui():
-    display(Markdown("## Peptide Design Engine — Final Colab UI"))
+    display(Markdown("## Peptide Design Engine - Final Colab UI"))
     display(widgets.HTML("<b>Preset Modes:</b> use these buttons to quickly apply recommended settings."))
     display(widgets.HBox([fast_mode_button, paper_mode_button, explore_mode_button, hotspot_only_button]))
     tabs = widgets.Tab()

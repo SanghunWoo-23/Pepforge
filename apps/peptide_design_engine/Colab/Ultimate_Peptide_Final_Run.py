@@ -1,6 +1,6 @@
 
 # =========================================================
-# Peptide Design Engine — VERIFIED COLAB RUN
+# Peptide Design Engine - VERIFIED COLAB RUN
 # =========================================================
 from IPython.display import display, Markdown
 import datetime
@@ -91,7 +91,7 @@ def run_pipeline(b):
     output.clear_output()
     with output:
         cfg = build_config()
-        print("🚀 START VERIFIED LENGTH-ONLY PIPELINE")
+        print("[RUN] START VERIFIED LENGTH-ONLY PIPELINE")
         print(f"Length mode: {cfg['LEN_MODE']} | RANGE: {cfg['MIN_LENGTH']}-{cfg['MAX_LENGTH']} | FIX: {cfg['FIX_LENGTH']}")
         print("Normalized length settings are applied before engine execution.")
         print(f"Length count: {cfg['LENGTH_COUNT_MODE']} | Binder: {cfg['BINDER_MODE']}")
@@ -99,7 +99,7 @@ def run_pipeline(b):
 
         rows, progress, paths = run(cfg, verbose=True)
 
-        print("✅ DONE")
+        print("[OK] DONE")
         print(f"Hotspot status: {CONFIG.get('_HOTSPOT_STATUS', '')}")
 
         # Explicit hotspot display for Colab users.
@@ -109,10 +109,10 @@ def run_pipeline(b):
         except Exception:
             hs = []
         if hs:
-            print("\n🎯 Extracted target hotspots used for design")
+            print("\n[TARGET] Extracted target hotspots used for design")
             for i, h in enumerate(hs, 1):
                 print(f"{i}. {h.get('motif','')} | range={h.get('chain','')}:{h.get('start','')}-{h.get('end','')} | source={h.get('source','')} | score={h.get('score','')}")
-            print("\n🔗 Peptide-hotspot mapping columns are included in results_top.csv:")
+            print("\n[LINK] Peptide-hotspot mapping columns are included in results_top.csv:")
             print("- target_hotspot_sequences")
             print("- hotspot_peptide_map")
             print("- best_hotspot")
@@ -123,16 +123,16 @@ def run_pipeline(b):
             print("- peptide_to_target_hotspot")
             print("- hotspot_status")
         else:
-            print("\n🎯 No extracted hotspots found. If you want automatic hotspot extraction, turn Auto hotspot ON and provide ProteinSeq/PDB, or paste a protein sequence into Targets.")
+            print("\n[TARGET] No extracted hotspots found. If you want automatic hotspot extraction, turn Auto hotspot ON and provide ProteinSeq/PDB, or paste a protein sequence into Targets.")
 
-        print("\n🏆 Top candidates")
+        print("\n[TOP] Top candidates")
         display(_try_pandas_table(rows, cfg.get("FINAL_TOPK", 10)))
 
-        print("\n📈 Plots")
+        print("\n[PLOTS] Plots")
         _plot_progress(progress)
         _plot_scores(rows)
 
-        print("\n📁 Saved files:")
+        print("\n[FILES] Saved files:")
         for k, v in paths.items():
             print(f"- {k}: {v}")
 

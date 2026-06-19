@@ -1,0 +1,37 @@
+{
+  "pepforge_version": "2.0.0",
+  "release_label": "v2.0.0 clean public source package",
+  "release_type": "clean_complete_source_package_for_direct_github_upload",
+  "date_released": "2026-06-19",
+  "maintainer": "Sanghun Woo",
+  "repository": "https://github.com/poowsh1407/Pepforge",
+  "core_modules": [
+    "Hotspot Finder",
+    "Peptide Design Engine",
+    "SPPS Planner",
+    "Docking Workbench",
+    "PyMOL Structure Builder",
+    "Workflow Mode",
+    "CLI validation/audit utilities"
+  ],
+  "major_updates": [
+    "SPPS terminal last wash corrected to DMF x3 followed by DCM x3 without redundant terminal post-coupling DMF x2",
+    "Compound DB normalized with separated reagent MW and product contribution MW",
+    "Docking Workbench collapsible Input and full-data windows added",
+    "PRODIGY-like/GROMACS-like/MD-style reporting tables preserved and documented",
+    "PyMOL Structure Builder quick-safe bridge export preserved"
+  ],
+  "data_policy": {
+    "active_tokens": 212,
+    "manual_required_active_tokens": 38,
+    "reagent_mw_blank_active_tokens": 85,
+    "product_contribution_blank_active_tokens": 37,
+    "blank_policy": "Blank values are used for manual-required or vendor-form-dependent rows; they are not automatically data loss."
+  },
+  "scope_boundary": "Research planning, screening, bridge export, and evidence reporting. Not final binding proof, not production QC, not replacement for external docking or MD.",
+  "github_upload_notes": [
+    "This package is intended to be uploaded directly as the repository contents.",
+    "Runtime outputs, build artifacts, caches, and executable artifacts are excluded by .gitignore.",
+    "Use tag v2.0.0 for this clean baseline."
+  ]
+}

@@ -13,9 +13,32 @@ class ParsedSequence:
 
 
 NTERM_MODIFIERS = [
-    "Ac", "FITC", "Biotin", "BIOTIN", "FAM", "TAMRA", "CY3", "CY5", "CY7",
-    "Pal", "Myr", "Gal", "Nic", "Caf", "DOTA", "NOTA"
+    "Ac", "FITC", "Biotin", "BIOTIN", "Biotin-NHS", "Biotin acid",
+    "FAM", "5-FAM", "6-FAM", "FAM-NHS", "TAMRA", "CY3", "CY5", "CY7",
+    "Pal", "Palmitic acid", "Palmitoyl", "Myr", "Myristic acid", "Myristoyl",
+    "Gal", "Gallic acid", "Galloyl", "Nic", "Nicotinic acid", "Nicotinoyl",
+    "Caf", "Caffeic acid", "Caffeoyl", "DOTA", "NOTA", "Dabcyl", "BHQ",
+    "His6", "His8", "His10", "FLAG", "HA", "Myc", "StrepII", "TwinStrep", "V5", "T7", "ALFA", "AviTag", "SpyTag"
 ]
+
+NTERM_MODIFIER_ALIASES = {
+    "AC": "Ac", "ACETYL": "Ac", "ACETICACID": "Ac",
+    "BIOTIN": "Biotin", "BIOTINNHS": "Biotin-NHS", "BIOTINACID": "Biotin acid",
+    "FITC": "FITC", "FAM": "FAM", "5FAM": "5-FAM", "6FAM": "6-FAM", "FAMNHS": "FAM-NHS",
+    "TAMRA": "TAMRA", "CY3": "CY3", "CY5": "CY5", "CY7": "CY7",
+    "PAL": "Pal", "PALMITICACID": "Pal", "PALMITOYL": "Pal",
+    "MYR": "Myr", "MYRISTICACID": "Myr", "MYRISTOYL": "Myr",
+    "GAL": "Gal", "GALLICACID": "Gal", "GALLOYL": "Gal",
+    "CAF": "Caf", "CAFFEICACID": "Caf", "CAFFEOYL": "Caf",
+    "NIC": "Nic", "NICOTINICACID": "Nic", "NICOTINOYL": "Nic",
+    "DOTA": "DOTA", "NOTA": "NOTA", "DABCYL": "Dabcyl", "BHQ": "BHQ",
+    "HIS6": "His6", "HIS8": "His8", "HIS10": "His10", "FLAG": "FLAG", "HA": "HA",
+    "MYC": "Myc", "STREPII": "StrepII", "TWINSTREP": "TwinStrep", "V5": "V5",
+    "T7": "T7", "ALFA": "ALFA", "AVITAG": "AviTag", "SPYTAG": "SpyTag",
+}
+
+def _norm_key(token: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", str(token or "")).upper()
 CTERM_MARKERS = {"NH2", "CONH2", "AMIDE", "COOH", "CO2H", "OH", "ACID"}
 
 
@@ -23,25 +46,101 @@ def strip_protecting_groups(text: str) -> str:
     return PROTECTING_GROUP_RE.sub("", text or "").replace(" ", "")
 
 
+
+def _normalise_nterm_modifier(token: str) -> str:
+    t = str(token or "").strip()
+    key = _norm_key(t)
+    if key in NTERM_MODIFIER_ALIASES:
+        return NTERM_MODIFIER_ALIASES[key]
+    for m in NTERM_MODIFIERS:
+        if _norm_key(m) == key:
+            return NTERM_MODIFIER_ALIASES.get(_norm_key(m), m)
+    return ""
+
+
+def _consume_leading_nterm_modifier(parts: list[str]) -> tuple[str, list[str]]:
+    """Return (modifier, remaining_parts), supporting hyphenated modifiers.
+
+    Examples: 5-FAM-Ahx-EEMQRR-NH2 -> modifier 5-FAM; Biotin-NHS-PEPTIDE
+    -> modifier Biotin-NHS.  Plain FAM-PEPTIDE still works.
+    """
+    if not parts:
+        return "", parts
+    # Try longest practical modifier first because some names contain hyphens.
+    max_len = min(3, len(parts))
+    for n in range(max_len, 0, -1):
+        cand = "-".join(parts[:n])
+        mod = _normalise_nterm_modifier(cand)
+        if mod:
+            return mod, parts[n:]
+    return "", parts
+
 def _is_cterm_marker(s: str) -> bool:
     return str(s or "").strip().upper() in CTERM_MARKERS
 
 
 def _split_attached_nterm(core_text: str) -> tuple[str, str]:
-    """Detect compact N-terminal modifier notation such as AcEEMQRR.
+    """Detect only safe compact N-terminal modifier notation.
 
-    This keeps normal peptide strings such as EEMQRR untouched, but allows
-    AcEEMQRR-NH2 or AcEEMQRR to be interpreted as Ac + EEMQRR.
+    Compact modifier notation is intentionally conservative.  In older builds,
+    case-insensitive detection treated natural all-caps sequences such as
+    ACDE... as Ac + DE..., and could similarly misread PAL... as Pal.  For SPPS
+    planning this is dangerous because it changes the actual core sequence.
+
+    Supported compact form:
+    - AcEEMQRR -> Ac + EEMQRR
+
+    Other modifiers should be written explicitly with a dash:
+    - FITC-EEMQRR
+    - Biotin-EEMQRR
+    - Pal-EEMQRR
     """
     s = str(core_text or "").strip()
-    for mod in sorted(NTERM_MODIFIERS, key=len, reverse=True):
-        if s.upper().startswith(mod.upper()) and len(s) > len(mod):
-            nxt = s[len(mod):len(mod)+1]
-            # treat as attached modifier only when the remaining string starts
-            # like a peptide sequence token.
-            if nxt and nxt.isalpha():
-                return mod if mod != "BIOTIN" else "Biotin", s[len(mod):]
+    if s.startswith("Ac") and not s.startswith("AC") and len(s) > 2:
+        nxt = s[2:3]
+        if nxt and nxt.isupper():
+            return "Ac", s[2:]
     return "", s
+
+
+KNOWN_CORE_TOKENS = {
+    "AEEA", "AHX", "CHA", "AIB", "NLE", "ORN", "CIT", "HYP", "DAB", "NAL",
+    "BALA", "B-ALA", "GABA", "PEG1", "PEG2", "PEG3", "PEG4", "PEG6", "PEG8", "PEG12", "PEG24",
+    "G4S", "G4SX2", "SMCC", "SULFOSMCC", "DSS"
+}
+
+
+def _tokenize_compact_segment(segment: str) -> list[str]:
+    """Tokenize one delimiter-free segment.
+
+    Multi-letter laboratory tokens are preserved only when written as a full
+    segment (Ahx, AEEA, Cha, PEG4, etc.) or in bracket notation.  Plain FASTA
+    chunks such as EEMQRR are still split into amino-acid residues.
+    """
+    seg = str(segment or "").strip().strip("[]")
+    if not seg:
+        return []
+    if seg.upper() in KNOWN_CORE_TOKENS:
+        canonical = {"AHX": "Ahx", "CHA": "Cha", "AIB": "Aib", "NLE": "Nle", "ORN": "Orn", "CIT": "Cit", "HYP": "Hyp", "DAB": "Dab", "NAL": "Nal", "BALA": "bAla", "B-ALA": "bAla"}.get(seg.upper())
+        return [canonical or seg]
+    tokens = []
+    i = 0
+    while i < len(seg):
+        ch = seg[i]
+        if ch == "[":
+            j = seg.find("]", i + 1)
+            if j > i:
+                tokens.append(seg[i+1:j].strip())
+                i = j + 1
+                continue
+        if ch == "d" and i + 1 < len(seg) and seg[i+1].isalpha() and seg[i+1].isupper():
+            tokens.append(seg[i:i+2])
+            i += 2
+            continue
+        if ch.isalpha() and ch.isupper():
+            tokens.append(ch)
+        i += 1
+    return [t for t in tokens if t]
 
 
 def tokenize_core_sequence(core: str) -> list[str]:
@@ -53,53 +152,32 @@ def tokenize_core_sequence(core: str) -> list[str]:
     - AcEEMQRR-NH2 -> Ac as N-terminal modifier, EEMQRR as core
     - dA,dR,Hyp,Ahx -> dA, dR, Hyp, Ahx
     - dA/dR/Hyp/Ahx -> dA, dR, Hyp, Ahx
+    - Biotin-Ahx-EEMQRR-NH2 -> Biotin as N-term, Ahx preserved as linker, then E/E/M/Q/R/R
+    - FAM-AEEA-EEMQRR-NH2 -> FAM as N-term, AEEA preserved as linker, then E/E/M/Q/R/R
     - E[Hyp]MQ[Ahx]RR -> E, Hyp, M, Q, Ahx, R, R
 
-    For multi-letter non-natural residues, comma/slash/semicolon/newline or [token]
-    notation is recommended.
+    Hyphen inside the parsed core is treated as a residue/linker separator. This
+    prevents Ahx/AEEA from being silently degraded into A/H/X or A/E/E/A.
     """
     s = strip_protecting_groups(core or "")
     if not s:
         return []
-    if re.search(r"[,;/\n\t ]", s):
-        return [p.strip().strip("[]") for p in re.split(r"\s*(?:,|;|/|\n|\t| )\s*", s) if p.strip()]
-    tokens = []
-    i = 0
-    while i < len(s):
-        ch = s[i]
-        if ch == "[":
-            j = s.find("]", i + 1)
-            if j > i:
-                tokens.append(s[i+1:j].strip())
-                i = j + 1
-                continue
-        if ch == "d" and i + 1 < len(s) and s[i+1].isalpha() and s[i+1].isupper():
-            tokens.append(s[i:i+2])
-            i += 2
-            continue
-        if ch.isalpha() and ch.isupper():
-            tokens.append(ch)
-        elif ch.isalpha() and ch.islower():
-            # lower-case characters that are not part of dAA or bracketed tokens are ignored
-            # to avoid turning terminal words into false amino acids.
-            pass
-        i += 1
-    return [t for t in tokens if t]
+    parts = [p.strip() for p in re.split(r"\s*(?:-|,|;|/|\n|\t| )\s*", s) if p.strip()]
+    tokens: list[str] = []
+    if len(parts) > 1:
+        for part in parts:
+            tokens.extend(_tokenize_compact_segment(part))
+        return [t for t in tokens if t]
+    return _tokenize_compact_segment(s)
 
 
 def parse_sequence(seq: str) -> ParsedSequence:
     """Parse peptide notation robustly for SPPS planning.
 
-    Correctly handles:
-    - Ac-EEMQRR-NH2
-    - EEMQRR-NH2
-    - EEMQRR
-    - AcEEMQRR-NH2
-    - AcEEMQRR
-
-    The previous behavior incorrectly treated EEMQRR-NH2 as Nterm=EEMQRR and core=NH2.
-    That made the planner parse N/H instead of the actual peptide sequence. This parser
-    first checks whether the last dash-separated token is a known C-terminal marker.
+    Correctly handles terminal modifiers, hyphenated labels, internal linker
+    tokens, D-amino-acid tokens, and C-terminal markers.  The first dash token
+    is treated as an N-terminal modifier only when it matches the supported
+    modifier list (including hyphenated names such as 5-FAM or Biotin-NHS).
     """
     raw = (seq or "").strip()
     s = raw.replace(" ", "")
@@ -109,33 +187,20 @@ def parse_sequence(seq: str) -> ParsedSequence:
     parts = [p.strip() for p in s.split("-") if p.strip()]
     nterm = ""
     cterm = ""
-    core = s
 
-    if len(parts) >= 3 and _is_cterm_marker(parts[-1]):
+    # Remove C-terminal marker first.
+    if parts and _is_cterm_marker(parts[-1]):
         cterm = parts[-1]
-        maybe_nterm = parts[0]
-        middle = "-".join(parts[1:-1])
-        # If first token is known modifier, use it as nterm; otherwise treat all before Cterm as core.
-        if any(maybe_nterm.upper() == m.upper() for m in NTERM_MODIFIERS):
-            nterm = maybe_nterm if maybe_nterm.upper() != "BIOTIN" else "Biotin"
-            core = middle
-        else:
-            core = "-".join(parts[:-1])
-    elif len(parts) >= 2 and _is_cterm_marker(parts[-1]):
-        cterm = parts[-1]
-        core_candidate = "-".join(parts[:-1])
-        detected, remainder = _split_attached_nterm(core_candidate)
-        nterm, core = detected, remainder
-    elif len(parts) >= 2:
-        maybe_nterm = parts[0]
-        if any(maybe_nterm.upper() == m.upper() for m in NTERM_MODIFIERS):
-            nterm = maybe_nterm if maybe_nterm.upper() != "BIOTIN" else "Biotin"
-            core = "-".join(parts[1:])
-        else:
-            detected, remainder = _split_attached_nterm("-".join(parts))
-            nterm, core = detected, remainder
+        parts = parts[:-1]
+
+    # Then consume a known N-terminal modifier, supporting hyphenated modifiers.
+    nterm, remaining = _consume_leading_nterm_modifier(parts)
+    if nterm:
+        core = "-".join(remaining)
     else:
-        detected, remainder = _split_attached_nterm(s)
+        core_candidate = "-".join(parts) if parts else s
+        # Safe compact notation: AcEEMQRR -> Ac + EEMQRR.
+        detected, remainder = _split_attached_nterm(core_candidate)
         nterm, core = detected, remainder
 
     core_clean = strip_protecting_groups(core)
