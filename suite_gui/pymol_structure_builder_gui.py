@@ -1,15 +1,22 @@
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import subprocess
+import sys
+import tempfile
+import time
 import json
 import csv
 import traceback
 from datetime import datetime
 from peptiforg_core.ui_helpers import set_pepforge_icon
+from peptiforg_core.ui_theme import apply_pepforge_theme
+from peptiforg_core.sandbox_runtime import configured_output
 
 from peptiforg_core.pymol_structure_builder import (
     classify_tokens,
@@ -25,6 +32,20 @@ from peptiforg_core.external_docking_runner_bridge import export_external_dockin
 from peptiforg_core.all_atom_md_preparation_bridge import export_all_atom_md_preparation_bridge, MD_PREP_BRIDGE_VERSION
 from peptiforg_core.external_md_result_import_bridge import export_external_md_result_import_bridge, MD_RESULT_IMPORT_BRIDGE_VERSION
 from peptiforg_core.publication_validation_report_builder import export_publication_validation_report, PUBLICATION_REPORT_BUILDER_VERSION
+
+
+CONDITION_PRESETS = {
+    "Physiological aqueous": {"pH": "7.4", "temperature_C": "37", "ionic_strength_mM": "150", "environment": "Aqueous buffer"},
+    "Neutral room temperature": {"pH": "7.0", "temperature_C": "25", "ionic_strength_mM": "100", "environment": "Aqueous buffer"},
+    "Membrane-mimetic metadata": {"pH": "7.4", "temperature_C": "37", "ionic_strength_mM": "150", "environment": "Membrane-mimetic"},
+    "Custom": None,
+}
+
+BUILD_PRESETS = {
+    "Fast Top 5 (recommended)": {"num_confs": 5, "max_iters": 80, "num_threads": 2, "search_profile": "evidence_fast", "min_final_conformers": 5, "max_embedding_retries": 2},
+    "Balanced Top 5": {"num_confs": 12, "max_iters": 200, "num_threads": 2, "search_profile": "evidence_balanced", "min_final_conformers": 5, "max_embedding_retries": 3},
+    "Thorough Top 5": {"num_confs": 30, "max_iters": 500, "num_threads": 4, "search_profile": "evidence_thorough", "min_final_conformers": 5, "max_embedding_retries": 4},
+}
 
 
 def _open_path(path: Path) -> None:
@@ -96,8 +117,7 @@ def export_gui_quick_bridge_package(
     expected_paths = {
         "sdf": str(out / f"{safe}.sdf"),
         "pdb": str(out / f"{safe}.pdb"),
-        "cif": str(out / f"{safe}.cif"),
-        "json": str(out / f"{safe}.json"),
+                "json": str(out / f"{safe}.json"),
         "report": str(out / f"{safe}_report.txt"),
         "pml": str(out / f"{safe}.pml"),
         "token_map": str(out / f"{safe}_token_map.csv"),
@@ -165,7 +185,7 @@ This package does not execute or replace external tools. Vina/Smina/Gnina/PRODIG
 
 What was written
 ----------------
-- SDF/PDB/CIF/PML/metadata/report using the same build path as Build SDF/PDB/PML
+- SDF/PDB/PML/metadata/report using the same build path as Build SDF/PDB/PML
 - token_map.csv for token interpretation
 - parameter_requirements.csv for modified-token review
 - bridge_settings.json for user-selected receptor/box/MD settings
@@ -262,18 +282,28 @@ Do not claim: final Kd, true nM binder, full all-atom MD validation, or experime
 class PyMOLStructureBuilderGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PyMOL Structure Builder")
+        self.title("Pepforge Peptide Structure Builder")
         set_pepforge_icon(self)
         self.geometry("1500x900")
         self.minsize(1180, 720)
-        self.output_dir = tk.StringVar(value=str(Path.cwd() / "outputs" / "pymol_structure_builder"))
-        self.sequence_var = tk.StringVar(value="FITC-Cha-AEEA-dK-NH2")
-        self.name_var = tk.StringVar(value="modified_peptide")
+        apply_pepforge_theme(self)
+        self.output_dir = tk.StringVar(value="")
+        self.sequence_var = tk.StringVar(value="")
+        self.name_var = tk.StringVar(value="")
+        self.condition_preset = tk.StringVar(value="Physiological aqueous")
+        self.condition_ph = tk.StringVar(value="7.4")
+        self.condition_temperature = tk.StringVar(value="37")
+        self.condition_ionic_strength = tk.StringVar(value="150")
+        self.condition_environment = tk.StringVar(value="Aqueous buffer")
+        self.build_preset = tk.StringVar(value="Fast Top 5 (recommended)")
+        self._build_process = None
+        self._build_job_dir: Path | None = None
+        self._build_started_at = 0.0
         # User-editable bridge settings. Bridge buttons are not magic one-click
         # final MD/docking; they export packages according to these values.
         self.bridge_receptor_path = tk.StringVar(value="")
         self.bridge_md_result_csv = tk.StringVar(value="")
-        self.bridge_conformers = tk.IntVar(value=8)
+        self.bridge_conformers = tk.IntVar(value=5)
         self.bridge_exhaustiveness = tk.IntVar(value=16)
         self.bridge_num_modes = tk.IntVar(value=20)
         self.bridge_quick_mode = tk.BooleanVar(value=True)
@@ -285,34 +315,50 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.bridge_size_z = tk.DoubleVar(value=22.0)
         self._build()
 
-    def _build(self):
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"))
-        style.configure("Head.TLabel", font=("Segoe UI", 11, "bold"))
-        style.configure("PepforgeGreen.Horizontal.TProgressbar", troughcolor="#e8e8e8", background="#2dbb55", lightcolor="#2dbb55", darkcolor="#2dbb55")
+    def _default_output_dir(self) -> Path:
+        return configured_output(Path.cwd() / "outputs" / "pymol_structure_builder", "pymol")
 
+    def _effective_output_dir(self) -> Path:
+        raw = str(self.output_dir.get() or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+        outdir = self._default_output_dir()
+        self.output_dir.set(str(outdir))
+        return outdir
+
+    def _effective_output_name(self) -> str:
+        name = str(self.name_var.get() or "").strip()
+        if name:
+            return name
+        if str(self.sequence_var.get() or "").strip():
+            return "modified_peptide"
+        return f"peptide_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def _require_sequence(self) -> str | None:
+        seq = str(self.sequence_var.get() or "").strip()
+        if not seq:
+            messagebox.showwarning("Input required", "Enter a peptide sequence first.")
+            return None
+        return seq
+
+    def _build(self):
         root = ttk.Frame(self, padding=12)
         root.pack(fill="both", expand=True)
 
-        ttk.Label(root, text="PyMOL Structure Builder", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(root, text="Peptide Structure Builder", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             root,
             text=(
-                f"Integrated Pepforge PyMOL Structure Tool v{STRUCTURE_TOOL_VERSION}. "
-                "Build RDKit-backed SDF/PDB/JSON/PML files from modified peptide notation. "
-                "v2.5.0 adds publication validation report building on top of external MD result import and validation summary on top of low-spec simulation and external docking runner bridge export. "
-                "Output is screening/validation-preparation grade, not final all-atom MD."
+                f"Pepforge Peptide Structure Builder v{STRUCTURE_TOOL_VERSION}. "
+                "Analyze a canonical or modified peptide sequence and build peptide-only SDF/PDB/JSON/PML starting conformers. "
+                "Outputs are plausible starting structures for inspection and external validation, not AlphaFold predictions or MD trajectories."
             ),
             wraplength=1200,
         ).pack(anchor="w", pady=(4, 12))
 
-        input_box = ttk.LabelFrame(root, text="Input")
+        input_box = ttk.LabelFrame(root, text="Input", style="Input.TLabelframe")
         input_box.pack(fill="x")
-        ttk.Label(input_box, text="Peptide notation").grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        ttk.Label(input_box, text="Peptide sequence").grid(row=0, column=0, sticky="w", padx=8, pady=8)
         ent = ttk.Entry(input_box, textvariable=self.sequence_var)
         ent.grid(row=0, column=1, sticky="ew", padx=8, pady=8)
         ttk.Label(input_box, text="Output name").grid(row=1, column=0, sticky="w", padx=8, pady=8)
@@ -320,64 +366,75 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         ttk.Label(input_box, text="Output folder").grid(row=2, column=0, sticky="w", padx=8, pady=8)
         ttk.Entry(input_box, textvariable=self.output_dir).grid(row=2, column=1, sticky="ew", padx=8, pady=8)
         ttk.Button(input_box, text="Browse", command=self._browse).grid(row=2, column=2, padx=8, pady=8)
+        ttk.Label(input_box, text="Condition preset").grid(row=3, column=0, sticky="w", padx=8, pady=(8, 3))
+        condition_preset_combo = ttk.Combobox(
+            input_box, textvariable=self.condition_preset, state="readonly",
+            values=tuple(CONDITION_PRESETS), width=34,
+        )
+        condition_preset_combo.grid(row=3, column=1, sticky="w", padx=8, pady=(8, 3))
+        condition_preset_combo.bind("<<ComboboxSelected>>", self._apply_condition_preset)
+        ttk.Label(
+            input_box,
+            text="Conditions are recorded for interpretation/export; RDKit does not simulate constant-pH solvent physics.",
+            style="Sub.TLabel",
+        ).grid(row=3, column=2, sticky="w", padx=8, pady=(8, 3))
+        ttk.Label(input_box, text="Condition values").grid(row=4, column=0, sticky="w", padx=8, pady=5)
+        condition_row = ttk.Frame(input_box)
+        condition_row.grid(row=4, column=1, columnspan=2, sticky="ew", padx=8, pady=5)
+        ttk.Label(condition_row, text="pH").pack(side="left")
+        ttk.Entry(condition_row, textvariable=self.condition_ph, width=8).pack(side="left", padx=(4, 12))
+        ttk.Label(condition_row, text="Temperature °C").pack(side="left")
+        ttk.Entry(condition_row, textvariable=self.condition_temperature, width=8).pack(side="left", padx=(4, 12))
+        ttk.Label(condition_row, text="Ionic strength mM").pack(side="left")
+        ttk.Entry(condition_row, textvariable=self.condition_ionic_strength, width=9).pack(side="left", padx=(4, 12))
+        ttk.Combobox(condition_row, textvariable=self.condition_environment, state="readonly", width=24,
+                     values=("Aqueous / unspecified", "Aqueous buffer", "Membrane-mimetic", "Organic / mixed solvent")).pack(side="left")
+        ttk.Label(input_box, text="Build preset").grid(row=5, column=0, sticky="w", padx=8, pady=(3, 8))
+        ttk.Combobox(
+            input_box, textvariable=self.build_preset, state="readonly",
+            values=tuple(BUILD_PRESETS), width=34,
+        ).grid(row=5, column=1, sticky="w", padx=8, pady=(3, 8))
+        ttk.Label(
+            input_box,
+            text="Fast guarantees five ranked outputs with adaptive retries; Balanced and Thorough spend progressively more sampling on evidence-prioritized families.",
+            style="Sub.TLabel",
+        ).grid(row=5, column=2, sticky="w", padx=8, pady=(3, 8))
         input_box.columnconfigure(1, weight=1)
 
-        bridge_box = ttk.LabelFrame(root, text="Bridge settings / user-defined external workflow parameters")
-        bridge_box.pack(fill="x", pady=(8, 0))
-        ttk.Label(bridge_box, text="Receptor PDB/CIF/PDBQT").grid(row=0, column=0, sticky="w", padx=6, pady=4)
-        ttk.Entry(bridge_box, textvariable=self.bridge_receptor_path).grid(row=0, column=1, columnspan=5, sticky="ew", padx=6, pady=4)
-        ttk.Button(bridge_box, text="Browse", command=self._browse_receptor).grid(row=0, column=6, padx=6, pady=4)
-        ttk.Label(bridge_box, text="MD result CSV").grid(row=1, column=0, sticky="w", padx=6, pady=4)
-        ttk.Entry(bridge_box, textvariable=self.bridge_md_result_csv).grid(row=1, column=1, columnspan=5, sticky="ew", padx=6, pady=4)
-        ttk.Button(bridge_box, text="Browse", command=self._browse_md_csv).grid(row=1, column=6, padx=6, pady=4)
-        ttk.Label(bridge_box, text="Confs").grid(row=2, column=0, sticky="w", padx=6, pady=4)
-        ttk.Spinbox(bridge_box, from_=1, to=64, textvariable=self.bridge_conformers, width=7).grid(row=2, column=1, sticky="w", padx=6, pady=4)
-        ttk.Label(bridge_box, text="Dock center XYZ").grid(row=2, column=2, sticky="e", padx=6, pady=4)
-        for i, var in enumerate([self.bridge_center_x, self.bridge_center_y, self.bridge_center_z], start=3):
-            ttk.Entry(bridge_box, textvariable=var, width=8).grid(row=2, column=i, sticky="w", padx=2, pady=4)
-        ttk.Label(bridge_box, text="Box size XYZ").grid(row=3, column=2, sticky="e", padx=6, pady=4)
-        for i, var in enumerate([self.bridge_size_x, self.bridge_size_y, self.bridge_size_z], start=3):
-            ttk.Entry(bridge_box, textvariable=var, width=8).grid(row=3, column=i, sticky="w", padx=2, pady=4)
-        ttk.Label(bridge_box, text="Vina exhaustiveness / modes").grid(row=3, column=0, sticky="w", padx=6, pady=4)
-        ttk.Spinbox(bridge_box, from_=1, to=128, textvariable=self.bridge_exhaustiveness, width=7).grid(row=3, column=1, sticky="w", padx=6, pady=4)
-        ttk.Spinbox(bridge_box, from_=1, to=100, textvariable=self.bridge_num_modes, width=7).grid(row=3, column=1, sticky="e", padx=6, pady=4)
-        ttk.Checkbutton(bridge_box, text="Quick safe bridge mode 권장: Build SDF/PDB/PML 경로를 재사용해서 템플릿을 즉시 생성", variable=self.bridge_quick_mode).grid(row=4, column=0, columnspan=7, sticky="w", padx=6, pady=(0, 2))
-        ttk.Label(bridge_box, text="Bridge buttons export templates/packages using these values; external Vina/OpenMM/GROMACS/PRODIGY-style tools still run outside Pepforge.").grid(row=5, column=0, columnspan=7, sticky="w", padx=6, pady=(0, 6))
-        bridge_box.columnconfigure(1, weight=1)
+        scope_box = ttk.LabelFrame(root, text="Evidence-aware peptide-only modelling", style="Card.TLabelframe")
+        scope_box.pack(fill="x", pady=(8, 0))
+        ttk.Label(
+            scope_box,
+            text=("Sequence evidence guides a diverse top-five ensemble across helix, beta/hairpin, turn, PPII and coil families. "
+                  "Terminal chemistry, chirality and modifications are preserved. Results are plausible starting conformers—not a claimed in-vivo structure."),
+            wraplength=1180,
+        ).pack(anchor="w", padx=8, pady=7)
 
-        actions = ttk.LabelFrame(root, text="Actions")
+        actions = ttk.LabelFrame(root, text="Build workflow", style="Card.TLabelframe")
         actions.pack(fill="x", pady=8)
         self.progress_var = tk.StringVar(value="Ready")
         self.progress = ttk.Progressbar(actions, mode="determinate", maximum=100, value=0, style="PepforgeGreen.Horizontal.TProgressbar")
-        self.progress.grid(row=0, column=0, columnspan=6, sticky="ew", padx=6, pady=(6, 2))
-        ttk.Label(actions, textvariable=self.progress_var).grid(row=0, column=6, columnspan=2, sticky="w", padx=6)
+        self.progress.grid(row=0, column=0, columnspan=3, sticky="ew", padx=6, pady=(6, 2))
+        ttk.Label(actions, textvariable=self.progress_var).grid(row=0, column=3, sticky="w", padx=6)
 
         self.action_buttons = []
         button_specs = [
             ("Analyze", self.analyze),
-            ("Build SDF/PDB/PML", self.export),
-            ("Simulation Bridge", self.export_bridge),
-            ("Docking Bridge", self.export_docking_bridge),
-            ("MD Prep Bridge", self.export_md_prep_bridge),
-            ("MD Result Import", self.export_md_result_import_bridge),
-            ("Publication Report", self.export_publication_report),
+            ("Build Top 5 Structures", self.export),
             ("Open Token Map", self.open_token_map),
-            ("Environment", self.show_environment),
-            ("Supported Tokens", self.show_supported_tokens),
-            ("Template Audit", self.show_template_audit),
-            ("Open Output", lambda: _open_path(Path(self.output_dir.get()))),
+            ("Open Output", lambda: _open_path(self._effective_output_dir())),
         ]
         for idx, (label, cmd) in enumerate(button_specs):
-            btn = ttk.Button(actions, text=label, command=cmd, width=18)
-            btn.grid(row=1 + idx // 6, column=idx % 6, padx=4, pady=4, sticky="ew")
+            btn = ttk.Button(actions, text=label, command=cmd, width=18, style="Accent.TButton" if idx == 1 else "TButton")
+            btn.grid(row=1, column=idx, padx=4, pady=4, sticky="ew")
             self.action_buttons.append(btn)
-        for col in range(6):
+        for col in range(4):
             actions.columnconfigure(col, weight=1)
 
         pane = ttk.PanedWindow(root, orient="vertical")
         pane.pack(fill="both", expand=True)
 
-        token_frame = ttk.LabelFrame(pane, text="Token interpretation")
+        token_frame = ttk.LabelFrame(pane, text="Chemistry interpretation", style="Card.TLabelframe")
         pane.add(token_frame, weight=3)
         cols = ("position", "raw", "token", "class", "note", "warning")
         self.tree = ttk.Treeview(token_frame, columns=cols, show="headings", height=15)
@@ -390,16 +447,159 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         y.pack(side="right", fill="y")
         self.tree.configure(yscrollcommand=y.set)
 
-        note_frame = ttk.LabelFrame(pane, text="Output and interpretation")
+        note_frame = ttk.LabelFrame(pane, text="Top-five ensemble and evidence", style="Card.TLabelframe")
         pane.add(note_frame, weight=2)
         self.note = tk.Text(note_frame, height=12, wrap="word")
         self.note.pack(fill="both", expand=True)
-        self.analyze()
+        self.note.insert("1.0", "Enter a peptide sequence, review the chemistry interpretation, then build the evidence-aware top five structures.")
 
     def _browse(self):
-        d = filedialog.askdirectory(initialdir=self.output_dir.get() or str(Path.cwd()))
+        d = filedialog.askdirectory(initialdir=str(self._effective_output_dir().parent if str(self.output_dir.get()).strip() else self._default_output_dir().parent))
         if d:
             self.output_dir.set(d)
+
+    def _environment_conditions(self) -> dict:
+        def optional_float(value: str, label: str, minimum: float, maximum: float):
+            text = str(value or "").strip()
+            if not text:
+                return None
+            number = float(text)
+            if not minimum <= number <= maximum:
+                raise ValueError(f"{label} must be between {minimum:g} and {maximum:g}.")
+            return number
+        return {
+            "pH": optional_float(self.condition_ph.get(), "pH", 0.0, 14.0),
+            "temperature_C": optional_float(self.condition_temperature.get(), "Temperature", -20.0, 120.0),
+            "ionic_strength_mM": optional_float(self.condition_ionic_strength.get(), "Ionic strength", 0.0, 5000.0),
+            "environment": str(self.condition_environment.get() or "Aqueous / unspecified"),
+        }
+
+    def _apply_condition_preset(self, _event=None):
+        values = CONDITION_PRESETS.get(str(self.condition_preset.get()))
+        if values is None:
+            return
+        self.condition_ph.set(values["pH"])
+        self.condition_temperature.set(values["temperature_C"])
+        self.condition_ionic_strength.set(values["ionic_strength_mM"])
+        self.condition_environment.set(values["environment"])
+
+    def _build_settings(self) -> dict:
+        return dict(BUILD_PRESETS.get(
+            str(self.build_preset.get()),
+            BUILD_PRESETS["Fast Top 5 (recommended)"],
+        ))
+
+    def _worker_command(self, request_path: Path) -> list[str]:
+        root = Path(__file__).resolve().parents[1]
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--structure-worker", str(request_path)]
+        return [sys.executable, str(root / "main_launcher.py"), "--structure-worker", str(request_path)]
+
+    def _start_structure_worker(self, sequence: str, name: str, conditions: dict) -> None:
+        settings = self._build_settings()
+        job_dir = Path(tempfile.mkdtemp(prefix="pepforge_psb_job_"))
+        request_path = job_dir / "request.json"
+        result_path = job_dir / "result.json"
+        log_path = job_dir / "worker.log"
+        request = {
+            "sequence": sequence,
+            "name": name,
+            "output_dir": str(self._effective_output_dir()),
+            "environment_conditions": conditions,
+            "result_path": str(result_path),
+            **settings,
+        }
+        request_path.write_text(json.dumps(request, indent=2, ensure_ascii=False), encoding="utf-8")
+        log_handle = log_path.open("w", encoding="utf-8")
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        try:
+            process = subprocess.Popen(
+                self._worker_command(request_path),
+                cwd=str(Path(__file__).resolve().parents[1]),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+            )
+        except Exception:
+            log_handle.close()
+            raise
+        self._build_process = process
+        self._build_log_handle = log_handle
+        self._build_job_dir = job_dir
+        self._build_started_at = time.monotonic()
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
+        self.progress_var.set(f"Building in isolated worker · {self.build_preset.get()}")
+        for button in self.action_buttons:
+            button.configure(state="disabled")
+        self.after(150, self._poll_structure_worker)
+
+    def _poll_structure_worker(self) -> None:
+        process = self._build_process
+        if process is None:
+            return
+        return_code = process.poll()
+        if return_code is None:
+            elapsed = int(time.monotonic() - self._build_started_at)
+            self.progress_var.set(f"Building in isolated worker · {elapsed}s elapsed")
+            self.after(250, self._poll_structure_worker)
+            return
+
+        self.progress.stop()
+        self.progress.configure(mode="determinate")
+        log_handle = getattr(self, "_build_log_handle", None)
+        if log_handle is not None:
+            log_handle.close()
+        job_dir = self._build_job_dir
+        self._build_process = None
+        result_path = job_dir / "result.json" if job_dir else None
+        try:
+            if result_path is None or not result_path.exists():
+                raise RuntimeError(f"Structure worker stopped with exit code {return_code} before writing a result. Worker log: {job_dir / 'worker.log' if job_dir else 'unavailable'}")
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            if not result.get("ok"):
+                raise RuntimeError(f"{result.get('error_type', 'BuildError')}: {result.get('error', 'unknown structure-build failure')}")
+            self._render_export_result(dict(result.get("paths") or {}))
+            self._set_done("Top-five ensemble complete")
+            messagebox.showinfo("Export complete", "The ranked top five structures plus evidence report, ensemble, family CSV, torsion CSV, JSON and PyMOL files were exported.")
+        except Exception as exc:
+            diag = self._write_diagnostics("build_sdf_pdb_pml", exc)
+            self.note.insert("end", "\nStructure worker diagnostic written:\n")
+            for key, path in diag.items():
+                self.note.insert("end", f"- {key}: {path}\n")
+            if job_dir:
+                self.note.insert("end", f"- worker_log: {job_dir / 'worker.log'}\n")
+            self._set_failed("Build failed; PSB remains open")
+            messagebox.showerror("Export failed", "The isolated structure build failed, but PSB remains open and diagnostic files were written.\n\n" + str(exc))
+
+    def _render_export_result(self, paths: dict[str, str]) -> None:
+        self.note.insert("end", "\nExported files:\n")
+        for key, path in paths.items():
+            self.note.insert("end", f"- {key}: {path}\n")
+        meta = json.loads(Path(paths["json"]).read_text(encoding="utf-8"))
+        ca = meta.get("conformation_analysis") or {}
+        he = meta.get("canonical_L_helix_evidence") or {}
+        seq_ev = meta.get("sequence_conformation_evidence") or {}
+        conditions = meta.get("environment_conditions") or {}
+        conf = meta.get("conformer_summary") or {}
+        self.note.insert("end", "\nConformational ensemble analysis:\n")
+        self.note.insert("end", f"- sampled family counts: {ca.get('family_counts', {})}\n")
+        self.note.insert("end", f"- search workload: {conf.get('requested_conformers')} conformers, {conf.get('max_optimization_iterations')} max iterations, {conf.get('worker_threads')} threads\n")
+        plan = meta.get("evidence_guided_family_plan") or {}
+        self.note.insert("end", f"- build preset profile: {plan.get('profile')}\n")
+        self.note.insert("end", f"- evidence-guided family priority: {plan.get('family_priority', [])}\n")
+        self.note.insert("end", f"- family evidence identifiers: {plan.get('family_evidence', {})}\n")
+        self.note.insert("end", f"- adaptive Top-5 retries: {conf.get('adaptive_embedding_attempts', [])}\n")
+        self.note.insert("end", "- ranked top five:\n")
+        for row in ca.get("top_conformers", []) or []:
+            self.note.insert("end", f"  {row.get('rank')}. {row.get('family')} | role={row.get('candidate_role')} | support={row.get('sequence_support')} | energy={row.get('energy')}\n")
+        self.note.insert("end", f"- canonical-L helix evidence coverage: {he.get('supported_residues', 0)}/{he.get('peptide_like_residues', 0)}\n")
+        self.note.insert("end", f"- i,i+3/i+4 opposite-charge pairs: {seq_ev.get('opposite_charge_i3_i4_pairs', [])}\n")
+        lit = seq_ev.get("literature_sequence_screen") or {}
+        self.note.insert("end", f"- alpha/beta/gamma backbone: {(lit.get('alpha_beta_gamma_peptidomimetic') or {}).get('detected_pattern')}\n")
+        self.note.insert("end", f"- recorded conditions: pH={conditions.get('pH')}, temperature={conditions.get('temperature_C')} °C, ionic strength={conditions.get('ionic_strength_mM')} mM, environment={conditions.get('environment')}\n")
+        self.note.insert("end", "- Conditions are metadata for interpretation/external validation, not an invented solvent or constant-pH energy correction.\n")
+        self.note.insert("end", "- Generated family fractions are search outcomes, not experimental populations.\n")
 
     def _browse_receptor(self):
         p = filedialog.askopenfilename(title="Select receptor/target file", filetypes=[("Structure files", "*.pdb *.cif *.mmcif *.pdbqt"), ("All files", "*.*")])
@@ -451,35 +651,31 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             self.progress_var.set(text)
             self.update_idletasks()
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _set_busy(self, text: str = "Working..."):
         try:
             self._set_progress(8, text)
             for b in getattr(self, "action_buttons", []):
                 b.configure(state="disabled")
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _set_done(self, text: str = "Done"):
         try:
             self._set_progress(100, text)
             for b in getattr(self, "action_buttons", []):
                 b.configure(state="normal")
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _set_failed(self, text: str = "Failed"):
         try:
             self._set_progress(0, text)
             for b in getattr(self, "action_buttons", []):
                 b.configure(state="normal")
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _write_diagnostics(self, stage: str, exc: Exception) -> dict[str, str]:
         """Write bridge diagnostics instead of ending with only a popup."""
-        diag_dir = Path(self.output_dir.get()).expanduser() / "bridge_diagnostics"
+        diag_dir = self._effective_output_dir() / "bridge_diagnostics"
         diag_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_stage = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in stage)
@@ -492,7 +688,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             "error": str(exc),
             "traceback": traceback.format_exc(),
             "meaning": "분석 오류 발견됨은 입력 토큰/구조/템플릿/환경 분석 중 경고 또는 실패가 감지됐다는 뜻이다. 출력 일부가 만들어졌을 수 있으므로 이 파일과 output 폴더를 확인한다.",
-            "common_causes": ["unsupported modified token", "RDKit/template fallback", "D-amino acid or lipid/label parameter warning", "non-ASCII path", "optional dependency missing"],
+            "common_causes": ["unsupported modified token", "RDKit unavailable or template audit issue", "D-amino acid or lipid/label parameter warning", "non-ASCII path", "optional dependency missing"],
         }
         json_path = base.with_suffix(".json")
         txt_path = base.with_suffix(".txt")
@@ -507,21 +703,24 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         return {"diagnostic_json": str(json_path), "diagnostic_txt": str(txt_path), "diagnostic_csv": str(csv_path)}
 
     def _safe_name(self):
-        name = self.name_var.get().strip() or "modified_peptide"
+        name = self._effective_output_name()
         return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)
 
 
 
     def open_token_map(self):
-        """Open or create the token_map.csv that users need as step 2."""
+        """Create the interpretation map without running a 3D calculation."""
+        seq = self._require_sequence()
+        if seq is None:
+            return
         name = self._safe_name()
-        out = Path(self.output_dir.get()).expanduser()
+        out = self._effective_output_dir()
         token_map = out / f"{name}_token_map.csv"
         try:
             if not token_map.exists():
                 self._set_busy("Creating token map...")
-                paths = export_modified_peptide_structure(self.sequence_var.get(), out, name)
-                token_map = Path(paths.get("token_map", token_map))
+                rows = _token_rows_for_bridge(seq)
+                _safe_write_csv(token_map, rows)
             self.note.insert("end", f"\nToken map ready: {token_map}\n")
             self._set_done("Token map ready")
             _open_path(token_map)
@@ -545,14 +744,20 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         try:
             payload = audit_template_files(Path(__file__).resolve().parents[1])
         except Exception as exc:
-            payload = {"error": str(exc), "note": "Template audit is optional. Generation uses RDKit SMILES if templates are not curated."}
+            payload = {
+                "error": str(exc),
+                "note": "Template audit could not be completed. Pepforge does not fabricate a substitute structure for chemistry that requires a curated derivative.",
+            }
         self._write_json_popup("Template Audit", payload)
 
     def analyze(self):
+        seq = self._require_sequence()
+        if seq is None:
+            return
         for x in self.tree.get_children():
             self.tree.delete(x)
         try:
-            toks = classify_tokens(self.sequence_var.get())
+            toks = classify_tokens(seq)
         except Exception as exc:
             self.note.delete("1.0", "end")
             self.note.insert("end", f"Parse failed: {exc}\n")
@@ -563,8 +768,8 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         warnings = [t.warning for t in toks if t.warning]
         self.note.insert("end", f"Parsed {len(toks)} tokens.\n")
         self.note.insert("end", "Examples: Ac-K(FITC)-LVFF-NH2, Ac-K(Ahx-Biotin)-LVFF-NH2, FITC-Cha-AEEA-dK-NH2, Pal-EEMQRR-NH2.\n")
-        self.note.insert("end", f"v2.5.0 uses the v1.3.0 attachment-aware PyMOL Structure Tool core, Low-Spec Validation Bridge v{BRIDGE_VERSION}, External Docking Runner Bridge v{DOCKING_BRIDGE_VERSION}, MD Preparation Bridge v{MD_PREP_BRIDGE_VERSION}, External MD Import Bridge v{MD_RESULT_IMPORT_BRIDGE_VERSION}, and Publication Report Builder v{PUBLICATION_REPORT_BUILDER_VERSION}.\n")
-        self.note.insert("end", "Primary outputs: SDF, PDB, JSON metadata, TXT report, portable PyMOL PML, conformer metrics, parameter requirements, evidence report, external docking runner templates, and all-atom MD preparation templates.\n")
+        self.note.insert("end", "The default workflow is peptide analysis and structure generation. Docking and MD are external validation steps.\n")
+        self.note.insert("end", "Primary outputs: ranked top-five SDF/PDB structures, JSON evidence, TXT report, PyMOL PML, and audit CSV files.\n")
         self.note.insert("end", "Generated structures are connected 3D starting models for PyMOL inspection/screening. They are not fully parameterized all-atom MD structures.\n")
         if warnings:
             self.note.insert("end", "\nWarnings:\n")
@@ -572,28 +777,30 @@ class PyMOLStructureBuilderGUI(tk.Tk):
                 self.note.insert("end", f"- {w}\n")
 
     def export(self):
+        seq = self._require_sequence()
+        if seq is None:
+            return
+        if self._build_process is not None:
+            messagebox.showinfo("Build in progress", "A structure build is already running.")
+            return
         self.analyze()
         name = self._safe_name()
-        self._set_busy("Building SDF/PDB/PML...")
         try:
-            self._set_progress(35, "Generating 3D structure...")
-            paths = export_modified_peptide_structure(self.sequence_var.get(), self.output_dir.get(), name)
-            self._set_progress(82, "Writing SDF/PDB/PML files...")
-            self.note.insert("end", "\nExported files:\n")
-            for k, p in paths.items():
-                self.note.insert("end", f"- {k}: {p}\n")
-            self._set_done("SDF/PDB/PML complete")
-            messagebox.showinfo("Export complete", "SDF/PDB/JSON/report/PML/token map exported.")
+            conditions = self._environment_conditions()
+            self._start_structure_worker(seq, name, conditions)
         except Exception as exc:
             diag = self._write_diagnostics("build_sdf_pdb_pml", exc)
             self.note.insert("end", "\nSDF/PDB/PML diagnostic written:\n")
             for k, p in diag.items():
                 self.note.insert("end", f"- {k}: {p}\n")
-            self._set_failed("SDF/PDB/PML diagnostic written")
-            messagebox.showerror("Export failed", "Build failed, but diagnostic files were written.\n\n" + str(exc))
+            self._set_failed("Build could not start")
+            messagebox.showerror("Export failed", "The isolated build could not start, but diagnostic files were written.\n\n" + str(exc))
 
 
     def _export_bridge_kind(self, label: str, kind: str, advanced_runner):
+        seq = self._require_sequence()
+        if seq is None:
+            return
         self.analyze()
         name = self._safe_name()
         self._set_busy(f"Building {label}...")
@@ -601,7 +808,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             self._set_progress(25, "Preparing base structure and token map...")
             if bool(self.bridge_quick_mode.get()):
                 paths = export_gui_quick_bridge_package(
-                    self.sequence_var.get(), self.output_dir.get(), name, label,
+                    self.sequence_var.get(), str(self._effective_output_dir()), name, label,
                     receptor_path=self._bridge_receptor(),
                     external_md_csv=self._bridge_md_csv(),
                     center=self._bridge_center(),
@@ -611,20 +818,11 @@ class PyMOLStructureBuilderGUI(tk.Tk):
                     num_confs=max(1, int(self.bridge_conformers.get())),
                 )
             else:
-                try:
-                    paths = advanced_runner(name)
-                except Exception as advanced_exc:
-                    self.note.insert("end", chr(10) + f"Advanced bridge failed, falling back to quick safe bridge: {advanced_exc}" + chr(10))
-                    paths = export_gui_quick_bridge_package(
-                        self.sequence_var.get(), self.output_dir.get(), name, label,
-                        receptor_path=self._bridge_receptor(),
-                        external_md_csv=self._bridge_md_csv(),
-                        center=self._bridge_center(),
-                        size=self._bridge_size(),
-                        exhaustiveness=max(1, int(self.bridge_exhaustiveness.get())),
-                        num_modes=max(1, int(self.bridge_num_modes.get())),
-                        num_confs=max(1, int(self.bridge_conformers.get())),
-                    )
+                # Advanced mode must either complete its requested workflow or fail
+                # visibly. Do not silently substitute a different Quick-bridge
+                # workflow, because that can make an advanced failure look like a
+                # successful advanced export.
+                paths = advanced_runner(name)
             self._set_progress(86, f"Writing {label} files...")
             self.note.insert("end", chr(10) + f"{label} exported:" + chr(10))
             for k, p in paths.items():
@@ -644,14 +842,14 @@ class PyMOLStructureBuilderGUI(tk.Tk):
     def export_bridge(self):
         self._export_bridge_kind(
             "Simulation Bridge", "simulation_bridge",
-            lambda name: export_low_spec_validation_bridge(self.sequence_var.get(), self.output_dir.get(), name, num_confs=max(1, int(self.bridge_conformers.get())))
+            lambda name: export_low_spec_validation_bridge(self.sequence_var.get(), str(self._effective_output_dir()), name, num_confs=max(1, int(self.bridge_conformers.get())))
         )
 
     def export_docking_bridge(self):
         self._export_bridge_kind(
             "Docking Bridge", "docking_bridge",
             lambda name: export_external_docking_runner_bridge(
-                self.sequence_var.get(), self.output_dir.get(), name,
+                self.sequence_var.get(), str(self._effective_output_dir()), name,
                 receptor_path=self._bridge_receptor(), center=self._bridge_center(), size=self._bridge_size(),
                 exhaustiveness=max(1, int(self.bridge_exhaustiveness.get())),
                 num_modes=max(1, int(self.bridge_num_modes.get())),
@@ -663,7 +861,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self._export_bridge_kind(
             "MD Prep Bridge", "md_prep_bridge",
             lambda name: export_all_atom_md_preparation_bridge(
-                self.sequence_var.get(), self.output_dir.get(), name,
+                self.sequence_var.get(), str(self._effective_output_dir()), name,
                 receptor_path=self._bridge_receptor(), center=self._bridge_center(), size=self._bridge_size(),
                 low_spec_num_confs=max(1, int(self.bridge_conformers.get())),
             )
@@ -673,7 +871,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self._export_bridge_kind(
             "MD Result Import", "md_result_import_bridge",
             lambda name: export_external_md_result_import_bridge(
-                self.sequence_var.get(), self.output_dir.get(), name,
+                self.sequence_var.get(), str(self._effective_output_dir()), name,
                 external_md_csv=self._bridge_md_csv(), receptor_path=self._bridge_receptor(),
                 center=self._bridge_center(), size=self._bridge_size(),
                 low_spec_num_confs=max(1, int(self.bridge_conformers.get())),
@@ -683,7 +881,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
     def export_publication_report(self):
         self._export_bridge_kind(
             "Publication Report", "publication_report",
-            lambda name: export_publication_validation_report(self.sequence_var.get(), self.output_dir.get(), name)
+            lambda name: export_publication_validation_report(self.sequence_var.get(), str(self._effective_output_dir()), name)
         )
 
 

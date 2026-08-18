@@ -1,0 +1,41 @@
+Sar
+     RDKit          3D
+
+ 12 11  0  0  0  0  0  0  0  0999 V2000
+   -1.7111   -0.2570    0.0876 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4924    0.5515    0.0287 N   0  0  0  0  0  0  0  0  0  0  0  0
+    0.6915   -0.3142    0.0348 C   0  0  0  0  0  0  0  0  0  0  0  0
+    1.9339    0.5207    0.0737 C   0  0  0  0  0  0  0  0  0  0  0  0
+    2.1569    1.2505    1.0264 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.5972    0.4116    0.0580 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.7672   -0.9555   -0.7766 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.7474   -0.8324    1.0377 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.5078    1.0754   -0.8783 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.6844   -0.9739    0.9306 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.7109   -0.9507   -0.8783 H   0  0  0  0  0  0  0  0  0  0  0  0
+    2.6455    0.4740   -0.7442 H   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  1  0
+  2  3  1  0
+  3  4  1  0
+  4  5  2  0
+  1  6  1  0
+  1  7  1  0
+  1  8  1  0
+  2  9  1  0
+  3 10  1  0
+  3 11  1  0
+  4 12  1  0
+M  END
+>  <Pepforge_TemplateRole>  (1) 
+explicit_attachment_fragment
+
+>  <Pepforge_CurationStatus>  (1) 
+explicit_residue_graph
+
+>  <Pepforge_Source>  (1) 
+explicit_residue_fragment
+
+>  <Pepforge_Notice>  (1) 
+Attachment fragment for connected peptide construction; not a free-reagent or experimental-structure claim.
+
+$$$$

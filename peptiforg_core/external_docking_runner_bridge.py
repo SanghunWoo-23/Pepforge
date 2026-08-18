@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
 """External docking runner bridge utilities for Pepforge v2.2.0.
 
@@ -145,8 +147,7 @@ vina --config vina_config_template.txt
     try:
         sh.chmod(0o755)
     except Exception:
-        pass
-
+        LOGGER.debug("Optional operation skipped", exc_info=True)
     smina = bridge_dir / "smina_gnina_notes.txt"
     _write_text(smina, """Pepforge v2.2.0 Smina/Gnina notes
 ====================================

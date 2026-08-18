@@ -28,13 +28,20 @@ def test_design_developability_report_available():
     assert "long_hydrophobic_stretch" in report["developability_penalties"]
 
 
-def test_docking_pose_quality_annotation():
-    from suite_gui.docking_workbench_gui import pose_quality_annotation
-    grade, note = pose_quality_annotation({
-        "contact_count": 14,
-        "clash_count": 1,
-        "hydrophobic_contacts": 4,
-        "hydrogen_bond_contacts": 2,
-        "min_distance_A": 2.4,
-    })
-    assert grade.startswith("A_")
+def test_docking_uses_explicit_geometry_rank_not_quality_grade():
+    import pandas as pd
+    from suite_gui import docking_workbench_gui as dw
+
+    target = pd.DataFrame([
+        {"chain":"A", "resi":"1", "resn":"ALA", "aa":"A", "atom":"CA", "element":"C", "x":0.0, "y":0.0, "z":0.0},
+        {"chain":"A", "resi":"2", "resn":"LYS", "aa":"K", "atom":"CA", "element":"C", "x":4.0, "y":0.0, "z":0.0},
+    ])
+    peptide = pd.DataFrame([
+        {"pep_pos":1, "aa":"K", "token":"K", "token_class":"std_aa", "x":0.0, "y":0.0, "z":0.0},
+        {"pep_pos":2, "aa":"L", "token":"L", "token_class":"std_aa", "x":3.8, "y":0.0, "z":0.0},
+    ])
+    poses, _contacts, _best = dw.run_pose_search(target, peptide, pose_limit=4)
+    assert not poses.empty
+    assert list(poses["pose_rank"]) == sorted(poses["pose_rank"].tolist())
+    assert "score_lower_better" not in poses.columns
+    assert not hasattr(dw, "pose_quality_annotation")

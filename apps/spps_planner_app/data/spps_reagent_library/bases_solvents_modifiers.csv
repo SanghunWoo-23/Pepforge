@@ -1,15 +1,42 @@
-name,class,MW,density_g_mL,state,default_role,notes
+﻿name,class,MW,density_g_mL,state,default_role,notes
 DIEA,base,129.25,0.742,liquid,base,Also called DIPEA
 DIPEA,base,129.25,0.742,liquid,base,Same as DIEA
-NMM,base,101.15,0.920,liquid,base,N-methylmorpholine
-Pyridine,base,79.10,0.982,liquid,base/solvent,Used in some acylation conditions
+NMM,base,101.15,0.92,liquid,base,N-methylmorpholine
+Pyridine,base,79.1,0.982,liquid,base/solvent,Used in some acylation conditions
 DMF,solvent,73.09,0.944,liquid,solvent,Common SPPS solvent
-NMP,solvent,99.13,1.030,liquid,solvent,Common SPPS solvent
-DCM,solvent,84.93,1.330,liquid,solvent,Common swelling/wash solvent; especially relevant to CTC/trityl loading
+NMP,solvent,99.13,1.03,liquid,solvent,Common SPPS solvent
+DCM,solvent,84.93,1.33,liquid,solvent,Common swelling/wash solvent; especially relevant to CTC/trityl loading
 MeOH,solvent,32.04,0.792,liquid,solvent,Optional final wash in some labs
-TFA,cleavage reagent,114.02,1.490,liquid,acid cleavage,TFA cleavage reagent
+TFA,cleavage reagent,114.02,1.49,liquid,acid cleavage,TFA cleavage reagent
 TIS,scavenger,158.36,0.773,liquid,scavenger,Cleavage cocktail scavenger
-Acetic anhydride,modifier reagent,102.09,1.080,liquid,N-terminal acetylation,Actual reagent for default Ac calculation
+Acetic anhydride,modifier reagent,102.09,1.08,liquid,N-terminal acetylation,Actual reagent for default Ac calculation
 FITC,label reagent,389.38,,solid,label,Isothiocyanate dye; protect from light and verify reagent form
 Biotin-NHS,label reagent,341.38,,solid,label,NHS ester form; chemistry differs from biotin acid
 Biotin acid,modifier reagent,244.31,,solid,modifier,Acid form may require coupling reagent/base
+TEA,base,101.19,0.726,liquid,base,Triethylamine
+Triethylamine,base,101.19,0.726,liquid,base,Same as TEA
+"2,4,6-collidine",base,121.18,0.917,liquid,base,Sterically hindered base
+"2,6-lutidine",base,107.16,0.925,liquid,base,Sterically hindered base
+TMP,base,141.25,0.837,liquid,base,Tetramethylpiperidine
+TBAF,base,261.46,,solution,base,Usually solution; concentration-specific
+ACN,solvent,41.05,0.786,liquid,solvent,Acetonitrile
+MeCN,solvent,41.05,0.786,liquid,solvent,Acetonitrile alias
+THF,solvent,72.11,0.889,liquid,solvent,Tetrahydrofuran
+DMSO,solvent,78.13,1.1,liquid,solvent,Dimethyl sulfoxide
+EDT,scavenger,94.2,1.123,liquid,scavenger,"Ethane-1,2-dithiol"
+MTBE,solvent,88.15,0.74,liquid,solvent,Methyl tert-butyl ether
+HFIP,solvent,168.04,1.596,liquid,solvent,Hexafluoroisopropanol
+Dioxane,solvent,88.11,1.033,liquid,solvent,"1,4-dioxane"
+EtOAc,solvent,88.11,0.902,liquid,solvent,Ethyl acetate
+Acetone,solvent,58.08,0.791,liquid,solvent,Acetone
+CHCl3,solvent,119.38,1.489,liquid,solvent,Chloroform
+Water,scavenger/solvent,18.015,1.0,liquid,cleavage scavenger,Alias for DW/H2O in cleavage cocktails
+DW / water,scavenger/solvent,18.015,1.0,liquid,cleavage scavenger,Water component in TFA cleavage cocktails
+Thioanisole,scavenger,124.2,1.06,liquid,cleavage scavenger,Scavenger in Reagent K/R/H
+Anisole,scavenger,108.14,0.995,liquid,cleavage scavenger,Scavenger in Reagent R
+Phenol,scavenger,94.11,1.07,solid_or_melt,cleavage scavenger,Common Reagent K/B/H scavenger; often weighed as solid
+DTT,reducing scavenger,154.25,,solid,cleavage scavenger,Reducing scavenger in Reagent L; report approximate w/v mass
+DMS,scavenger,62.13,0.846,liquid,cleavage scavenger,Dimethyl sulfide; Reagent H/Met oxidation suppression
+Ammonium iodide,scavenger/additive,144.94,,solid,cleavage additive,Reagent H additive; report approximate w/v mass
+DMB,scavenger/additive,138.17,,solid,cleavage additive,Dimethoxybenzene/DMB option used in Reagent I; verify exact isomer by SOP
+p-Cresol,scavenger,108.14,1.034,liquid_or_solid,cleavage scavenger,Older cleavage cocktail scavenger option

@@ -6,7 +6,7 @@ def test_real_pymol_tool_builds_connected_files(tmp_path):
     paths = export_modified_peptide_structure("Ac-K(Ahx-Biotin)-LVFF-NH2", tmp_path, "k_ahx_biotin_lvff")
     for key in ["sdf", "pdb", "json", "report", "pml", "token_map"]:
         assert Path(paths[key]).exists(), key
-    assert "Visualization" in Path(paths["cif"]).read_text(encoding="utf-8") or Path(paths["cif"]).exists()
+    assert "cif" not in paths
 
 
 def test_real_pymol_tool_parses_sidechain_and_fitc():

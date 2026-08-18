@@ -6,12 +6,14 @@ Peptide Design Engine - Desktop GUI / EXE-ready launcher
 Design goals
 - Preserve the original engine: this GUI calls peptide_engine.run() directly.
 - Keep Colab-style controls: target, mode, length, feature toggles, hotspot, docking,
-  pseudo-docking, optional ML, continual-learning import/train/rerank.
+  structure-input export and user-data model import/train/rerank.
 - Avoid feature loss: any CONFIG key not exposed as a widget can be supplied through
   Advanced JSON Override.
 - EXE packaging friendly: uses only tkinter from the standard library plus the project modules.
 """
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
 import contextlib
 import csv
@@ -19,6 +21,7 @@ import json
 import os
 import re
 import queue
+import secrets
 import sys
 import threading
 import traceback
@@ -46,6 +49,8 @@ ROOT_DIR = PYTHON_DIR.parent
 PROJECT_ROOT = PYTHON_DIR.parents[2] if len(PYTHON_DIR.parents) >= 3 else ROOT_DIR
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+from peptiforg_core.sandbox_runtime import configured_output  # noqa: E402
+from peptiforg_core.ui_theme import apply_pepforge_theme, BACKGROUND  # noqa: E402
 try:
     from peptiforg_core.ui_helpers import set_pepforge_icon  # noqa: E402
 except Exception:
@@ -57,8 +62,7 @@ except Exception:
                 window.iconphoto(True, img)
                 setattr(window, "_pepforge_icon_img", img)
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
 def resource_path(relative: str) -> Path:
     """Return a path that works both in source mode and PyInstaller onefile mode."""
     base = Path(getattr(sys, "_MEIPASS", ROOT_DIR))
@@ -172,9 +176,7 @@ class QueueWriter:
         return len(text)
 
     def flush(self) -> None:
-        pass
-
-
+        LOGGER.debug("Optional operation skipped", exc_info=True)
 # ---------------------------------------------------------------------
 # GUI
 # ---------------------------------------------------------------------
@@ -183,6 +185,7 @@ class PeptideDesktopGUI(tk.Tk):
         super().__init__()
         self.title("Pepforge Peptide Design Engine")
         set_pepforge_icon(self)
+        apply_pepforge_theme(self)
         self.geometry("1180x820")
         self.minsize(1040, 720)
         self._app_icon_img = None
@@ -194,10 +197,14 @@ class PeptideDesktopGUI(tk.Tk):
 
         self.msg_q: queue.Queue = queue.Queue()
         self.worker: Optional[threading.Thread] = None
+        self.applied_config: Optional[Dict[str, Any]] = None
+        self.settings_applied = False
         self.last_output_dir: Optional[Path] = None
         self.last_zip: Optional[Path] = None
+        self.last_run_config: Optional[Dict[str, Any]] = None
         self._build_vars()
         self._build_ui()
+        self._install_settings_change_tracking()
         self.after(100, self._poll_queue)
         self.after(950, self._close_splash)
 
@@ -213,8 +220,7 @@ class PeptideDesktopGUI(tk.Tk):
                 self._app_icon_img = ImageTk.PhotoImage(im)
                 self.iconphoto(True, self._app_icon_img)
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _show_splash(self) -> None:
         try:
             splash_path = resource_path("assets/PeptideDesignEngine_Splash.png")
@@ -241,14 +247,14 @@ class PeptideDesktopGUI(tk.Tk):
             if self._splash is not None and self._splash.winfo_exists():
                 self._splash.destroy()
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         self.deiconify()
 
     # --------------------------- vars ---------------------------
     def _build_vars(self) -> None:
         c = eng.CONFIG
         self.var_preset = tk.StringVar(value="custom")
-        self.var_targets = tk.StringVar(value=list_to_gui_text(c.get("TARGETS", [])) or "DELIKFVRWA, YYERWFCAA")
+        self.var_targets = tk.StringVar(value="")
         self.var_target_mode = tk.StringVar(value=c.get("TARGET_MODE_LABEL", "MULTI"))
         self.var_design_mode = tk.StringVar(value=c.get("DESIGN_MODE", "MULTI_TARGET_BINDER"))
         self.var_binder_mode = tk.StringVar(value=c.get("BINDER_MODE", "BALANCED"))
@@ -257,6 +263,7 @@ class PeptideDesktopGUI(tk.Tk):
         self.var_gen = tk.IntVar(value=int(c.get("GEN", 20)))
         self.var_topk = tk.IntVar(value=int(c.get("FINAL_TOPK", 10)))
         self.var_seed = tk.IntVar(value=int(c.get("SEED", 42)))
+        self.var_lock_seed = tk.BooleanVar(value=not to_bool(c.get("AUTO_SEED_EACH_RUN", True)))
 
         self.var_len_mode = tk.StringVar(value=c.get("LEN_MODE", "RANDOM"))
         self.var_fix_len = tk.IntVar(value=int(c.get("FIX_LENGTH", 14)))
@@ -271,6 +278,7 @@ class PeptideDesktopGUI(tk.Tk):
         self.var_use_tag = tk.BooleanVar(value=to_bool(c.get("USE_TAG", True)))
         self.var_use_base_chem = tk.BooleanVar(value=to_bool(c.get("USE_BASE_CHEM", True)))
         self.var_use_label = tk.BooleanVar(value=to_bool(c.get("USE_LABEL", True)))
+        self.var_use_cterm_nh2 = tk.BooleanVar(value=to_bool(c.get("USE_CTERM_NH2", True)))
 
         # Selectable chemistry libraries. Values are still mirrored into CONFIG,
         # while Advanced JSON Override can override them if needed.
@@ -318,10 +326,10 @@ class PeptideDesktopGUI(tk.Tk):
         self.var_ml_weight = tk.DoubleVar(value=float(c.get("ML_RERANK_WEIGHT", 0.20)))
         self.var_use_ml_prior = tk.BooleanVar(value=to_bool(c.get("USE_ML_PRIOR", False)))
         self.var_ml_prior_weight = tk.DoubleVar(value=float(c.get("ML_PRIOR_WEIGHT", 0.45)))
-        self.var_ml_prior_table = tk.StringVar(value=str(c.get("ML_PRIOR_TABLE_PATH", "data/ml_prior/pdb_interface_prior_sample.csv")))
+        self.var_ml_prior_table = tk.StringVar(value="")
         self.var_trained_model = tk.StringVar(value="")
         self.var_trained_ml_weight = tk.DoubleVar(value=0.25)
-        self.var_training_db = tk.StringVar(value=str(ROOT_DIR / "data" / "training_data.csv"))
+        self.var_training_db = tk.StringVar(value="")
         self.var_ml_label = tk.StringVar(value="experimental_binding")
         self.var_models_dir = tk.StringVar(value=str(ROOT_DIR / "models"))
         self.var_mapping_csv = tk.StringVar(value="")
@@ -329,8 +337,19 @@ class PeptideDesktopGUI(tk.Tk):
         self.var_training_status = tk.StringVar(value="Training DB: not loaded")
         self.var_preview_limit = tk.IntVar(value=50)
 
-        self.var_outdir = tk.StringVar(value=str(ROOT_DIR / "outputs" / "desktop_run"))
+        self.var_outdir = tk.StringVar(value="")
         self.var_config_file = tk.StringVar(value="")
+
+    def _default_outdir(self) -> Path:
+        return configured_output(ROOT_DIR / "outputs" / "desktop_run", "design")
+
+    def _effective_outdir(self) -> Path:
+        raw = str(self.var_outdir.get() or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+        outdir = self._default_outdir()
+        self.var_outdir.set(str(outdir))
+        return outdir
 
     # --------------------------- UI construction ---------------------------
     def _build_ui(self) -> None:
@@ -348,10 +367,9 @@ class PeptideDesktopGUI(tk.Tk):
                 self._header_logo_img = ImageTk.PhotoImage(im)
                 ttk.Label(header, image=self._header_logo_img).grid(row=0, column=0, rowspan=2, sticky="w", padx=(0, 12))
             except Exception:
-                pass
-
+                LOGGER.debug("Optional operation skipped", exc_info=True)
         ttk.Label(header, text="Peptide Design Engine", font=("Segoe UI", 18, "bold")).grid(row=0, column=1, sticky="w")
-        ttk.Label(header, text="Desktop GUI · EXE installer-ready · continual ML-ready", foreground="#555").grid(row=1, column=1, sticky="w")
+        ttk.Label(header, text="Design, review, and export peptide candidates", foreground="#555").grid(row=1, column=1, sticky="w")
 
         self.nb = ttk.Notebook(self)
         self.nb.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
@@ -365,15 +383,21 @@ class PeptideDesktopGUI(tk.Tk):
 
         footer = ttk.Frame(self, padding=(10, 6))
         footer.grid(row=2, column=0, sticky="ew")
-        footer.columnconfigure(2, weight=1)
-        ttk.Button(footer, text="Run Engine", command=self.run_engine).grid(row=0, column=0, padx=4)
-        ttk.Button(footer, text="Stop requested", command=self.stop_requested).grid(row=0, column=1, padx=4)
-        ttk.Label(footer, textvariable=self.var_outdir).grid(row=0, column=2, sticky="ew", padx=8)
-        ttk.Button(footer, text="Open Output Folder", command=self.open_output).grid(row=0, column=3, padx=4)
-        ttk.Button(footer, text="Open ZIP", command=self.open_zip).grid(row=0, column=4, padx=4)
+        footer.columnconfigure(4, weight=1)
+        self.apply_settings_button = ttk.Button(footer, text="1. Apply Settings", command=self.apply_settings)
+        self.apply_settings_button.grid(row=0, column=0, padx=4)
+        self.run_engine_button = ttk.Button(footer, text="2. Generate Candidates", command=self.run_engine, state="disabled")
+        self.run_engine_button.grid(row=0, column=1, padx=4)
+        self.repeat_run_button = ttk.Button(footer, text="Repeat Last Run", command=self.repeat_last_run, state="disabled")
+        self.repeat_run_button.grid(row=0, column=2, padx=4)
+        ttk.Button(footer, text="Stop", command=self.stop_requested).grid(row=0, column=3, padx=4)
+        self.settings_status = tk.StringVar(value="Settings changed — click Apply Settings")
+        ttk.Label(footer, textvariable=self.settings_status).grid(row=0, column=4, sticky="ew", padx=8)
+        ttk.Button(footer, text="Open Output Folder", command=self.open_output).grid(row=0, column=5, padx=4)
+        ttk.Button(footer, text="Open Result ZIP", command=self.open_zip).grid(row=0, column=6, padx=4)
 
     def _make_scrolled(self, parent: ttk.Frame) -> ttk.Frame:
-        canvas = tk.Canvas(parent, highlightthickness=0)
+        canvas = tk.Canvas(parent, highlightthickness=0, background=BACKGROUND)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas)
 
@@ -431,7 +455,7 @@ class PeptideDesktopGUI(tk.Tk):
 
     def _tab_basic(self) -> None:
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text="1. Basic / Run")
+        self.nb.add(tab, text="1. Design Settings")
         inner = self._make_scrolled(tab)
         inner.columnconfigure(1, weight=1)
         inner.columnconfigure(3, weight=1)
@@ -442,33 +466,46 @@ class PeptideDesktopGUI(tk.Tk):
         self.target_text.grid(row=2, column=0, columnspan=4, sticky="ew", padx=6, pady=4)
         self.target_text.insert("1.0", self.var_targets.get())
 
-        self._row_combo(inner, 3, "Preset", self.var_preset, ["custom", "fast", "paper", "exploration", "hotspot_only"])
-        ttk.Button(inner, text="Apply Preset to UI", command=self.apply_preset_to_ui).grid(row=3, column=2, sticky="w", padx=6)
-        self._row_combo(inner, 4, "Target Mode", self.var_target_mode, ["SINGLE", "MULTI", "BRIDGE"])
-        self._row_combo(inner, 5, "Design Mode", self.var_design_mode, ["SINGLE_TARGET", "MULTI_TARGET_BINDER", "BRIDGE_LINKER"])
-        self._row_combo(inner, 6, "Binder Mode", self.var_binder_mode, ["BALANCED", "AFFINITY_FIRST", "DEVELOPABILITY", "DUAL_BINDER", "CYCLIC_PEPTIDE"])
-        self._row_entry(inner, 7, "Population", self.var_pop)
-        self._row_entry(inner, 8, "Generations", self.var_gen)
-        self._row_entry(inner, 9, "Final Top K", self.var_topk)
-        self._row_entry(inner, 10, "Seed", self.var_seed)
+        preset_combo = self._row_combo(inner, 3, "Preset", self.var_preset, ["custom", "fast", "paper", "exploration", "hotspot_only"])
+        preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_preset_to_ui(), add=True)
+        self._row_combo(inner, 4, "Target Scope", self.var_target_mode, ["SINGLE", "MULTI", "BRIDGE"])
+        self._row_combo(inner, 5, "Design Strategy", self.var_design_mode, ["SINGLE_TARGET", "MULTI_TARGET_BINDER", "BRIDGE_LINKER"])
+        self._row_combo(inner, 6, "Optimization Goal", self.var_binder_mode, ["BALANCED", "AFFINITY_FIRST", "DEVELOPABILITY", "DUAL_BINDER", "CYCLIC_PEPTIDE"])
+        self._row_entry(inner, 7, "Candidates / Generation", self.var_pop)
+        self._row_entry(inner, 8, "Optimization Generations", self.var_gen)
+        self._row_entry(inner, 9, "Final Candidates", self.var_topk)
+        self.seed_entry = self._row_entry(inner, 10, "Random Seed", self.var_seed)
+        ttk.Checkbutton(
+            inner,
+            text="Lock seed for exact repeat",
+            variable=self.var_lock_seed,
+            command=self._update_seed_control,
+        ).grid(row=9, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+        ttk.Label(
+            inner,
+            text="Unlocked: every Generate run receives a new recorded seed. Locked: the entered seed is reproduced exactly.",
+            foreground="#555",
+            wraplength=520,
+        ).grid(row=10, column=2, columnspan=2, sticky="w", padx=6, pady=4)
+        self._update_seed_control()
 
-        ttk.Label(inner, text="Length Mode").grid(row=3, column=2, sticky="w", padx=6, pady=4)
+        ttk.Label(inner, text="Peptide Length Mode").grid(row=3, column=2, sticky="w", padx=6, pady=4)
         ttk.Combobox(inner, textvariable=self.var_len_mode, values=["RANDOM", "FIX"], state="readonly", width=16).grid(row=3, column=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(inner, text="Fix Length").grid(row=4, column=2, sticky="w", padx=6, pady=4)
+        ttk.Label(inner, text="Fixed Length").grid(row=4, column=2, sticky="w", padx=6, pady=4)
         ttk.Entry(inner, textvariable=self.var_fix_len, width=18).grid(row=4, column=3, sticky="ew", padx=6, pady=4)
         ttk.Label(inner, text="Min Length").grid(row=5, column=2, sticky="w", padx=6, pady=4)
         ttk.Entry(inner, textvariable=self.var_min_len, width=18).grid(row=5, column=3, sticky="ew", padx=6, pady=4)
         ttk.Label(inner, text="Max Length").grid(row=6, column=2, sticky="w", padx=6, pady=4)
         ttk.Entry(inner, textvariable=self.var_max_len, width=18).grid(row=6, column=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(inner, text="Length Count").grid(row=7, column=2, sticky="w", padx=6, pady=4)
+        ttk.Label(inner, text="Length Measurement").grid(row=7, column=2, sticky="w", padx=6, pady=4)
         ttk.Combobox(inner, textvariable=self.var_length_metric, values=["TOKEN", "RESIDUE", "EXPANDED"], state="readonly").grid(row=7, column=3, sticky="ew", padx=6, pady=4)
         ttk.Checkbutton(inner, text="Trim to length", variable=self.var_trim).grid(row=8, column=2, columnspan=2, sticky="w", padx=6, pady=4)
 
-        ttk.Label(inner, text="Output directory").grid(row=11, column=0, sticky="w", padx=6, pady=(14, 4))
+        ttk.Label(inner, text="Output Folder").grid(row=11, column=0, sticky="w", padx=6, pady=(14, 4))
         ttk.Entry(inner, textvariable=self.var_outdir).grid(row=11, column=1, columnspan=2, sticky="ew", padx=6, pady=(14, 4))
         ttk.Button(inner, text="Browse", command=lambda: self._pick_dir(self.var_outdir)).grid(row=11, column=3, sticky="w", padx=6, pady=(14, 4))
 
-        ttk.Label(inner, text="Optional config JSON file").grid(row=12, column=0, sticky="w", padx=6, pady=4)
+        ttk.Label(inner, text="Optional Settings JSON").grid(row=12, column=0, sticky="w", padx=6, pady=4)
         ttk.Entry(inner, textvariable=self.var_config_file).grid(row=12, column=1, columnspan=2, sticky="ew", padx=6, pady=4)
         ttk.Button(inner, text="Browse", command=lambda: self._pick_file(self.var_config_file, [("JSON", "*.json"), ("All", "*.*")])).grid(row=12, column=3, sticky="w", padx=6, pady=4)
 
@@ -559,6 +596,7 @@ class PeptideDesktopGUI(tk.Tk):
             ("Use tag system (uncheck = hide tag options)", self.var_use_tag),
             ("Use base chemistry / N-terminal chemicals (uncheck = hide)", self.var_use_base_chem),
             ("Use label system (uncheck = hide label options)", self.var_use_label),
+            ("Allow C-term NH2", self.var_use_cterm_nh2),
             ("Motif lock", self.var_motif_lock),
         ]
         for i, (text, var) in enumerate(toggle_specs):
@@ -670,8 +708,9 @@ class PeptideDesktopGUI(tk.Tk):
         mf = self.motif_frame
         mr = 0
         ttk.Label(mf, text="Motif preset").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
-        ttk.Combobox(mf, textvariable=self.var_motif_preset, values=["Custom", "RGD integrin-like", "PXXP SH3-like", "LXXLL nuclear-receptor-like", "KLV hydrophobic anchor-like", "RGD + acidic patch example", "Short cationic anchor example"], width=32, state="readonly").grid(row=mr, column=1, sticky="ew", padx=6, pady=4)
-        ttk.Button(mf, text="Apply preset", command=self._apply_motif_preset).grid(row=mr, column=2, sticky="w", padx=6, pady=4)
+        motif_preset_combo = ttk.Combobox(mf, textvariable=self.var_motif_preset, values=["Custom", "RGD integrin-like", "PXXP SH3-like", "LXXLL nuclear-receptor-like", "KLV hydrophobic anchor-like", "RGD + acidic patch example", "Short cationic anchor example"], width=32, state="readonly")
+        motif_preset_combo.grid(row=mr, column=1, sticky="ew", padx=6, pady=4)
+        motif_preset_combo.bind("<<ComboboxSelected>>", lambda _event: self._apply_motif_preset(), add=True)
         mr += 1
         ttk.Label(mf, text="Locked motifs").grid(row=mr, column=0, sticky="w", padx=6, pady=4)
         ttk.Entry(mf, textvariable=self.var_locked_motifs, width=50).grid(row=mr, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
@@ -693,31 +732,31 @@ class PeptideDesktopGUI(tk.Tk):
 
     def _tab_hotspot_docking(self) -> None:
         tab = ttk.Frame(self.nb)
-        self.nb.add(tab, text="3. Hotspot / Docking")
+        self.nb.add(tab, text="3. Hot Spot / Docking")
         inner = self._make_scrolled(tab)
         inner.columnconfigure(1, weight=1)
         inner.columnconfigure(3, weight=1)
 
-        ttk.Label(inner, text="Hotspot / epitope extraction", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", padx=6, pady=(10, 4))
-        ttk.Checkbutton(inner, text="Auto hotspot", variable=self.var_auto_hotspot).grid(row=1, column=0, sticky="w", padx=6, pady=4)
-        self._row_combo(inner, 2, "Hotspot source", self.var_hotspot_source, ["SEQUENCE", "PDB"])
-        self._row_entry(inner, 3, "Hotspot sequence", self.var_hotspot_sequence, width=50)
+        ttk.Label(inner, text="Hot spot / epitope extraction", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", padx=6, pady=(10, 4))
+        ttk.Checkbutton(inner, text="Detect hot spots automatically", variable=self.var_auto_hotspot).grid(row=1, column=0, sticky="w", padx=6, pady=4)
+        self._row_combo(inner, 2, "Hot Spot Source", self.var_hotspot_source, ["SEQUENCE", "PDB"])
+        self._row_entry(inner, 3, "Source Sequence", self.var_hotspot_sequence, width=50)
         ttk.Label(inner, text="PDB file").grid(row=4, column=0, sticky="w", padx=6, pady=4)
         ttk.Entry(inner, textvariable=self.var_hotspot_pdb_file).grid(row=4, column=1, columnspan=2, sticky="ew", padx=6, pady=4)
         ttk.Button(inner, text="Browse", command=lambda: self._pick_file(self.var_hotspot_pdb_file, [("PDB", "*.pdb"), ("Text", "*.txt"), ("All", "*.*")])).grid(row=4, column=3, sticky="w", padx=6, pady=4)
-        self._row_entry(inner, 5, "Hotspot window", self.var_hotspot_window)
-        self._row_entry(inner, 6, "Hotspot top K", self.var_hotspot_topk)
-        ttk.Checkbutton(inner, text="Replace targets with hotspot regions", variable=self.var_hotspot_replace).grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=4)
-        ttk.Checkbutton(inner, text="Lock hotspot as motif", variable=self.var_hotspot_lock_motif).grid(row=8, column=0, columnspan=2, sticky="w", padx=6, pady=4)
+        self._row_entry(inner, 5, "Analysis Window", self.var_hotspot_window)
+        self._row_entry(inner, 6, "Candidate Regions", self.var_hotspot_topk)
+        ttk.Checkbutton(inner, text="Use detected regions as targets", variable=self.var_hotspot_replace).grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=4)
+        ttk.Checkbutton(inner, text="Use detected region as a locked motif", variable=self.var_hotspot_lock_motif).grid(row=8, column=0, columnspan=2, sticky="w", padx=6, pady=4)
 
-        ttk.Label(inner, text="Docking / pseudo-docking export", font=("Segoe UI", 11, "bold")).grid(row=10, column=0, columnspan=4, sticky="w", padx=6, pady=(18, 4))
+        ttk.Label(inner, text="Docking preparation / structure-input export", font=("Segoe UI", 11, "bold")).grid(row=10, column=0, columnspan=4, sticky="w", padx=6, pady=(18, 4))
         self._row_combo(inner, 11, "Docking stage", self.var_docking_stage, ["OFF", "FINAL_TOP_ONLY", "EVERY_N_GENERATIONS"])
         self._row_combo(inner, 12, "Docking engine", self.var_docking_engine, ["NONE", "CUSTOM", "ROSETTA", "VINA", "DIFFDOCK"])
         self._row_combo(inner, 13, "Docking-ready mode", self.var_docking_ready_mode, ["BASIC", "ADVANCED"])
         self._row_entry(inner, 14, "Docking-ready bonus", self.var_docking_bonus)
-        ttk.Checkbutton(inner, text="Prepare pseudo-docking Colab input", variable=self.var_pseudodock).grid(row=15, column=0, columnspan=2, sticky="w", padx=6, pady=4)
+        ttk.Checkbutton(inner, text="Prepare canonical sequence-only complex inputs", variable=self.var_pseudodock).grid(row=15, column=0, columnspan=2, sticky="w", padx=6, pady=4)
         self._row_entry(inner, 16, "Receptor sequence", self.var_receptor_sequence, width=50)
-        self._row_entry(inner, 17, "Pseudo-docking top K", self.var_pseudodock_topk)
+        self._row_entry(inner, 17, "Structure-input top K", self.var_pseudodock_topk)
 
     def _tab_ml_data(self) -> None:
         tab = ttk.Frame(self.nb)
@@ -753,9 +792,7 @@ class PeptideDesktopGUI(tk.Tk):
         ml_box = ttk.LabelFrame(top, text="Train / Rerank", padding=8)
         ml_box.grid(row=4, column=0, columnspan=4, sticky="ew", padx=4, pady=8)
         ml_box.columnconfigure(1, weight=1)
-        ttk.Checkbutton(ml_box, text="Use built-in optional ML reranking", variable=self.var_optional_ml).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=3)
-        ttk.Label(ml_box, text="Optional ML weight").grid(row=1, column=0, sticky="w", padx=4, pady=3)
-        ttk.Entry(ml_box, textvariable=self.var_ml_weight, width=12).grid(row=1, column=1, sticky="w", padx=4, pady=3)
+        ttk.Label(ml_box, text="Built-in untrained reranking: disabled; select a user-data trained model below.", foreground="#8a4b08").grid(row=0, column=0, columnspan=4, sticky="w", padx=4, pady=3)
 
         ttk.Label(ml_box, text="ML label column").grid(row=2, column=0, sticky="w", padx=4, pady=3)
         self.ml_label_combo = ttk.Combobox(
@@ -782,16 +819,16 @@ class PeptideDesktopGUI(tk.Tk):
         ttk.Label(ml_box, textvariable=self.var_model_status, foreground="#335").grid(row=6, column=0, columnspan=4, sticky="w", padx=4, pady=(5, 0))
         ttk.Label(ml_box, textvariable=self.var_training_status, foreground="#335").grid(row=7, column=0, columnspan=4, sticky="w", padx=4, pady=(2, 0))
 
-        prior_box = ttk.LabelFrame(top, text="PDB/interface-derived ML Prior", padding=8)
+        prior_box = ttk.LabelFrame(top, text="User-reviewed statistical ranking prior", padding=8)
         prior_box.grid(row=5, column=0, columnspan=4, sticky="ew", padx=4, pady=8)
         prior_box.columnconfigure(1, weight=1)
-        ttk.Checkbutton(prior_box, text="Use PDB/interface-derived ML prior", variable=self.var_use_ml_prior).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=3)
+        ttk.Checkbutton(prior_box, text="Use explicit CSV statistical prior", variable=self.var_use_ml_prior).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=3)
         ttk.Label(prior_box, text="Prior weight").grid(row=1, column=0, sticky="w", padx=4, pady=3)
         ttk.Entry(prior_box, textvariable=self.var_ml_prior_weight, width=12).grid(row=1, column=1, sticky="w", padx=4, pady=3)
         ttk.Label(prior_box, text="Prior table path").grid(row=2, column=0, sticky="w", padx=4, pady=3)
         ttk.Entry(prior_box, textvariable=self.var_ml_prior_table).grid(row=2, column=1, sticky="ew", padx=4, pady=3)
         ttk.Button(prior_box, text="Browse", command=lambda: self._pick_file(self.var_ml_prior_table, [("CSV", "*.csv"), ("All", "*.*")])).grid(row=2, column=2, sticky="w", padx=4, pady=3)
-        ttk.Label(prior_box, text="Conservative ranking prior only; not a validated affinity predictor.", foreground="#666").grid(row=3, column=0, columnspan=4, sticky="w", padx=4, pady=(2,0))
+        ttk.Label(prior_box, text="Requires an explicit reviewed CSV. This is not ML, affinity, ΔG, Kd, or experimental validation.", foreground="#666").grid(row=3, column=0, columnspan=4, sticky="w", padx=4, pady=(2,0))
 
         preview_frame = ttk.LabelFrame(tab, text="training_data.csv preview", padding=6)
         preview_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
@@ -889,22 +926,74 @@ class PeptideDesktopGUI(tk.Tk):
 
     # --------------------------- config ---------------------------
     def preset_config(self, name: str) -> Dict[str, Any]:
-        if name == "fast":
-            return {"LEN_MODE": "RANDOM", "MIN_LENGTH": 10, "MAX_LENGTH": 12, "FIX_LENGTH": 12, "POP": 100, "GEN": 8, "FINAL_TOPK": 10,
-                    "USE_D": False, "USE_NON_NAT": False, "USE_LINKER": False, "USE_TAG": False, "USE_BASE_CHEM": False, "USE_LABEL": False,
-                    "MOTIF_LOCK": False, "USE_OPTIONAL_ML": False, "AUTO_HOTSPOT": False, "PREPARE_PSEUDODOCKING_COLAB": False}
-        if name == "paper":
-            return {"LEN_MODE": "RANDOM", "MIN_LENGTH": 12, "MAX_LENGTH": 15, "FIX_LENGTH": 14, "POP": 200, "GEN": 20, "FINAL_TOPK": 25,
-                    "DESIGN_MODE": "BRIDGE_LINKER", "BINDER_MODE": "BALANCED", "USE_LINKER": True, "USE_OPTIONAL_ML": False}
-        if name == "exploration":
-            return {"LEN_MODE": "RANDOM", "MIN_LENGTH": 12, "MAX_LENGTH": 20, "FIX_LENGTH": 16, "POP": 300, "GEN": 30, "FINAL_TOPK": 50,
-                    "USE_D": True, "USE_NON_NAT": True, "USE_LINKER": True, "USE_TAG": True, "USE_BASE_CHEM": True, "USE_LABEL": True,
-                    "USE_OPTIONAL_ML": True, "ML_RERANK_WEIGHT": 0.20}
-        if name == "hotspot_only":
-            return {"LEN_MODE": "RANDOM", "MIN_LENGTH": 12, "MAX_LENGTH": 15, "FIX_LENGTH": 14, "POP": 200, "GEN": 20, "FINAL_TOPK": 25,
-                    "DESIGN_MODE": "MULTI_TARGET_BINDER", "BINDER_MODE": "BALANCED", "USE_D": False, "USE_NON_NAT": False, "USE_LINKER": False,
-                    "USE_TAG": False, "USE_BASE_CHEM": False, "USE_LABEL": False, "AUTO_HOTSPOT": True, "HOTSPOT_SOURCE": "SEQUENCE"}
-        return {}
+        """Return a complete, deterministic configuration for preset-owned fields.
+
+        Presets intentionally do not touch user-owned chemistry choices that are
+        outside their historical scope (for example USE_CTERM_NH2 or the selected
+        chemistry token lists).  Every field that *is* owned by the preset system
+        is reset here so applying a preset never depends on which preset was used
+        immediately before it.
+        """
+        baseline = {
+            "TARGET_MODE_LABEL": "MULTI",
+            "DESIGN_MODE": "MULTI_TARGET_BINDER",
+            "BINDER_MODE": "BALANCED",
+            "LEN_MODE": "RANDOM",
+            "MIN_LENGTH": 18,
+            "MAX_LENGTH": 30,
+            "FIX_LENGTH": 24,
+            "POP": 200,
+            "GEN": 20,
+            "FINAL_TOPK": 10,
+            "USE_D": True,
+            "USE_NON_NAT": True,
+            "USE_LINKER": True,
+            "USE_TAG": True,
+            "USE_BASE_CHEM": True,
+            "USE_LABEL": True,
+            "MOTIF_LOCK": False,
+            "USE_OPTIONAL_ML": False,
+            "ML_RERANK_WEIGHT": 0.20,
+            "AUTO_HOTSPOT": False,
+            "HOTSPOT_SOURCE": "SEQUENCE",
+            "PREPARE_PSEUDODOCKING_COLAB": False,
+        }
+
+        overrides: Dict[str, Dict[str, Any]] = {
+            "fast": {
+                "MIN_LENGTH": 10, "MAX_LENGTH": 12, "FIX_LENGTH": 12,
+                "POP": 100, "GEN": 8, "FINAL_TOPK": 10,
+                "USE_D": False, "USE_NON_NAT": False, "USE_LINKER": False,
+                "USE_TAG": False, "USE_BASE_CHEM": False, "USE_LABEL": False,
+                "MOTIF_LOCK": False,
+            },
+            "paper": {
+                "TARGET_MODE_LABEL": "BRIDGE",
+                "DESIGN_MODE": "BRIDGE_LINKER",
+                "MIN_LENGTH": 12, "MAX_LENGTH": 15, "FIX_LENGTH": 14,
+                "POP": 200, "GEN": 20, "FINAL_TOPK": 25,
+            },
+            "exploration": {
+                "MIN_LENGTH": 12, "MAX_LENGTH": 20, "FIX_LENGTH": 16,
+                "POP": 300, "GEN": 30, "FINAL_TOPK": 50,
+                "USE_OPTIONAL_ML": False, "ML_RERANK_WEIGHT": 0.20,
+            },
+            "hotspot_only": {
+                "TARGET_MODE_LABEL": "MULTI",
+                "DESIGN_MODE": "MULTI_TARGET_BINDER",
+                "MIN_LENGTH": 12, "MAX_LENGTH": 15, "FIX_LENGTH": 14,
+                "POP": 200, "GEN": 20, "FINAL_TOPK": 25,
+                "USE_D": False, "USE_NON_NAT": False, "USE_LINKER": False,
+                "USE_TAG": False, "USE_BASE_CHEM": False, "USE_LABEL": False,
+                "AUTO_HOTSPOT": True,
+            },
+        }
+        selected = overrides.get(name)
+        if selected is None:
+            return {}
+        cfg = dict(baseline)
+        cfg.update(selected)
+        return cfg
 
     def apply_preset_to_ui(self) -> None:
         cfg = self.preset_config(self.var_preset.get())
@@ -912,6 +1001,7 @@ class PeptideDesktopGUI(tk.Tk):
             return
         for key, value in cfg.items():
             mapping = {
+                "TARGET_MODE_LABEL": self.var_target_mode,
                 "LEN_MODE": self.var_len_mode, "MIN_LENGTH": self.var_min_len, "MAX_LENGTH": self.var_max_len, "FIX_LENGTH": self.var_fix_len,
                 "POP": self.var_pop, "GEN": self.var_gen, "FINAL_TOPK": self.var_topk, "DESIGN_MODE": self.var_design_mode,
                 "BINDER_MODE": self.var_binder_mode, "USE_D": self.var_use_d, "USE_NON_NAT": self.var_use_non_nat, "USE_LINKER": self.var_use_linker,
@@ -942,6 +1032,7 @@ class PeptideDesktopGUI(tk.Tk):
             "GEN": int(self.var_gen.get()),
             "FINAL_TOPK": int(self.var_topk.get()),
             "SEED": int(self.var_seed.get()),
+            "AUTO_SEED_EACH_RUN": not bool(self.var_lock_seed.get()),
             "LEN_MODE": self.var_len_mode.get(),
             "FIX_LENGTH": int(self.var_fix_len.get()),
             "MIN_LENGTH": int(self.var_min_len.get()),
@@ -955,6 +1046,7 @@ class PeptideDesktopGUI(tk.Tk):
             "USE_TAG": bool(self.var_use_tag.get()),
             "USE_BASE_CHEM": bool(self.var_use_base_chem.get()),
             "USE_LABEL": bool(self.var_use_label.get()),
+            "USE_CTERM_NH2": bool(self.var_use_cterm_nh2.get()),
             "TAG_TYPES": self._selected_tokens(self.var_tag_types),
             "LINKER_TYPES": self._selected_tokens(self.var_linker_types),
             "LINKER_MODE": self.var_linker_mode.get(),
@@ -983,7 +1075,7 @@ class PeptideDesktopGUI(tk.Tk):
             "PREPARE_PSEUDODOCKING_COLAB": bool(self.var_pseudodock.get()),
             "RECEPTOR_SEQUENCE": self.var_receptor_sequence.get().strip(),
             "PSEUDODOCKING_TOPK": int(self.var_pseudodock_topk.get()),
-            "USE_OPTIONAL_ML": bool(self.var_optional_ml.get()),
+            "USE_OPTIONAL_ML": False,
             "ML_RERANK_WEIGHT": float(self.var_ml_weight.get()),
             "USE_ML_PRIOR": bool(self.var_use_ml_prior.get()),
             "ML_PRIOR_WEIGHT": float(self.var_ml_prior_weight.get()),
@@ -1056,7 +1148,7 @@ class PeptideDesktopGUI(tk.Tk):
                 self.advanced_text.delete("1.0", "end")
                 self.advanced_text.insert("1.0", old)
             except Exception:
-                pass
+                LOGGER.debug("Optional operation skipped", exc_info=True)
             messagebox.showerror("Config error", str(e))
 
     def insert_chemistry_override_example(self) -> None:
@@ -1100,25 +1192,115 @@ class PeptideDesktopGUI(tk.Tk):
             messagebox.showerror("Config error", str(e))
 
     # --------------------------- actions ---------------------------
+    def _install_settings_change_tracking(self) -> None:
+        """Require an explicit Apply after any user-editable setting changes."""
+        variables = []
+        for value in self.__dict__.values():
+            if isinstance(value, tk.Variable):
+                variables.append(value)
+            elif isinstance(value, dict):
+                variables.extend(v for v in value.values() if isinstance(v, tk.Variable))
+        seen = set()
+        for variable in variables:
+            if id(variable) in seen or variable is getattr(self, "settings_status", None):
+                continue
+            seen.add(id(variable))
+            variable.trace_add("write", self._mark_settings_dirty)
+
+        def bind_text(widget):
+            try:
+                widget.edit_modified(False)
+                def changed(_event=None, _widget=widget):
+                    if _widget.edit_modified():
+                        _widget.edit_modified(False)
+                        self._mark_settings_dirty()
+                widget.bind("<<Modified>>", changed, add=True)
+            except Exception:
+                LOGGER.debug("Could not track PDE text changes", exc_info=True)
+
+        bind_text(getattr(self, "target_text", None))
+        bind_text(getattr(self, "advanced_text", None))
+
+    def _mark_settings_dirty(self, *_args) -> None:
+        self.settings_applied = False
+        self.applied_config = None
+        try:
+            self.settings_status.set("Settings changed — click Apply Settings")
+            self.run_engine_button.configure(state="disabled")
+        except Exception:
+            pass
+
+    def apply_settings(self) -> None:
+        """Validate and freeze the visible settings used by the next run."""
+        try:
+            config = self.collect_config()
+            has_target = bool(config.get("TARGETS"))
+            has_hotspot_input = bool(
+                config.get("AUTO_HOTSPOT")
+                and (str(config.get("HOTSPOT_SEQUENCE", "")).strip() or str(config.get("HOTSPOT_PDB_TEXT", "")).strip())
+            )
+            if not has_target and not has_hotspot_input:
+                raise ValueError("Enter at least one target sequence, or enable automatic hot-spot detection and provide its sequence/PDB input.")
+            if int(config.get("POP", 0)) <= 0 or int(config.get("GEN", 0)) <= 0 or int(config.get("FINAL_TOPK", 0)) <= 0:
+                raise ValueError("Candidates per generation, optimization generations, and final candidates must be greater than zero.")
+            if str(config.get("LEN_MODE", "RANDOM")).upper() == "FIX":
+                if int(config.get("FIX_LENGTH", 0)) <= 0:
+                    raise ValueError("Fixed Length must be greater than zero.")
+            elif int(config.get("MIN_LENGTH", 0)) <= 0 or int(config.get("MAX_LENGTH", 0)) < int(config.get("MIN_LENGTH", 0)):
+                raise ValueError("Min Length must be greater than zero and cannot exceed Max Length.")
+        except Exception as exc:
+            self.settings_applied = False
+            self.applied_config = None
+            self.settings_status.set("Settings contain an error")
+            self.run_engine_button.configure(state="disabled")
+            messagebox.showerror("Settings error", f"Settings could not be applied:\n{exc}")
+            return
+        self.applied_config = config
+        self.settings_applied = True
+        self.settings_status.set("Settings applied — ready to generate")
+        self.run_engine_button.configure(state="normal")
+        self._log("Settings applied. Candidate generation is ready.\n")
+
     def run_engine(self) -> None:
         if self.worker and self.worker.is_alive():
             messagebox.showinfo("Running", "Engine is already running.")
             return
-        try:
-            cfg = self.collect_config()
-        except Exception as e:
-            messagebox.showerror("Config error", f"Cannot build CONFIG:\n{e}")
+        if not self.settings_applied or self.applied_config is None:
+            messagebox.showwarning("Apply settings", "Click Apply Settings before generating candidates.")
             return
-        outdir = Path(self.var_outdir.get()).expanduser()
+        cfg = dict(self.applied_config)
+        if bool(cfg.get("AUTO_SEED_EACH_RUN", True)):
+            cfg["SEED"] = 1 + secrets.randbelow(2_147_483_646)
+        self._launch_run(cfg, repeat=False)
+
+    def repeat_last_run(self) -> None:
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo("Running", "Engine is already running.")
+            return
+        if self.last_run_config is None:
+            messagebox.showinfo("No previous run", "Generate candidates once before repeating a run.")
+            return
+        self._launch_run(dict(self.last_run_config), repeat=True)
+
+    def _launch_run(self, cfg: Dict[str, Any], repeat: bool) -> None:
+        outdir = self._effective_outdir()
         outdir.mkdir(parents=True, exist_ok=True)
-        run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         run_outdir = outdir / f"run_{run_stamp}"
+        self.last_run_config = dict(cfg)
         self.nb.select(self.nb.tabs()[-1])
         self._log("\n" + "=" * 80 + "\n")
-        self._log(f"Starting run: {run_stamp}\nOutput: {run_outdir}\n")
+        mode = "exact repeat" if repeat else ("new exploratory seed" if cfg.get("AUTO_SEED_EACH_RUN", True) else "locked reproducible seed")
+        self._log(f"Starting run: {run_stamp}\nMode: {mode}\nRandom seed used: {cfg.get('SEED')}\nOutput: {run_outdir}\n")
         self._set_buttons_running(True)
         self.worker = threading.Thread(target=self._run_worker, args=(cfg, run_outdir), daemon=True)
         self.worker.start()
+
+    def _update_seed_control(self) -> None:
+        try:
+            self.seed_entry.configure(state="normal" if self.var_lock_seed.get() else "disabled")
+        except Exception:
+            pass
 
     def _run_worker(self, cfg: Dict[str, Any], outdir: Path) -> None:
         try:
@@ -1308,7 +1490,7 @@ class PeptideDesktopGUI(tk.Tk):
             model_path = ml_trainer.train_from_csv(self.var_training_db.get(), self.var_models_dir.get(), label_col=self.var_ml_label.get())
             self.var_trained_model.set(str(model_path))
             self.update_model_status()
-            self._log(f"[OK] surrogate model saved: {model_path}\n")
+            self._log(f"[OK] user-data ranking model saved: {model_path}\n")
             messagebox.showinfo("ML training complete", f"Saved model:\n{model_path}")
         except Exception as e:
             messagebox.showerror("ML training error", str(e))
@@ -1333,7 +1515,7 @@ class PeptideDesktopGUI(tk.Tk):
                     self._log("\n[ERROR] ERROR\n" + item[1] + "\n")
                     messagebox.showerror("Run error", item[1][-3000:])
         except queue.Empty:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         self.after(100, self._poll_queue)
 
     def _log(self, text: str) -> None:
@@ -1354,11 +1536,16 @@ class PeptideDesktopGUI(tk.Tk):
             ))
 
     def _set_buttons_running(self, running: bool) -> None:
-        # kept simple; ttk does not expose all button refs in this implementation
         self.config(cursor="watch" if running else "")
+        try:
+            self.apply_settings_button.configure(state="disabled" if running else "normal")
+            self.run_engine_button.configure(state="disabled" if running or not self.settings_applied else "normal")
+            self.repeat_run_button.configure(state="disabled" if running or self.last_run_config is None else "normal")
+        except Exception:
+            pass
 
     def open_output(self) -> None:
-        target = self.last_output_dir or Path(self.var_outdir.get())
+        target = self.last_output_dir or self._effective_outdir()
         if target.exists():
             open_path(target)
         else:

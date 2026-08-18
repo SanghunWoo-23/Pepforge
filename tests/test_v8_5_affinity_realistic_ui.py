@@ -1,29 +1,20 @@
 import pandas as pd
 from suite_gui import docking_workbench_gui as dw
 
-
-def test_affinity_report_uses_one_kd_unit_and_plausible_delta_g():
-    poses = pd.DataFrame([{
-        "pose_id": "pose_test",
-        "score_lower_better": -8.2,
-        "contact_count": 12,
-        "clash_count": 1,
-        "hydrophobic_contacts": 3,
-        "electrostatic_contacts": 2,
-        "aromatic_contacts": 1,
-        "hydrogen_bond_contacts": 2,
-        "min_distance_A": 3.4,
+def _poses():
+    return pd.DataFrame([{
+        'pose_rank':1,'pose_id':'pose_test','conformation':'structure_builder_rigid_body','orientation':'forward_N_to_C',
+        'contact_count':12,'centroid_overlap_warnings':1,'hydrophobic_proximities':3,'opposite_charge_proximities':2,
+        'aromatic_proximities':1,'polar_residue_proximities':2,'min_centroid_distance_A':3.4,
+        'rotation_z_deg':0.,'translation_x_A':0.,'translation_y_A':0.,'translation_z_A':0.,
+        'center_x_A':0.,'center_y_A':0.,'center_z_A':0.,'note':'test'
     }])
-    summary = dw.affinity_summary_df(poses, pd.DataFrame())
-    assert (summary["metric"] == "estimated_ΔG").sum() == 1
-    assert (summary["metric"] == "estimated_Kd").sum() == 1
-    dg = float(summary.loc[summary.metric == "estimated_ΔG", "value"].iloc[0])
-    assert -13.5 <= dg <= -1.0
-    unit = summary.loc[summary.metric == "estimated_Kd", "unit"].iloc[0]
-    assert unit in {"mM", "uM", "nM", "pM", "M"}
 
+def test_internal_screening_report_does_not_fabricate_delta_g_or_kd():
+    summary=dw.screening_evidence_df(_poses(),pd.DataFrame())
+    assert summary.loc[summary.metric=='internal_delta_G','value'].iloc[0]=='not calculated'
+    assert summary.loc[summary.metric=='internal_Kd','value'].iloc[0]=='not calculated'
+    assert 'geometry_rank_score' not in set(summary['metric'])
 
-def test_affinity_estimator_penalizes_clashes():
-    clean = dw._estimate_delta_g_from_contacts(12, 2, 3, 1, 2, 0, 3.4)
-    clashing = dw._estimate_delta_g_from_contacts(12, 2, 3, 1, 2, 6, 1.8)
-    assert clean < clashing
+def test_weighted_contact_to_affinity_estimator_is_removed():
+    assert not hasattr(dw,'_estimate_delta_g_from_contacts')

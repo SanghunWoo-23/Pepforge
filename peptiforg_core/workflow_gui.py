@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
 import csv
 import json
@@ -42,7 +44,7 @@ class WorkflowApp:
         try:
             style.theme_use("clam")
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         style.configure("Title.TLabel", font=("Segoe UI", 19, "bold"))
         style.configure("Sec.TLabel", font=("Segoe UI", 12, "bold"))
         style.configure("Action.TButton", font=("Segoe UI", 10, "bold"), padding=6)
@@ -123,7 +125,7 @@ class WorkflowApp:
             if cands:
                 self.candidate_var.set(cands[-1].get("sequence", self.candidate_var.get()))
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         self.write_log(f"Project set: {folder}")
 
     def create_project(self):

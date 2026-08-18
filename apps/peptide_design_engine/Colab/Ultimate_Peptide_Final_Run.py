@@ -1,3 +1,5 @@
+import logging
+LOGGER = logging.getLogger(__name__)
 
 # =========================================================
 # Peptide Design Engine - VERIFIED COLAB RUN
@@ -95,6 +97,7 @@ def run_pipeline(b):
         print(f"Length mode: {cfg['LEN_MODE']} | RANGE: {cfg['MIN_LENGTH']}-{cfg['MAX_LENGTH']} | FIX: {cfg['FIX_LENGTH']}")
         print("Normalized length settings are applied before engine execution.")
         print(f"Length count: {cfg['LENGTH_COUNT_MODE']} | Binder: {cfg['BINDER_MODE']}")
+        print(f"Random seed used: {cfg['SEED']} | New seed each run: {cfg.get('AUTO_SEED_EACH_RUN', False)}")
         print(f"Docking stage: {cfg['DOCKING_STAGE']} | Docking engine: {cfg['DOCKING_ENGINE']}")
 
         rows, progress, paths = run(cfg, verbose=True)
@@ -143,6 +146,5 @@ def run_pipeline(b):
             from google.colab import files
             files.download(paths["zip"])
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
 run_button.on_click(run_pipeline)

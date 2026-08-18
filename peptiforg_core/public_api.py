@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-"""Pepforge Public API v2.0.0.
+"""Pepforge Public API v3.0.0.
 
 Stable public import surface for the research release.  This module intentionally
 re-exports high-level functions that are safe for scripts and documentation.
@@ -11,7 +11,7 @@ Pepforge supports screening, planning, triage, and evidence organization. It doe
 not prove final Kd, true binding, or replace external docking/MD/experimental validation.
 """
 
-PUBLIC_API_VERSION = "2.0.0"
+PUBLIC_API_VERSION = "3.0.0"
 
 from peptiforg_core.project_session_manager import (
     new_project_session,

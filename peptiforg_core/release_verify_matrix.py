@@ -2,9 +2,9 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
-import csv, json, subprocess, sys, py_compile
+import csv, json, os, subprocess, sys, py_compile
 
-RELEASE_VERIFY_VERSION = "4.2.0"
+RELEASE_VERIFY_VERSION = "3.0.0"
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames=None) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,28 +62,32 @@ def verify_release_matrix(root_dir: str | Path, output_dir: str | Path) -> dict[
         root / "peptiforg_core" / "release_integrity.py",
     ]
     compile_errors = []
-    for target in compile_targets:
+    compile_dir = out / "compiled"
+    compile_dir.mkdir(parents=True, exist_ok=True)
+    for index, target in enumerate(compile_targets):
         try:
-            py_compile.compile(str(target), doraise=True)
+            py_compile.compile(str(target), cfile=str(compile_dir / f"{index:02d}_{target.stem}.pyc"), doraise=True)
         except Exception as exc:
             compile_errors.append({"file": str(target.relative_to(root)), "error": repr(exc)})
     add("compile_public_modules", not compile_errors, f"{len(compile_targets)} modules; {len(compile_errors)} errors")
 
     # CLI smoke matrix, bounded to lightweight commands only
+    child_env = dict(os.environ)
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        proc = subprocess.run([sys.executable, str(root / "pepforge_cli.py"), "version"], capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([sys.executable, str(root / "pepforge_cli.py"), "version"], capture_output=True, text=True, timeout=30, env=child_env)
         add("cli_version", proc.returncode == 0 and RELEASE_VERIFY_VERSION in proc.stdout, proc.stdout.strip() or proc.stderr.strip())
     except Exception as exc:
         add("cli_version", False, repr(exc))
 
     try:
-        proc = subprocess.run([sys.executable, str(root / "pepforge_cli.py"), "experimental-template", "--output-dir", str(out / "template")], capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([sys.executable, str(root / "pepforge_cli.py"), "experimental-template", "--output-dir", str(out / "template")], capture_output=True, text=True, timeout=30, env=child_env)
         add("cli_experimental_template", proc.returncode == 0 and "experimental_data_import_template.csv" in proc.stdout, proc.stdout.strip()[-300:] or proc.stderr.strip()[-300:])
     except Exception as exc:
         add("cli_experimental_template", False, repr(exc))
 
     try:
-        proc = subprocess.run([sys.executable, str(root / "pepforge_cli.py"), "init-workflow", "--project-dir", str(out / "workflow_init"), "--project-name", "VerifyMatrix"], capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([sys.executable, str(root / "pepforge_cli.py"), "init-workflow", "--project-dir", str(out / "workflow_init"), "--project-name", "VerifyMatrix"], capture_output=True, text=True, timeout=30, env=child_env)
         add("cli_init_workflow", proc.returncode == 0 and "workflow_run_config.json" in proc.stdout, proc.stdout.strip()[-300:] or proc.stderr.strip()[-300:])
     except Exception as exc:
         add("cli_init_workflow", False, repr(exc))

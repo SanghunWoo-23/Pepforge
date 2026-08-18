@@ -61,7 +61,7 @@ def apply_preset(name: str | None) -> Dict[str, Any]:
             "POP": 300, "GEN": 30, "FINAL_TOPK": 50,
             "USE_D": True, "USE_NON_NAT": True, "USE_LINKER": True,
             "USE_TAG": True, "USE_BASE_CHEM": True, "USE_LABEL": True,
-            "USE_OPTIONAL_ML": True, "ML_RERANK_WEIGHT": 0.20,
+            "USE_OPTIONAL_ML": False, "ML_RERANK_WEIGHT": 0.20,
         })
     elif name == "hotspot_only":
         cfg.update({
@@ -130,7 +130,7 @@ def main() -> None:
     p.add_argument("--use-optional-ml", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--ml-rerank-weight", type=float, default=None)
     p.add_argument("--trained-model", default=None,
-                   help="Path to models/surrogate_model.json made by ml_trainer.py; used for post-run reranking.")
+                   help="Path to user_data_ridge_model.json trained from user-provided labeled data.")
     p.add_argument("--trained-ml-weight", type=float, default=0.25,
                    help="Blend weight for trained-model reranking.")
 
@@ -281,7 +281,7 @@ def main() -> None:
         if ml_trainer is None:
             raise RuntimeError("ml_trainer.py could not be imported.")
         model_path = ml_trainer.train_from_csv(args.training_db, args.models_dir, label_col=args.ml_label)
-        print(f"[OK] surrogate model saved: {model_path}")
+        print(f"[OK] user-data ranking model saved: {model_path}")
 
     if args.no_run:
         return

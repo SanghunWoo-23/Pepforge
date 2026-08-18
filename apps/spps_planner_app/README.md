@@ -1,57 +1,37 @@
-# SPPS Python Planner
+# SPPS Planner V4.0.0
 
-Python-based SPPS planner that keeps Excel-like usability while moving calculation logic into maintainable Python code.
+SPPS Planner V4.0.0 application engine and required data, embedded in Pepforge V3.0.0.
 
-## What this does
+## Key behavior
 
-- Parses peptide sequences such as `Ac-EEMQRR-NH2`
-- Removes protecting group notation for core sequence parsing
-- Applies resin-dependent loading logic
-  - Amide: DMF swell → deprotection → DMF wash → synthesis → DMF wash
-  - CTC/Trityl: DCM swell → 90% DCM + 10% DMF synthesis
-- Calculates wash-by-wash synthesis operations
-- Calculates raw material usage in g and mL
-- Exports CSV and XLSX files
-- Lets you keep adding compounds and actual run data
-- Includes ML-ready data log and simple ML/anomaly-detection functions
+- Shows one blank peptide item at startup when no saved items exist.
+- `CTC(합성기)` uses every residue written in Sequence as a coupling target, without loading AA/DIEA rows. The removed `CTC(합성용)` label is migrated only when opening older saved data.
+- Cleavage preset names show the actual components, for example `TFA=95; TIS=2.5; Water=2.5`.
+- The embedded SPPS module reports V4.0.0; the surrounding Pepforge release remains V3.0.0.
+- Windows EXE/Installer build paths and output-name mismatches were corrected.
 
-## Quick start
+## Run from source
 
-```bash
-python -m pip install -r requirements.txt
-streamlit run app.py
+```bat
+python main_launcher.py
 ```
 
-Or on Windows, double-click:
+## Build Windows EXE
+
+```bat
+BUILD_EXE_ONLY.bat
+```
+
+## Build Windows Installer
+
+Install Python 3.11/3.12 and Inno Setup 6/7, then run:
+
+```bat
+BUILD_INSTALLER.bat
+```
+
+Expected installer:
 
 ```text
-run_app.bat
+installer\output\Pepforge_Setup_V3.0.0.exe
 ```
-
-## CLI example
-
-```bash
-python cli.py --seq Ac-EEMQRR-NH2 --resin Amide --mmol 400 --outdir outputs/std_400mmol
-```
-
-Expected STD check:
-
-```text
-DMF = 304,800 mL
-Piperidine = 11,200 mL
-DCM = 12,000 mL
-```
-
-## Editable data files
-
-- `data/compounds.csv` — compound/AA/label/linker database
-- `data/resins.csv` — resin rules
-- `data/process_rules.csv` — process counts and solvent fractions
-- `data/actual_runs.csv` — actual run/yield/purity/usage log for future ML
-
-## Recommended workflow
-
-1. Use Streamlit app for input and review.
-2. Export CSV/XLSX synthesis forms and raw material tables.
-3. Add actual run data to `data/actual_runs.csv`.
-4. Once actual target values exist, use ML Lab for first models.

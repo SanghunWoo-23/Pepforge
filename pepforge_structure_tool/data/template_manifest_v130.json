@@ -1,7 +1,7 @@
 {
   "version": "1.3.0",
-  "template_mode": "attachment_aware_template_checked_v130",
-  "important_limit": "Structures are RDKit-generated connected starting models with template SDF audit. Template files can be replaced by curated SDFs while preserving token syntax.",
+  "template_mode": "chemistry_explicit_attachment_registry_v2",
+  "important_limit": "Only tokens with explicit residue/linker/attachment chemistry are buildable. Recognized ambiguous labels/chemicals remain parseable but require a curated derivative instead of a fabricated structure.",
   "attach_point_rules": {
     "non_natural_aa": {
       "chain_in": "backbone_N",
@@ -13,28 +13,28 @@
       "chain_in": "amine_N",
       "chain_out": "carbonyl_C",
       "expected_unit": "N...C(=O)",
-      "usage": "linear spacer/linker; not STD AA"
+      "usage": "explicit amino-acid/PEG-acid linker convention"
     },
     "label": {
-      "chain_in": "label_amine_N",
-      "chain_out": null,
-      "expected_unit": "N-label_fragment",
-      "usage": "terminal or side-chain modification; not sequence residue"
+      "chain_in": null,
+      "chain_out": "peptide_or_linker_primary_amine",
+      "expected_unit": "explicit peptide-bound label fragment",
+      "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
     },
     "chemical": {
-      "chain_in": "chemical_amine_or_linker_N",
-      "chain_out": "optional_carbonyl_C_or_none",
-      "expected_unit": "N-chemical_fragment or N...C(=O)",
-      "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
+      "chain_in": null,
+      "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+      "expected_unit": "explicit acyl fragment or curated derivative",
+      "usage": "chemical modification; generic unknown linkage is never fabricated"
     }
   },
   "templates": {
     "Aib": {
       "token": "Aib",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "explicit achiral amino-acid graph",
       "smiles": "NC(C)(C)C(=O)",
-      "template_file": "data/templates/Aib.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Aib.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -45,15 +45,136 @@
         "in_atom_1based": 1,
         "out_atom_1based": 5
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "2-aminoisobutyric acid",
+        "source": "explicit achiral amino-acid graph"
+      }
+    },
+    "Nva": {
+      "token": "Nva",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "N[C@@H](CCC)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Nva.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 6
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
+    },
+    "dNva": {
+      "token": "dNva",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "N[C@H](CCC)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/dNva.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 6
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
+    },
+    "Abu": {
+      "token": "Abu",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "N[C@@H](CC)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Abu.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 5
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
+    },
+    "dAbu": {
+      "token": "dAbu",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "N[C@H](CC)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/dAbu.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 5
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
+    },
+    "Sar": {
+      "token": "Sar",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "CNCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Sar.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 2,
+        "out_atom_1based": 4
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
     },
     "Nle": {
       "token": "Nle",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "explicit alpha-amino-acid graph",
       "smiles": "N[C@@H](CCCC)C(=O)",
-      "template_file": "data/templates/Nle.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Nle.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -64,15 +185,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "L-norleucine",
+        "source": "explicit alpha-amino-acid graph"
+      }
     },
     "dNle": {
       "token": "dNle",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror alpha stereochemistry",
       "smiles": "N[C@H](CCCC)C(=O)",
-      "template_file": "data/templates/dNle.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dNle.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -83,15 +210,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "D-norleucine",
+        "source": "mirror alpha stereochemistry"
+      }
     },
     "Orn": {
       "token": "Orn",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "explicit alpha-amino-acid graph",
       "smiles": "N[C@@H](CCCN)C(=O)",
-      "template_file": "data/templates/Orn.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Orn.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -102,15 +235,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "L-ornithine",
+        "source": "explicit alpha-amino-acid graph"
+      }
     },
     "dOrn": {
       "token": "dOrn",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror alpha stereochemistry",
       "smiles": "N[C@H](CCCN)C(=O)",
-      "template_file": "data/templates/dOrn.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dOrn.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -121,15 +260,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "D-ornithine",
+        "source": "mirror alpha stereochemistry"
+      }
     },
     "Dab": {
       "token": "Dab",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "PubChem CID 134490 convention",
       "smiles": "N[C@@H](CCN)C(=O)",
-      "template_file": "data/templates/Dab.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Dab.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -140,15 +285,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 6
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "L-2,4-diaminobutyric acid",
+        "source": "PubChem CID 134490 convention"
+      }
     },
     "dDab": {
       "token": "dDab",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror alpha stereochemistry",
       "smiles": "N[C@H](CCN)C(=O)",
-      "template_file": "data/templates/dDab.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dDab.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -159,15 +310,67 @@
         "in_atom_1based": 1,
         "out_atom_1based": 6
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "D-2,4-diaminobutyric acid",
+        "source": "mirror alpha stereochemistry"
+      }
+    },
+    "Dap": {
+      "token": "Dap",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "N[C@@H](CN)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Dap.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 5
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
+    },
+    "dDap": {
+      "token": "dDap",
+      "category": "non_natural_aa",
+      "source": "explicit_residue_fragment",
+      "smiles": "N[C@H](CN)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/dDap.sdf",
+      "attach_points": {
+        "chain_in": "backbone_N",
+        "chain_out": "backbone_carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "sequence monomer; counted as peptide-like residue"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 5
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph"
+      }
     },
     "Cit": {
       "token": "Cit",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "explicit alpha-amino-acid graph",
       "smiles": "N[C@@H](CCCNC(=O)N)C(=O)",
-      "template_file": "data/templates/Cit.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Cit.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -178,15 +381,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 10
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "L-citrulline",
+        "source": "explicit alpha-amino-acid graph"
+      }
     },
     "dCit": {
       "token": "dCit",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror alpha stereochemistry",
       "smiles": "N[C@H](CCCNC(=O)N)C(=O)",
-      "template_file": "data/templates/dCit.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dCit.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -197,15 +406,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 10
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "D-citrulline",
+        "source": "mirror alpha stereochemistry"
+      }
     },
     "Hyp": {
       "token": "Hyp",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "PubChem CID 5810",
       "smiles": "N1C[C@H](O)C[C@H]1C(=O)",
-      "template_file": "data/templates/Hyp.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Hyp.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -216,15 +431,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "trans-4-hydroxy-L-proline (2S,4R)",
+        "source": "PubChem CID 5810"
+      }
     },
     "dHyp": {
       "token": "dHyp",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror stereochemistry of Hyp convention",
       "smiles": "N1C[C@@H](O)C[C@@H]1C(=O)",
-      "template_file": "data/templates/dHyp.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dHyp.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -235,15 +456,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "mirror D-trans-4-hydroxyproline",
+        "source": "mirror stereochemistry of Hyp convention"
+      }
     },
     "Cha": {
       "token": "Cha",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "PubChem CID 712421",
       "smiles": "N[C@@H](CC1CCCCC1)C(=O)",
-      "template_file": "data/templates/Cha.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Cha.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -254,15 +481,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 10
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "3-cyclohexyl-L-alanine",
+        "source": "PubChem CID 712421"
+      }
     },
     "dCha": {
       "token": "dCha",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror alpha stereochemistry",
       "smiles": "N[C@H](CC1CCCCC1)C(=O)",
-      "template_file": "data/templates/dCha.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dCha.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -273,15 +506,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 10
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "3-cyclohexyl-D-alanine",
+        "source": "mirror alpha stereochemistry"
+      }
     },
     "Nal": {
       "token": "Nal",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "PubChem CID 2724883",
       "smiles": "N[C@@H](Cc1cccc2ccccc12)C(=O)",
-      "template_file": "data/templates/Nal.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Nal.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -292,15 +531,21 @@
         "in_atom_1based": 1,
         "out_atom_1based": 14
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "1-naphthyl-L-alanine (1-Nal)",
+        "source": "PubChem CID 2724883"
+      }
     },
     "dNal": {
       "token": "dNal",
       "category": "non_natural_aa",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "mirror alpha stereochemistry",
       "smiles": "N[C@H](Cc1cccc2ccccc12)C(=O)",
-      "template_file": "data/templates/dNal.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/dNal.sdf",
       "attach_points": {
         "chain_in": "backbone_N",
         "chain_out": "backbone_carbonyl_C",
@@ -311,388 +556,1332 @@
         "in_atom_1based": 1,
         "out_atom_1based": 14
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_residue_graph",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "explicit_residue_graph",
+        "structure_convention": "1-naphthyl-D-alanine (D-1-Nal)",
+        "source": "mirror alpha stereochemistry"
+      }
     },
     "Ahx": {
       "token": "Ahx",
       "category": "linker",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "database_or_explicit_linker_convention",
       "smiles": "NCCCCCC(=O)",
-      "template_file": "data/templates/Ahx.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/Ahx.sdf",
       "attach_points": {
         "chain_in": "amine_N",
         "chain_out": "carbonyl_C",
         "expected_unit": "N...C(=O)",
-        "usage": "linear spacer/linker; not STD AA"
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
         "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
     "bAla": {
       "token": "bAla",
       "category": "linker",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "database_or_explicit_linker_convention",
       "smiles": "NCCC(=O)",
-      "template_file": "data/templates/bAla.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/bAla.sdf",
       "attach_points": {
         "chain_in": "amine_N",
         "chain_out": "carbonyl_C",
         "expected_unit": "N...C(=O)",
-        "usage": "linear spacer/linker; not STD AA"
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
         "out_atom_1based": 4
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
     "gAla": {
       "token": "gAla",
       "category": "linker",
-      "source": "rdkit_template_sdf_checked_v130",
+      "source": "database_or_explicit_linker_convention",
       "smiles": "NCCCC(=O)",
-      "template_file": "data/templates/gAla.sdf",
+      "template_file": "pepforge_structure_tool/data/templates/gAla.sdf",
       "attach_points": {
         "chain_in": "amine_N",
         "chain_out": "carbonyl_C",
         "expected_unit": "N...C(=O)",
-        "usage": "linear spacer/linker; not STD AA"
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
         "out_atom_1based": 5
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
     "AEEA": {
       "token": "AEEA",
       "category": "linker",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCOCCNC(=O)",
-      "template_file": "data/templates/AEEA.sdf",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/AEEA.sdf",
       "attach_points": {
         "chain_in": "amine_N",
         "chain_out": "carbonyl_C",
         "expected_unit": "N...C(=O)",
-        "usage": "linear spacer/linker; not STD AA"
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
-        "out_atom_1based": 8
+        "out_atom_1based": 9
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
     "PEG4": {
       "token": "PEG4",
       "category": "linker",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCOCCOCCOCCNC(=O)",
-      "template_file": "data/templates/PEG4.sdf",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG4.sdf",
       "attach_points": {
         "chain_in": "amine_N",
         "chain_out": "carbonyl_C",
         "expected_unit": "N...C(=O)",
-        "usage": "linear spacer/linker; not STD AA"
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
-        "out_atom_1based": 14
+        "out_atom_1based": 16
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
     "PEG8": {
       "token": "PEG8",
       "category": "linker",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCOCCOCCOCCOCCOCCNC(=O)",
-      "template_file": "data/templates/PEG8.sdf",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCOCCOCCOCCOCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG8.sdf",
       "attach_points": {
         "chain_in": "amine_N",
         "chain_out": "carbonyl_C",
         "expected_unit": "N...C(=O)",
-        "usage": "linear spacer/linker; not STD AA"
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
-        "out_atom_1based": 20
+        "out_atom_1based": 28
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
-    "Biotin": {
-      "token": "Biotin",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCCCC1SCC2NC(=O)NC12",
-      "template_file": "data/templates/Biotin.sdf",
+    "PEG1": {
+      "token": "PEG1",
+      "category": "linker",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG1.sdf",
       "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
+        "chain_in": "amine_N",
+        "chain_out": "carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
-        "out_atom_1based": null
+        "out_atom_1based": 7
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
-    "FITC": {
-      "token": "FITC",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "Nc1ccc2c(c1)C(=O)OC21c2ccccc2Oc2ccccc21",
-      "template_file": "data/templates/FITC.sdf",
+    "PEG2": {
+      "token": "PEG2",
+      "category": "linker",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG2.sdf",
       "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": null
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "FAM": {
-      "token": "FAM",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "Nc1ccc2c(c1)C(=O)OC21c2ccccc2Oc2ccccc21",
-      "template_file": "data/templates/FAM.sdf",
-      "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": null
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "TAMRA": {
-      "token": "TAMRA",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "Nc1ccc2c(c1)C(=O)OC21c2ccc(N(C)C)cc2Oc2ccc(N(C)C)cc21",
-      "template_file": "data/templates/TAMRA.sdf",
-      "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": null
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "NBD": {
-      "token": "NBD",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "Nc1ccc([N+](=O)[O-])c2nonc12",
-      "template_file": "data/templates/NBD.sdf",
-      "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": null
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "DOTA": {
-      "token": "DOTA",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCN1CCN(CCN(CCN(CC1)CC(=O)O)CC(=O)O)CC(=O)O",
-      "template_file": "data/templates/DOTA.sdf",
-      "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": null
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "Cy5": {
-      "token": "Cy5",
-      "category": "label",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCC=CC=CC=CN1C=CC=C1",
-      "template_file": "data/templates/Cy5.sdf",
-      "attach_points": {
-        "chain_in": "label_amine_N",
-        "chain_out": null,
-        "expected_unit": "N-label_fragment",
-        "usage": "terminal or side-chain modification; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": null
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "Pal": {
-      "token": "Pal",
-      "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCCCCCCCCCCCCCCC(=O)",
-      "template_file": "data/templates/Pal.sdf",
-      "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": 17
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "Myr": {
-      "token": "Myr",
-      "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCCCCCCCCCCCCC(=O)",
-      "template_file": "data/templates/Myr.sdf",
-      "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": 15
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "Ste": {
-      "token": "Ste",
-      "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCCCCCCCCCCCCCCCCC(=O)",
-      "template_file": "data/templates/Ste.sdf",
-      "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": 19
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "Lau": {
-      "token": "Lau",
-      "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCCCCCCCCCCC(=O)",
-      "template_file": "data/templates/Lau.sdf",
-      "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
-      },
-      "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": 13
-      },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
-    },
-    "Chol": {
-      "token": "Chol",
-      "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCCOC(=O)CCCC(=O)OC1CCC2(C)C3CCC4(C)CC(O)CCC4C3CCC12C",
-      "template_file": "data/templates/Chol.sdf",
-      "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
+        "chain_in": "amine_N",
+        "chain_out": "carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
         "out_atom_1based": 10
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
     },
-    "Mal": {
-      "token": "Mal",
-      "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCC(=O)C1=CC=CC=C1",
-      "template_file": "data/templates/Mal.sdf",
+    "PEG3": {
+      "token": "PEG3",
+      "category": "linker",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG3.sdf",
       "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
+        "chain_in": "amine_N",
+        "chain_out": "carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "explicit amino-acid/PEG-acid linker convention"
       },
       "local_attach_atom_hints": {
         "in_atom_1based": 1,
-        "out_atom_1based": 3
+        "out_atom_1based": 13
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
+    },
+    "PEG6": {
+      "token": "PEG6",
+      "category": "linker",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCOCCOCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG6.sdf",
+      "attach_points": {
+        "chain_in": "amine_N",
+        "chain_out": "carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "explicit amino-acid/PEG-acid linker convention"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 22
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
+    },
+    "PEG12": {
+      "token": "PEG12",
+      "category": "linker",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG12.sdf",
+      "attach_points": {
+        "chain_in": "amine_N",
+        "chain_out": "carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "explicit amino-acid/PEG-acid linker convention"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 40
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
+    },
+    "PEG24": {
+      "token": "PEG24",
+      "category": "linker",
+      "source": "database_or_explicit_linker_convention",
+      "smiles": "NCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCOCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/PEG24.sdf",
+      "attach_points": {
+        "chain_in": "amine_N",
+        "chain_out": "carbonyl_C",
+        "expected_unit": "N...C(=O)",
+        "usage": "explicit amino-acid/PEG-acid linker convention"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 1,
+        "out_atom_1based": 76
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "explicit_linear_linker_graph",
+      "buildable": true
+    },
+    "Biotin": {
+      "token": "Biotin",
+      "category": "label",
+      "source": "PubChem CID 171548 (biotin); peptide-bound amide rule",
+      "smiles": "[C@H]12[C@H](NC(N1)=O)[C@@H](SC2)CCCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Biotin.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 3,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "verified_database_structure_and_explicit_amide_rule",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "verified_database_structure_and_explicit_amide_rule",
+        "attachment_chemistry": "biotin carboxyl -> peptide/linker primary amine; amide",
+        "structure_convention": "biotin",
+        "source": "PubChem CID 171548 (biotin); peptide-bound amide rule"
+      }
+    },
+    "FITC": {
+      "token": "FITC",
+      "category": "label",
+      "source": "PubChem CID 18730 (fluorescein 5-isothiocyanate)",
+      "smiles": "c1(O)cc2Oc3c(ccc(c3)O)C3(c2cc1)c1ccc(cc1C(O3)=O)NC(=S)",
+      "template_file": "pepforge_structure_tool/data/templates/FITC.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 26,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "verified_database_structure_and_explicit_thiourea_rule",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "verified_database_structure_and_explicit_thiourea_rule",
+        "attachment_chemistry": "5-FITC isothiocyanate -> peptide/linker primary amine; thiourea",
+        "structure_convention": "5-FITC",
+        "source": "PubChem CID 18730 (fluorescein 5-isothiocyanate)"
+      }
+    },
+    "FAM": {
+      "token": "FAM",
+      "category": "label",
+      "source": "PubChem CID 123755 (5-carboxyfluorescein); explicit Pepforge 5-FAM convention",
+      "smiles": "c12C3(c4ccc(O)cc4Oc4cc(ccc34)O)OC(=O)c2cc(cc1)C(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/FAM.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "verified_database_structure_and_explicit_amide_rule",
+      "buildable": true,
+      "chemistry": {
+        "evidence_status": "verified_database_structure_and_explicit_amide_rule",
+        "attachment_chemistry": "5-FAM carboxyl -> peptide/linker primary amine; amide",
+        "structure_convention": "5-FAM",
+        "source": "PubChem CID 123755 (5-carboxyfluorescein); explicit Pepforge 5-FAM convention"
+      }
+    },
+    "Alexa488": {
+      "token": "Alexa488",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Alexa555": {
+      "token": "Alexa555",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Alexa647": {
+      "token": "Alexa647",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "BHQ1": {
+      "token": "BHQ1",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "BHQ2": {
+      "token": "BHQ2",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "BODIPY": {
+      "token": "BODIPY",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Cy3": {
+      "token": "Cy3",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Cy5": {
+      "token": "Cy5",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Cy5.5": {
+      "token": "Cy5.5",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Cy7": {
+      "token": "Cy7",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "DFO": {
+      "token": "DFO",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "DOTA": {
+      "token": "DOTA",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Dabcyl": {
+      "token": "Dabcyl",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Dansyl": {
+      "token": "Dansyl",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Desthiobiotin": {
+      "token": "Desthiobiotin",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "EDANS": {
+      "token": "EDANS",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "NBD": {
+      "token": "NBD",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "NOTA": {
+      "token": "NOTA",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "ROX": {
+      "token": "ROX",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "TAMRA": {
+      "token": "TAMRA",
+      "category": "label",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_or_linker_primary_amine",
+        "expected_unit": "explicit peptide-bound label fragment",
+        "usage": "N-terminal/side-chain label only when attachment chemistry is defined"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "evidence_status": "requires_curated_derivative",
+        "attachment_chemistry": null,
+        "structure_convention": null,
+        "source": null
+      }
+    },
+    "Alkyne": {
+      "token": "Alkyne",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Azide": {
+      "token": "Azide",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "BiotinCap": {
+      "token": "BiotinCap",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Bz": {
+      "token": "Bz",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Caf": {
+      "token": "Caf",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "O=C(/C=C/c1ccc(O)c(O)c1)",
+      "template_file": "pepforge_structure_tool/data/templates/Caf.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": 2
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Chol": {
+      "token": "Chol",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "DBCO": {
+      "token": "DBCO",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
     },
     "Dde": {
       "token": "Dde",
       "category": "chemical",
-      "source": "rdkit_template_sdf_checked_v130",
-      "smiles": "NCC(=O)C=C(C)C(=O)C",
-      "template_file": "data/templates/Dde.sdf",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
       "attach_points": {
-        "chain_in": "chemical_amine_or_linker_N",
-        "chain_out": "optional_carbonyl_C_or_none",
-        "expected_unit": "N-chemical_fragment or N...C(=O)",
-        "usage": "chemical modification such as lipid/cholesterol handle; not sequence residue"
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
       },
       "local_attach_atom_hints": {
-        "in_atom_1based": 1,
-        "out_atom_1based": 8
+        "in_atom_1based": null,
+        "out_atom_1based": null
       },
-      "template_swap_rule": "Curated SDF may replace the placeholder if it keeps the same attach-point roles and local attach atom hints are updated when needed.",
-      "curation_status": "template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry"
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Gal": {
+      "token": "Gal",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "O=C(c1cc(O)c(O)c(O)c1)",
+      "template_file": "pepforge_structure_tool/data/templates/Gal.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": 2
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Lau": {
+      "token": "Lau",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "CCCCCCCCCCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Lau.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": 12
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Mal": {
+      "token": "Mal",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Maleimide": {
+      "token": "Maleimide",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Myr": {
+      "token": "Myr",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "CCCCCCCCCCCCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Myr.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": 14
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Nic": {
+      "token": "Nic",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "O=C(c1ccncc1)",
+      "template_file": "pepforge_structure_tool/data/templates/Nic.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": 6,
+        "out_atom_1based": 2
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Ole": {
+      "token": "Ole",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Pal": {
+      "token": "Pal",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "CCCCCCCCCCCCCCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Pal.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": 16
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Ste": {
+      "token": "Ste",
+      "category": "chemical",
+      "source": "explicit_acyl_attachment_rule",
+      "smiles": "CCCCCCCCCCCCCCCCCC(=O)",
+      "template_file": "pepforge_structure_tool/data/templates/Ste.sdf",
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": 18
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "buildable_only_as_explicit_N_terminal_or_sidechain_acyl",
+      "buildable": true,
+      "chemistry": {
+        "attachment_chemistry": "acylation of primary amine",
+        "evidence_status": "explicit_fragment_rule"
+      }
+    },
+    "Succinyl": {
+      "token": "Succinyl",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "TCO": {
+      "token": "TCO",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
+    },
+    "Tetrazine": {
+      "token": "Tetrazine",
+      "category": "chemical",
+      "source": "token_recognized_but_derivative_unspecified",
+      "smiles": null,
+      "template_file": null,
+      "attach_points": {
+        "chain_in": null,
+        "chain_out": "peptide_primary_amine_when_acyl_rule_defined",
+        "expected_unit": "explicit acyl fragment or curated derivative",
+        "usage": "chemical modification; generic unknown linkage is never fabricated"
+      },
+      "local_attach_atom_hints": {
+        "in_atom_1based": null,
+        "out_atom_1based": null
+      },
+      "template_swap_rule": "A curated SDF may replace the generated attachment-fragment template only when the same explicit chemistry is preserved.",
+      "curation_status": "requires_curated_derivative",
+      "buildable": false,
+      "chemistry": {
+        "attachment_chemistry": null,
+        "evidence_status": "requires_curated_derivative"
+      }
     }
   }
 }

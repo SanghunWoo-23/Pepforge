@@ -6,11 +6,12 @@ def test_target_fasta_sequence_cleaner_accepts_multiline_and_numbers():
     assert _clean_protein_sequence(text) == 'MKTACDGGH'
 
 
-def test_target_sequence_peptide_pdb_pipeline_is_not_rejected():
+def test_target_sequence_without_coordinates_blocks_local_3d_screening():
     df = structure_pipeline_df('Sequence', 'PDB', '>target\nMKTACDGGH', '', None, None)
-    statuses = set(df['status'].astype(str))
-    assert 'READY_TO_PREPARE' in statuses
-    assert any('AlphaFold3' in str(x) for x in df['engine'])
+    row = df[df['stage'] == '3_3d_screening'].iloc[0]
+    assert row['status'] == 'BLOCKED'
+    assert 'target coordinates' in str(row['note']).lower()
+
 
 
 def test_no_music_note_glyph_in_cys_workflow_doc():

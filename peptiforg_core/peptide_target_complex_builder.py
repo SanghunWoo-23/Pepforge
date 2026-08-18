@@ -58,7 +58,9 @@ def _clean_sequence(seq: str) -> str:
     # keep one-letter amino acids; remove common caps/modifiers as pseudo-builder cannot model them atomically.
     s=re.sub(r'Ac|NH2|FITC|FAM|TAMRA|Biotin|Ahx|AEEA|Pal|Myr|Cha','',s,flags=re.I)
     letters=''.join(ch.upper() for ch in s if ch.upper() in AA1)
-    return letters or 'PEPTIDE'
+    if not letters:
+        raise ValueError('No supported canonical peptide residues were parsed. Provide an explicit peptide PDB for modified/non-canonical chemistry.')
+    return letters
 
 def build_pseudo_peptide_pdb(sequence: str, center: tuple[float,float,float], offset_A: float = 8.0, chain_id: str = 'P') -> str:
     seq=_clean_sequence(sequence)

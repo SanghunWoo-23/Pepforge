@@ -1,0 +1,44 @@
+Nic
+     RDKit          3D
+
+ 13 13  0  0  0  0  0  0  0  0999 V2000
+    2.6700   -1.2706    0.1225 O   0  0  0  0  0  0  0  0  0  0  0  0
+    2.1090   -0.1830    0.1629 C   0  0  0  0  0  0  0  0  0  0  0  0
+    0.6442   -0.0566    0.0497 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.1440   -1.1935   -0.1083 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.5101   -1.0152   -0.2089 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.1118    0.1941   -0.1622 N   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.3169    1.2751   -0.0082 C   0  0  0  0  0  0  0  0  0  0  0  0
+    0.0598    1.2059    0.1022 C   0  0  0  0  0  0  0  0  0  0  0  0
+    2.6789    0.7532    0.2863 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.2922   -2.1859   -0.1515 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -2.1790   -1.8623   -0.3335 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8369    2.2288    0.0249 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.6446    2.1099    0.2242 H   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  2  0
+  2  3  1  0
+  3  4  2  0
+  4  5  1  0
+  5  6  2  0
+  6  7  1  0
+  7  8  2  0
+  8  3  1  0
+  2  9  1  0
+  4 10  1  0
+  5 11  1  0
+  7 12  1  0
+  8 13  1  0
+M  END
+>  <Pepforge_TemplateRole>  (1) 
+explicit_attachment_fragment
+
+>  <Pepforge_CurationStatus>  (1) 
+buildable_only_as_explicit_N_terminal_or_sidechain_acyl
+
+>  <Pepforge_Source>  (1) 
+explicit_acyl_attachment_rule
+
+>  <Pepforge_Notice>  (1) 
+Attachment fragment for connected peptide construction; not a claim that this SDF is the free labeling reagent.
+
+$$$$

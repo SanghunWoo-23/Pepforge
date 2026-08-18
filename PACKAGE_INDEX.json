@@ -1,37 +1,36 @@
 {
-  "pepforge_version": "2.0.0",
-  "release_label": "v2.0.0 clean public source package",
-  "release_type": "clean_complete_source_package_for_direct_github_upload",
-  "date_released": "2026-06-19",
-  "maintainer": "Sanghun Woo",
-  "repository": "https://github.com/poowsh1407/Pepforge",
-  "core_modules": [
-    "Hotspot Finder",
-    "Peptide Design Engine",
-    "SPPS Planner",
-    "Docking Workbench",
-    "PyMOL Structure Builder",
-    "Workflow Mode",
-    "CLI validation/audit utilities"
+  "pepforge_version": "3.0.0",
+  "release_type": "integrated_peptide_design_structure_spps_and_screening_workbench",
+  "base_release": "Pepforge V3.0.0 public STD release",
+  "fixed": [
+    "Docking Workbench validation, progress, atomic contact screening, and export paths",
+    "Structure Builder conformer ensemble and curated explicit-chemistry registry",
+    "Peptide Design Engine preset, motif, terminal, ML-evidence, and export hardening",
+    "SPPS Planner Ac-EEMQRR-NH2 30 eq / TFA 95% / DW 5% cleavage contract",
+    "Hot Spot Finder direct input, progress, thread safety, and result export"
   ],
-  "major_updates": [
-    "SPPS terminal last wash corrected to DMF x3 followed by DCM x3 without redundant terminal post-coupling DMF x2",
-    "Compound DB normalized with separated reagent MW and product contribution MW",
-    "Docking Workbench collapsible Input and full-data windows added",
-    "PRODIGY-like/GROMACS-like/MD-style reporting tables preserved and documented",
-    "PyMOL Structure Builder quick-safe bridge export preserved"
+  "preserved": [
+    "Pepforge integrated launcher UI",
+    "Peptide Design Engine native desktop GUI",
+    "SPPS Planner checklist/progress/transfer-sheet workflow",
+    "Docking Workbench and Peptide Structure Builder V3.0.0 contracts"
   ],
-  "data_policy": {
-    "active_tokens": 212,
-    "manual_required_active_tokens": 38,
-    "reagent_mw_blank_active_tokens": 85,
-    "product_contribution_blank_active_tokens": 37,
-    "blank_policy": "Blank values are used for manual-required or vendor-form-dependent rows; they are not automatically data loss."
-  },
-  "scope_boundary": "Research planning, screening, bridge export, and evidence reporting. Not final binding proof, not production QC, not replacement for external docking or MD.",
-  "github_upload_notes": [
-    "This package is intended to be uploaded directly as the repository contents.",
-    "Runtime outputs, build artifacts, caches, and executable artifacts are excluded by .gitignore.",
-    "Use tag v2.0.0 for this clean baseline."
+  "claim_boundary": "Pepforge provides design, preparation, conformer generation, and local geometry/contact screening evidence. It does not claim validated affinity, Kd, Delta G, native structures, MD, or experimental efficacy.",
+  "date_released": "2026-08-13",
+  "release_label": "Pepforge V3.0.0 with SPPS Planner V4 Evidence Workflow",
+  "patch_notes": [
+    "Fake or surrogate scientific outputs are blocked or explicitly classified.",
+    "Modified peptide chemistry is preserved through structure and docking preparation.",
+    "PDE uses user-provided labeled data only for trained-model reranking.",
+    "SPPS and Hot Spot workflows retain native desktop operation and explicit progress.",
+    "SPPS V4 advice applies only coherent reviewed historical conditions; it does not invent an optimum or merge records.",
+    "LOT Number and Batch Manager are excluded from the Pepforge SPPS surface."
+  ],
+  "version": "3.0.0",
+  "latest_patch": "V3.0.0 PSB reliability plus SPPS V4 evidence-workflow integration",
+  "notes": [
+    "Suite version: Pepforge V3.0.0.",
+    "Embedded synthesis component: SPPS Planner V4.0.0.",
+    "Historical internal module labels describe component lineage and do not supersede the suite version."
   ]
 }

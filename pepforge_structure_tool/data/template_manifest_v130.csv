@@ -1,36 +1,78 @@
-﻿token,category,template_file,in_atom_1based,out_atom_1based,curation_status
-AEEA,linker,data/templates/AEEA.sdf,1,8,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Ahx,linker,data/templates/Ahx.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Aib,non_natural_aa,data/templates/Aib.sdf,1,5,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Biotin,label,data/templates/Biotin.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Cha,non_natural_aa,data/templates/Cha.sdf,1,10,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Chol,chemical,data/templates/Chol.sdf,1,10,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Cit,non_natural_aa,data/templates/Cit.sdf,1,10,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Cy5,label,data/templates/Cy5.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-DOTA,label,data/templates/DOTA.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Dab,non_natural_aa,data/templates/Dab.sdf,1,6,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Dde,chemical,data/templates/Dde.sdf,1,8,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-FAM,label,data/templates/FAM.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-FITC,label,data/templates/FITC.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Hyp,non_natural_aa,data/templates/Hyp.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Lau,chemical,data/templates/Lau.sdf,1,13,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Mal,chemical,data/templates/Mal.sdf,1,3,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Myr,chemical,data/templates/Myr.sdf,1,15,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-NBD,label,data/templates/NBD.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Nal,non_natural_aa,data/templates/Nal.sdf,1,14,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Nle,non_natural_aa,data/templates/Nle.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Orn,non_natural_aa,data/templates/Orn.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-PEG4,linker,data/templates/PEG4.sdf,1,14,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-PEG8,linker,data/templates/PEG8.sdf,1,20,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Pal,chemical,data/templates/Pal.sdf,1,17,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-Ste,chemical,data/templates/Ste.sdf,1,19,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-TAMRA,label,data/templates/TAMRA.sdf,1,,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-bAla,linker,data/templates/bAla.sdf,1,4,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dCha,non_natural_aa,data/templates/dCha.sdf,1,10,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dCit,non_natural_aa,data/templates/dCit.sdf,1,10,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dDab,non_natural_aa,data/templates/dDab.sdf,1,6,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dHyp,non_natural_aa,data/templates/dHyp.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dNal,non_natural_aa,data/templates/dNal.sdf,1,14,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dNle,non_natural_aa,data/templates/dNle.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-dOrn,non_natural_aa,data/templates/dOrn.sdf,1,7,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
-gAla,linker,data/templates/gAla.sdf,1,5,template_file_checked_and_attach_hint_mapped; replace with curated SDF for publication-grade geometry
+﻿token,category,buildable,template_file,curation_status,source,structure_convention,attachment_chemistry
+AEEA,linker,True,pepforge_structure_tool/data/templates/AEEA.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+Abu,non_natural_aa,True,pepforge_structure_tool/data/templates/Abu.sdf,explicit_residue_graph,explicit_residue_fragment,,
+Ahx,linker,True,pepforge_structure_tool/data/templates/Ahx.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+Aib,non_natural_aa,True,pepforge_structure_tool/data/templates/Aib.sdf,explicit_residue_graph,explicit achiral amino-acid graph,2-aminoisobutyric acid,
+Alexa488,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Alexa555,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Alexa647,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Alkyne,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Azide,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+BHQ1,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+BHQ2,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+BODIPY,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Biotin,label,True,pepforge_structure_tool/data/templates/Biotin.sdf,verified_database_structure_and_explicit_amide_rule,PubChem CID 171548 (biotin); peptide-bound amide rule,biotin,biotin carboxyl -> peptide/linker primary amine; amide
+BiotinCap,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Bz,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Caf,chemical,True,pepforge_structure_tool/data/templates/Caf.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+Cha,non_natural_aa,True,pepforge_structure_tool/data/templates/Cha.sdf,explicit_residue_graph,PubChem CID 712421,3-cyclohexyl-L-alanine,
+Chol,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Cit,non_natural_aa,True,pepforge_structure_tool/data/templates/Cit.sdf,explicit_residue_graph,explicit alpha-amino-acid graph,L-citrulline,
+Cy3,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Cy5,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Cy5.5,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Cy7,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+DBCO,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+DFO,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+DOTA,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Dab,non_natural_aa,True,pepforge_structure_tool/data/templates/Dab.sdf,explicit_residue_graph,PubChem CID 134490 convention,"L-2,4-diaminobutyric acid",
+Dabcyl,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Dansyl,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Dap,non_natural_aa,True,pepforge_structure_tool/data/templates/Dap.sdf,explicit_residue_graph,explicit_residue_fragment,,
+Dde,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Desthiobiotin,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+EDANS,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+FAM,label,True,pepforge_structure_tool/data/templates/FAM.sdf,verified_database_structure_and_explicit_amide_rule,PubChem CID 123755 (5-carboxyfluorescein); explicit Pepforge 5-FAM convention,5-FAM,5-FAM carboxyl -> peptide/linker primary amine; amide
+FITC,label,True,pepforge_structure_tool/data/templates/FITC.sdf,verified_database_structure_and_explicit_thiourea_rule,PubChem CID 18730 (fluorescein 5-isothiocyanate),5-FITC,5-FITC isothiocyanate -> peptide/linker primary amine; thiourea
+Gal,chemical,True,pepforge_structure_tool/data/templates/Gal.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+Hyp,non_natural_aa,True,pepforge_structure_tool/data/templates/Hyp.sdf,explicit_residue_graph,PubChem CID 5810,"trans-4-hydroxy-L-proline (2S,4R)",
+Lau,chemical,True,pepforge_structure_tool/data/templates/Lau.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+Mal,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Maleimide,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Myr,chemical,True,pepforge_structure_tool/data/templates/Myr.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+NBD,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+NOTA,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Nal,non_natural_aa,True,pepforge_structure_tool/data/templates/Nal.sdf,explicit_residue_graph,PubChem CID 2724883,1-naphthyl-L-alanine (1-Nal),
+Nic,chemical,True,pepforge_structure_tool/data/templates/Nic.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+Nle,non_natural_aa,True,pepforge_structure_tool/data/templates/Nle.sdf,explicit_residue_graph,explicit alpha-amino-acid graph,L-norleucine,
+Nva,non_natural_aa,True,pepforge_structure_tool/data/templates/Nva.sdf,explicit_residue_graph,explicit_residue_fragment,,
+Ole,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Orn,non_natural_aa,True,pepforge_structure_tool/data/templates/Orn.sdf,explicit_residue_graph,explicit alpha-amino-acid graph,L-ornithine,
+PEG1,linker,True,pepforge_structure_tool/data/templates/PEG1.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG12,linker,True,pepforge_structure_tool/data/templates/PEG12.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG2,linker,True,pepforge_structure_tool/data/templates/PEG2.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG24,linker,True,pepforge_structure_tool/data/templates/PEG24.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG3,linker,True,pepforge_structure_tool/data/templates/PEG3.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG4,linker,True,pepforge_structure_tool/data/templates/PEG4.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG6,linker,True,pepforge_structure_tool/data/templates/PEG6.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+PEG8,linker,True,pepforge_structure_tool/data/templates/PEG8.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+Pal,chemical,True,pepforge_structure_tool/data/templates/Pal.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+ROX,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Sar,non_natural_aa,True,pepforge_structure_tool/data/templates/Sar.sdf,explicit_residue_graph,explicit_residue_fragment,,
+Ste,chemical,True,pepforge_structure_tool/data/templates/Ste.sdf,buildable_only_as_explicit_N_terminal_or_sidechain_acyl,explicit_acyl_attachment_rule,,acylation of primary amine
+Succinyl,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+TAMRA,label,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+TCO,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+Tetrazine,chemical,False,,requires_curated_derivative,token_recognized_but_derivative_unspecified,,
+bAla,linker,True,pepforge_structure_tool/data/templates/bAla.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,
+dAbu,non_natural_aa,True,pepforge_structure_tool/data/templates/dAbu.sdf,explicit_residue_graph,explicit_residue_fragment,,
+dCha,non_natural_aa,True,pepforge_structure_tool/data/templates/dCha.sdf,explicit_residue_graph,mirror alpha stereochemistry,3-cyclohexyl-D-alanine,
+dCit,non_natural_aa,True,pepforge_structure_tool/data/templates/dCit.sdf,explicit_residue_graph,mirror alpha stereochemistry,D-citrulline,
+dDab,non_natural_aa,True,pepforge_structure_tool/data/templates/dDab.sdf,explicit_residue_graph,mirror alpha stereochemistry,"D-2,4-diaminobutyric acid",
+dDap,non_natural_aa,True,pepforge_structure_tool/data/templates/dDap.sdf,explicit_residue_graph,explicit_residue_fragment,,
+dHyp,non_natural_aa,True,pepforge_structure_tool/data/templates/dHyp.sdf,explicit_residue_graph,mirror stereochemistry of Hyp convention,mirror D-trans-4-hydroxyproline,
+dNal,non_natural_aa,True,pepforge_structure_tool/data/templates/dNal.sdf,explicit_residue_graph,mirror alpha stereochemistry,1-naphthyl-D-alanine (D-1-Nal),
+dNle,non_natural_aa,True,pepforge_structure_tool/data/templates/dNle.sdf,explicit_residue_graph,mirror alpha stereochemistry,D-norleucine,
+dNva,non_natural_aa,True,pepforge_structure_tool/data/templates/dNva.sdf,explicit_residue_graph,explicit_residue_fragment,,
+dOrn,non_natural_aa,True,pepforge_structure_tool/data/templates/dOrn.sdf,explicit_residue_graph,mirror alpha stereochemistry,D-ornithine,
+gAla,linker,True,pepforge_structure_tool/data/templates/gAla.sdf,explicit_linear_linker_graph,database_or_explicit_linker_convention,,

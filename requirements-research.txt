@@ -1,0 +1,5 @@
+-r requirements-ml.txt
+matplotlib>=3.8
+ipwidgets>=8.1
+torch>=2.3
+fair-esm>=2.0

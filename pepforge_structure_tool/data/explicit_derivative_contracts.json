@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "claim_boundary": "These records define information required before a derivative can be built. They are not structure templates or inferred reactions.",
+  "generic_tokens": {
+    "TAMRA": {
+      "required_fields": ["isomer", "activated_derivative", "attachment_atom", "peptide_nucleophile", "linkage"],
+      "accepted_examples_for_user_specification": ["5-TAMRA-NHS ester", "6-TAMRA-NHS ester"],
+      "blocked_reason": "Generic TAMRA does not select the 5/6 isomer or attachment chemistry."
+    },
+    "Cy5": {
+      "required_fields": ["cyanine_variant", "activated_derivative", "peptide_nucleophile", "linkage", "formal_charge_state"],
+      "accepted_examples_for_user_specification": ["sulfo-Cy5 NHS ester", "Cy5 maleimide"],
+      "blocked_reason": "Generic Cy5 does not identify sulfonation, reactive group, linkage, or charge state."
+    },
+    "NBD": {
+      "required_fields": ["reactive_derivative", "peptide_nucleophile", "attachment_atom", "linkage"],
+      "accepted_examples_for_user_specification": ["NBD-F amine substitution", "NBD-Cl thiol substitution"],
+      "blocked_reason": "Generic NBD does not identify the leaving group or peptide nucleophile."
+    },
+    "DOTA": {
+      "required_fields": ["activated_derivative", "attachment_arm", "peptide_nucleophile", "linkage", "metal_state"],
+      "accepted_examples_for_user_specification": ["DOTA-NHS ester, unmetallated", "p-SCN-Bn-DOTA"],
+      "blocked_reason": "Generic DOTA does not identify the attachment arm, linkage, or metal complex."
+    },
+    "Chol": {
+      "required_fields": ["cholesterol_derivative", "spacer", "peptide_nucleophile", "linkage"],
+      "accepted_examples_for_user_specification": ["cholesteryl hemisuccinate amide", "cholesterol-PEG-carboxyl amide"],
+      "blocked_reason": "Cholesterol has no unique direct peptide attachment convention."
+    },
+    "Mal": {
+      "required_fields": ["maleimide_derivative", "spacer", "peptide_nucleophile", "reaction_state", "linkage"],
+      "accepted_examples_for_user_specification": ["maleimide spacer before thiol reaction", "cysteine succinimidyl thioether adduct"],
+      "blocked_reason": "Mal may mean an unreacted maleimide or a post-thiol succinimide adduct."
+    },
+    "Dde": {
+      "required_fields": ["Dde_variant", "protected_atom", "protection_state", "attachment_atom"],
+      "accepted_examples_for_user_specification": ["Lys(Dde) epsilon-amine protection"],
+      "blocked_reason": "Dde is a protecting group and must name the protected residue atom and state."
+    }
+  }
+}

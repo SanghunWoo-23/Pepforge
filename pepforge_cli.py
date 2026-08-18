@@ -111,6 +111,9 @@ def cmd_verify_matrix(args):
 def cmd_release_gate(args):
     paths = release_gate_check(args.root_dir, args.output_dir)
     print(json.dumps(paths, indent=2, ensure_ascii=False))
+    summary = json.loads(Path(paths["release_gate_summary"]).read_text(encoding="utf-8"))
+    if int(summary.get("failed", 0)):
+        raise SystemExit(1)
 
 
 def build_parser():

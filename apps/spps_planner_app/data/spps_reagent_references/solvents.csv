@@ -1,6 +1,15 @@
-﻿solvent,role,note
+solvent,role,note
 DMF,SPPS wash/reaction/deprotection solvent,Default planner solvent.
 NMP,Alternative coupling solvent,User-selectable.
 DCM,Swelling/wash/loading solvent,Important for CTC/trityl workflows.
 Piperidine,Fmoc deprotection component,Planner defaults to 20% piperidine in DMF for deprotection.
 TFA,Cleavage suggestion,Planner provides heuristic; verify SOP.
+ACN,HPLC/workup solvent,Acetonitrile.
+MeCN,Alias of ACN,Acetonitrile alias.
+THF,reaction solvent,Tetrahydrofuran; verify compatibility.
+DMSO,reaction solvent,Dimethyl sulfoxide.
+TIS,scavenger,Cleavage cocktail scavenger.
+EDT,scavenger,Cys/Met-rich cleavage scavenger.
+MTBE,precipitation solvent,Peptide precipitation/wash context.
+Diethyl ether,precipitation solvent,Peptide precipitation context.
+HFIP,special solvent,Peptide solubilization context; verify SOP.

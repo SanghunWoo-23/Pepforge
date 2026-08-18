@@ -5,3 +5,14 @@ HOAt,catalyst/additive,136.11,,solid,additive,High-performance additive; safety/
 DMAP,catalyst/additive,122.17,,solid,catalyst,Used in acylation/esterification contexts
 NHS,catalyst/additive,115.09,,solid,activation additive,NHS ester chemistry context
 Sulfo-NHS,catalyst/additive,217.13,,solid,activation additive,Water-soluble NHS derivative
+HOBt hydrate,catalyst/additive,153.14,,solid,additive,Hydrate form; verify actual bottle
+Cl-HOBt,catalyst/additive,169.57,,solid,additive,Chloro-HOBt additive
+6-Cl-HOBt,catalyst/additive,169.57,,solid,additive,6-chloro-HOBt additive
+Oxyma Pure,catalyst/additive,142.11,,solid,additive,Common carbodiimide additive
+K-Oxyma,catalyst/additive,180.2,,solid,additive,Potassium salt form; verify hydrate
+HOSu,catalyst/additive,115.09,,solid,activation additive,N-hydroxysuccinimide
+HOOBt,catalyst/additive,151.12,,solid,additive,Verify form
+HOSBt,catalyst/additive,151.12,,solid,additive,Verify form
+Pd(PPh3)4,catalyst/additive,1155.56,,solid,catalyst,Alloc deprotection context
+Phenylsilane,catalyst/additive,108.21,0.879,liquid,scavenger/reductant,Alloc deprotection context
+Hydrazine,catalyst/additive,32.05,1.021,liquid,deprotection reagent,Dde/ivDde deprotection; concentration-dependent

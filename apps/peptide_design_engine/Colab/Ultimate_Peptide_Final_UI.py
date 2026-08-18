@@ -1,3 +1,6 @@
+import logging
+LOGGER = logging.getLogger(__name__)
+import secrets
 
 # =========================================================
 # Peptide Design Engine - VERIFIED COLAB UI
@@ -5,10 +8,11 @@
 from IPython.display import display, Markdown
 import ipywidgets as widgets
 
-target_input = widgets.Textarea(value="DELIKFVRWA\nYYERWFCAA", description="Targets", layout=widgets.Layout(width='650px', height='80px'))
+target_input = widgets.Textarea(value="", description="Targets", layout=widgets.Layout(width='650px', height='80px'))
 pop_size = widgets.IntSlider(value=200, min=20, max=1000, step=20, description="POP")
 gen_max = widgets.IntSlider(value=20, min=1, max=150, step=1, description="GEN")
 seed_input = widgets.IntText(value=42, description="Seed")
+auto_seed = widgets.Checkbox(value=True, description="New seed each run")
 engine_mode = widgets.Dropdown(options=["NSGA2","GA"], value="NSGA2", description="Engine")
 design_mode = widgets.Dropdown(options=["SINGLE","MULTI","BRIDGE"], value="MULTI", description="TargetMode")
 bridge_anchor_len = widgets.IntSlider(value=4, min=2, max=10, description="BridgeAnchor")
@@ -46,8 +50,8 @@ max_linkers = widgets.IntSlider(value=2, min=0, max=6, description="MaxLink")
 aa_linker_lib = widgets.Checkbox(value=True, description="AA linker lib")
 aa_linker_mode = widgets.Dropdown(options=["TOKEN","EXPAND_TO_RESIDUES"], value="TOKEN", description="AALinkMode")
 
-motif_lock = widgets.Checkbox(value=True, description="Motif lock")
-locked_motifs = widgets.Text(value="RGD,KLVFF", description="Motifs")
+motif_lock = widgets.Checkbox(value=False, description="Motif lock")
+locked_motifs = widgets.Text(value="", description="Motifs")
 locked_motif_pos = widgets.Text(value="RGD:2;KLVFF:-6", description="MotifPos")
 lock_residues = widgets.Text(value="C,W", description="ProtectAA")
 dual_min_distance = widgets.IntSlider(value=6, min=0, max=30, description="DualDist")
@@ -64,17 +68,17 @@ af_lform_only = widgets.Checkbox(value=True, description="AF L-form only")
 use_optional_ml = widgets.Checkbox(value=False, description="Optional ML rerank")
 ml_rerank_weight = widgets.FloatSlider(value=0.20, min=0.0, max=0.8, step=0.05, description="ML weight")
 prepare_pseudodock = widgets.Checkbox(value=False, description="Pseudo-dock FASTA")
-receptor_sequence = widgets.Textarea(value="", description="Receptor", placeholder="Paste receptor protein sequence for optional pseudo-docking", layout=widgets.Layout(width='650px', height='90px'))
+receptor_sequence = widgets.Textarea(value="", description="Receptor", layout=widgets.Layout(width='650px', height='90px'))
 pseudodock_topk = widgets.IntSlider(value=10, min=1, max=50, description="PseudoTopK")
 
 auto_hotspot = widgets.Checkbox(value=False, description="Auto hotspot")
 hotspot_source = widgets.Dropdown(options=["SEQUENCE","PDB"], value="SEQUENCE", description="HotSource")
 hotspot_window = widgets.IntSlider(value=6, min=3, max=15, step=1, description="HotWin")
 hotspot_topk = widgets.IntSlider(value=5, min=1, max=20, step=1, description="HotTopK")
-hotspot_sequence = widgets.Textarea(value="", description="ProteinSeq", placeholder="Paste protein sequence", layout=widgets.Layout(width='650px', height='90px'))
-hotspot_pdb_text = widgets.Textarea(value="", description="PDB text", placeholder="Optional: paste PDB text, or upload .pdb file below", layout=widgets.Layout(width='650px', height='100px'))
+hotspot_sequence = widgets.Textarea(value="", description="ProteinSeq", layout=widgets.Layout(width='650px', height='90px'))
+hotspot_pdb_text = widgets.Textarea(value="", description="PDB text", layout=widgets.Layout(width='650px', height='100px'))
 hotspot_pdb_upload = widgets.FileUpload(accept=".pdb,.ent,.txt", multiple=False, description="Upload PDB file")
-hotspot_chain = widgets.Text(value="", description="Chain", placeholder="optional")
+hotspot_chain = widgets.Text(value="", description="Chain")
 hotspot_lock_as_motif = widgets.Checkbox(value=False, description="Lock hotspots")
 hotspot_replace_targets = widgets.Checkbox(value=True, description="Use as TARGETS")
 hotspot_min_exposure = widgets.FloatSlider(value=0.35, min=0.0, max=1.0, step=0.05, description="MinExpose")
@@ -82,7 +86,7 @@ hotspot_binding_weight = widgets.FloatSlider(value=0.80, min=0.0, max=2.0, step=
 hotspot_debug_mode = widgets.Checkbox(value=True, description="Hotspot debug / fallback")
 hotspot_debug_force_topk = widgets.IntSlider(value=5, min=1, max=20, step=1, description="DebugTopK")
 motif_position_mode = widgets.Dropdown(options=["FREE","N_TERM","CENTER","C_TERM"], value="FREE", description="MotifPos")
-motif_position_map_text = widgets.Textarea(value="", description="MotifMap", placeholder="KLVFF:CENTER\nHHHHHH:C_TERM", layout=widgets.Layout(width='650px', height='80px'))
+motif_position_map_text = widgets.Textarea(value="", description="MotifMap", layout=widgets.Layout(width='650px', height='80px'))
 
 def _motif_position_map_from_text(x):
     result = {}
@@ -310,7 +314,7 @@ def _positions_from_text(x):
         try:
             vals.append(int(v))
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     return vals
 
 def _motif_pos_from_text(x):
@@ -370,7 +374,8 @@ def build_config():
         "TARGETS": _targets_from_text(target_input.value),
         "POP": pop_size.value,
         "GEN": gen_max.value,
-        "SEED": seed_input.value,
+        "SEED": 1 + secrets.randbelow(2_147_483_646) if auto_seed.value else seed_input.value,
+        "AUTO_SEED_EACH_RUN": auto_seed.value,
         "ENGINE_MODE": engine_mode.value,
         "DESIGN_MODE": _design_mode_to_engine(design_mode.value),
         "TARGET_MODE_LABEL": design_mode.value,
@@ -455,7 +460,7 @@ def display_ui():
     tabs.children = [
         widgets.VBox([
             target_input,
-            widgets.HBox([pop_size, gen_max, seed_input, engine_mode]),
+            widgets.HBox([pop_size, gen_max, seed_input, auto_seed, engine_mode]),
             widgets.HBox([design_mode, bridge_anchor_len, bridge_require_order]),
             widgets.HTML("<b>TargetMode:</b> SINGLE = one target/hotspot bias, MULTI = multiple targets/hotspots, BRIDGE = target-derived anchors/linker design."),
             widgets.HBox([len_mode, fix_len, fix_len_text, min_len, min_len_text, max_len, max_len_text]),

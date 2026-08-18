@@ -1,14 +1,22 @@
 
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 import os
 import sys
 import math
 import re
 import shutil
+import traceback
+import json
+import tempfile
+from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from peptiforg_core.ui_helpers import set_pepforge_icon, open_path
+from peptiforg_core.ui_theme import apply_pepforge_theme
+from peptiforg_core.sandbox_runtime import configured_output
 from peptiforg_core.rcsb_pdb_bridge import search_rcsb, download_rcsb_structure, results_to_rows, RCSB_BRIDGE_VERSION
 from peptiforg_core.target_structure_preparation import export_target_preparation_package, TARGET_PREP_VERSION
 from peptiforg_core.binding_site_selector import export_binding_site_selection_package, BINDING_SITE_SELECTOR_VERSION
@@ -31,10 +39,7 @@ if str(ROOT) not in sys.path:
 
 from peptiforg_core.peptide_tokens import (
     parse_peptide_notation as unified_parse_peptide,
-    token_to_surrogate,
     normalize_token,
-    LINKER_ONLY_TOKENS,
-    AA_LIKE_TOKEN_MAP,
     NTERM_MODIFIERS,
 )
 
@@ -45,8 +50,6 @@ AA_MASS = {
     "S": 105.09, "T": 119.12, "W": 204.23, "Y": 181.19, "V": 117.15,
 }
 HYDRO = {"A":1.8,"R":-4.5,"N":-3.5,"D":-3.5,"C":2.5,"Q":-3.5,"E":-3.5,"G":-0.4,"H":-3.2,"I":4.5,"L":3.8,"K":-3.9,"M":1.9,"F":2.8,"P":-1.6,"S":-0.8,"T":-0.7,"W":-0.9,"Y":-1.3,"V":4.2}
-HELIX = set("AEKLMQRH")
-BETA = set("VIFYWT")
 CHARGED = set("DEKRH")
 BASIC = set("KRH")
 ACIDIC = set("DE")
@@ -64,6 +67,8 @@ HYDROGEN_BOND_STRONG_DA_CUTOFF_A = 3.5
 HYDROPHOBIC_CONTACT_CUTOFF_A = 5.0
 CONTACT_CUTOFF_A = 5.0
 CLASH_CUTOFF_A = 2.0
+CHARGE_PROXIMITY_CUTOFF_A = 5.0
+POLAR_PROXIMITY_CUTOFF_A = 5.0
 HBOND_CAPABLE = POLAR | BASIC | ACIDIC | set("YWHC")
 
 def _residue_can_hbond(aa: str) -> bool:
@@ -123,6 +128,17 @@ def _atom_contact_columns() -> list[str]:
         "target_residue", "target_chain", "target_resi", "target_resn", "target_atom",
         "peptide_residue", "peptide_chain", "peptide_resi", "peptide_resn", "peptide_atom",
         "distance_A", "cutoff_A", "contact_class", "note"
+    ]
+
+
+def _pose_columns() -> list[str]:
+    return [
+        "pose_rank", "pose_id", "conformation", "orientation",
+        "contact_count", "centroid_overlap_warnings",
+        "hydrophobic_proximities", "opposite_charge_proximities",
+        "aromatic_proximities", "polar_residue_proximities", "min_centroid_distance_A",
+        "rotation_z_deg", "translation_x_A", "translation_y_A", "translation_z_A",
+        "center_x_A", "center_y_A", "center_z_A", "note"
     ]
 
 # Common project aliases.  The canonical notation is used for metadata so
@@ -237,21 +253,6 @@ def terminal_status_df(seq: str) -> pd.DataFrame:
         rows.append({"field": "terminal_modifier_warning", "value": ";".join(misplaced), "note": "These tokens are N-terminal-only modifiers by default. Internal use requires explicit side-chain notation and external parameter review."})
     return pd.DataFrame(rows, columns=["field", "value", "note"])
 
-# Coarse-grained surrogates used only for local structure/MD screening.
-# They allow D-form, common non-natural residues, linkers, labels and chemical caps
-# to remain in the workflow instead of being rejected. Publication-grade all-atom
-# validation still requires force-field parameters for noncanonical chemistry.
-CHEMICAL_BEAD_SURROGATE = {
-    "AC": "A", "ACETYL": "A", "SUCCINYL": "D", "T7SUCCINYL": "D",
-    "PAL": "V", "PALMITICACID": "V", "PALMITOYL": "V", "MYR": "V", "MYRISTICACID": "V", "MYRISTOYL": "V", "CHOL": "V", "CHOLESTERYL": "V",
-    "GAL": "Y", "GALLICACID": "Y", "GALLOYL": "Y", "CAF": "Y", "CAFFEICACID": "Y", "CAFFEOYL": "Y", "NIC": "H", "NICOTINICACID": "H", "NICOTINOYL": "H",
-    "BIOTIN": "F", "FITC": "Y", "FAM": "Y", "TAMRA": "Y", "CY3": "Y", "CY5": "Y", "DOTA": "D", "NOTA": "D",
-    "AHX": "G", "AEEA": "G", "PEG1": "G", "PEG2": "G", "PEG3": "G", "PEG4": "G", "PEG6": "G", "PEG8": "G", "PEG12": "G", "PEG24": "G",
-    "SMCC": "G", "SULFOSMCC": "G", "TRIAZOLE": "G", "CLICK": "G", "HYDRAZONE": "G", "OXIME": "G",
-}
-
-
-
 THREE_TO_ONE = {
     "ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E","GLY":"G","HIS":"H","ILE":"I",
     "LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P","SER":"S","THR":"T","TRP":"W","TYR":"Y","VAL":"V",
@@ -273,88 +274,38 @@ def clean_sequence(seq: str) -> str:
     return parse_peptide_notation(seq).get("core", "")
 
 def _split_peptide_model_tokens(seq: str):
-    """Return ordered token rows for simulation-friendly peptide modeling.
+    """Return ordered chemistry tokens without canonical-surrogate substitution.
 
-    Canonical residues, D-residues, common non-natural residues, linkers and
-    terminal chemicals are converted to conservative surrogate bead types. This
-    keeps chemically rich Pepforge candidates usable for local pose screening and
-    dynamics while clearly recording the original token.
+    This table is descriptive metadata only.  Non-natural amino acids, linkers,
+    labels and terminal chemicals retain their own token identity.  3D geometry
+    is obtained from Structure Builder or an explicit PDB; unsupported chemistry
+    is never silently replaced by Gly/Ala/Lys/etc.
     """
-    raw = canonical_peptide_notation(seq).strip().replace(" ", "")
-    parsed = unified_parse_peptide(raw)
+    sequence = canonical_peptide_notation(seq)
+    if not sequence:
+        return []
+    from peptiforg_core.pymol_structure_builder import classify_tokens
     rows = []
-    if not raw:
-        return rows
-
-    def add(token, aa, cls, note=""):
-        aa = (aa or "G")[:1].upper()
-        rows.append({"token": str(token), "aa": aa, "class": cls, "note": note})
-
-    if parsed.nterm:
-        n = normalize_token(parsed.nterm)
-        if n not in {"AC", "ACETYL"}:
-            add(parsed.nterm, CHEMICAL_BEAD_SURROGATE.get(n, "A"), "n_terminal_chemical", "terminal chemical represented in the screening model")
-
-    s, _cterm = raw, parsed.cterm
-    # Strip terminal markers and explicit N-terminal modifier from token scan.
-    for marker in ("CONH2", "NH2", "AMIDE", "COOH", "CO2H", "ACID", "OH"):
-        s = re.sub(r"(?i)-?" + re.escape(marker) + r"$", "", s)
-    parts = [p for p in s.split("-") if p]
-    if parts and normalize_token(parts[0]) in NTERM_MODIFIERS:
-        parts = parts[1:]
-    s_after = "-".join(parts) if parts else s
-    if parsed.nterm == "Ac" and s_after.startswith("Ac") and not s_after.startswith("AC"):
-        s_after = s_after[2:]
-
-    tokens = []
-    if "-" in s_after or re.search(r"[,;/\n\t ]", s_after):
-        tokens = [p.strip().strip("[]") for p in re.split(r"\s*(?:-|,|;|/|\n|\t| )\s*", s_after) if p.strip()]
-    else:
-        i = 0
-        while i < len(s_after):
-            ch = s_after[i]
-            if ch == "[":
-                j = s_after.find("]", i+1)
-                if j > i:
-                    tokens.append(s_after[i+1:j]); i = j+1; continue
-            if ch == "d" and i+1 < len(s_after) and s_after[i+1].upper() in AA_MASS:
-                tokens.append(s_after[i:i+2]); i += 2; continue
-            if ch.isupper():
-                tokens.append(ch)
-            i += 1
-
-    for token_index, tok in enumerate(tokens, start=1):
-        norm = normalize_token(tok)
-        if not norm:
-            continue
-        # Pal/Myr/FITC/etc. are N-terminal modifiers by default.  If they
-        # survived into the internal token list, do not silently model them as
-        # ordinary residues.  Keep a warning bead for traceability but avoid
-        # giving it normal contact chemistry.
-        if norm in NTERM_MODIFIERS:
-            add(tok, "G", "misplaced_n_terminal_modifier", "N-terminal-only modifier found internally; side-chain use must be explicitly specified and externally parameterized")
-            continue
-        if len(tok) == 2 and tok[0] == "d" and tok[1].upper() in AA_MASS:
-            add(tok, tok[1].upper(), "d_form", "D-form residue modeled with canonical side-chain class and D-form flag")
-            continue
-        if norm in LINKER_ONLY_TOKENS:
-            # flexible linkers get at least one neutral flexible bead; long PEGs get two.
-            reps = 2 if re.search(r"PEG(8|12|24)", norm) else 1
-            for k in range(reps):
-                add(tok if k == 0 else tok + f"_{k+1}", CHEMICAL_BEAD_SURROGATE.get(norm, "G"), "linker", "flexible linker represented by neutral coarse bead")
-            continue
-        aa = token_to_surrogate(tok)
-        if aa:
-            cls = "non_natural" if norm in AA_LIKE_TOKEN_MAP else "canonical"
-            for ch in aa:
-                add(tok, ch, cls, "non-natural residue mapped to conservative canonical surrogate" if cls == "non_natural" else "")
-            continue
-        if norm in CHEMICAL_BEAD_SURROGATE:
-            add(tok, CHEMICAL_BEAD_SURROGATE[norm], "chemical", "chemical token represented by a conservative coarse bead")
-        else:
-            add(tok, "G", "unknown", "unknown token retained as neutral coarse bead for screening")
+    for item in classify_tokens(sequence):
+        token = str(item.token or item.raw or "")
+        cls = str(item.cls or "unknown")
+        aa = ""
+        if cls == "std_aa" and len(token) == 1 and token.upper() in AA_MASS:
+            aa = token.upper()
+        elif cls == "d_std_aa":
+            raw = str(item.raw or token)
+            if raw and raw[-1].upper() in AA_MASS:
+                aa = raw[-1].upper()
+        if cls in {"unknown", "unsupported"}:
+            cls = "unsupported"
+        rows.append({
+            "token": token,
+            "aa": aa or "X",
+            "class": cls,
+            "note": str(item.note or ""),
+            "warning": str(item.warning or ""),
+        })
     return rows
-
 
 
 def peptide_token_compatibility_df(seq: str):
@@ -362,70 +313,80 @@ def peptide_token_compatibility_df(seq: str):
     rows = _split_peptide_model_tokens(seq)
     parsed = unified_parse_peptide(seq)
     if not rows:
-        return pd.DataFrame([{"metric":"simulation_token_status","value":"no peptide tokens","note":"Enter a peptide sequence or peptide PDB."}])
+        return pd.DataFrame([{"metric":"token_status","value":"no peptide tokens","note":"Enter a peptide sequence or peptide PDB."}])
     counts = {}
+    warnings = []
     for r in rows:
         counts[r["class"]] = counts.get(r["class"], 0) + 1
+        if r.get("warning"):
+            warnings.append(f"{r.get('token')}: {r.get('warning')}")
+    supported_for_builder = counts.get("unsupported", 0) == 0
     out = [
-        {"metric":"coarse_model_beads","value":len(rows),"note":"Residue/chemical/linker beads used by local pose search and dynamics."},
-        {"metric":"d_form_beads","value":counts.get("d_form",0),"note":"D-form residues are supported by surrogate side-chain class and D-form flag."},
-        {"metric":"non_natural_beads","value":counts.get("non_natural",0),"note":"Non-natural amino acids are mapped to conservative canonical surrogates."},
-        {"metric":"linker_beads","value":counts.get("linker",0),"note":"Linkers are retained as flexible neutral beads."},
-        {"metric":"chemical_modifier_beads","value":counts.get("chemical",0)+counts.get("n_terminal_chemical",0),"note":"Chemical caps/labels are retained as coarse interaction beads when possible."},
-        {"metric":"unknown_token_beads","value":counts.get("unknown",0),"note":"Unknown tokens are not rejected; they are modeled as neutral beads and flagged for review."},
-        {"metric":"misplaced_n_terminal_modifier_beads","value":counts.get("misplaced_n_terminal_modifier",0),"note":"N-terminal-only chemicals such as Pal/FITC are not treated as internal residues unless explicit side-chain attachment notation is provided."},
-        {"metric":"terminal_modifier_warnings","value":";".join(misplaced_nterm_modifier_tokens(seq)) if misplaced_nterm_modifier_tokens(seq) else "none","note":"Internal Pal/Myr/FITC/etc. are flagged because their default position is N-terminus."},
+        {"metric":"token_count","value":len(rows),"note":"Chemistry tokens parsed from the peptide notation."},
+        {"metric":"d_amino_acid_count","value":counts.get("d_std_aa",0),"note":"D-residues retain stereochemistry in Structure Builder; no L-residue substitution is applied."},
+        {"metric":"non_natural_count","value":counts.get("non_natural_aa",0),"note":"Non-natural residues retain their own Structure Builder templates when supported."},
+        {"metric":"linker_count","value":counts.get("linker",0),"note":"Linkers retain their own connected chemistry when supported."},
+        {"metric":"terminal_or_label_count","value":sum(counts.get(k,0) for k in ("n_terminal_modifier","c_terminal_modifier","n_terminal","c_terminal","label","chemical")),"note":"Terminal chemicals/labels are not counted as canonical amino acids."},
+        {"metric":"unsupported_token_count","value":counts.get("unsupported",0),"note":"Unsupported tokens block sequence-derived 3D generation instead of being converted to canonical residues."},
+        {"metric":"notation_warnings","value":"; ".join(warnings) if warnings else "none","note":"Warnings emitted by the chemistry-aware parser."},
         {"metric":"aa_like_tokens","value":";".join(parsed.aa_like_tokens) if parsed.aa_like_tokens else "none","note":"Recognized non-natural amino-acid tokens."},
         {"metric":"linker_tokens","value":";".join(parsed.linker_tokens) if parsed.linker_tokens else "none","note":"Recognized linker/spacer tokens."},
-        {"metric":"simulation_scope","value":"screening-ready","note":"Local pose search and embedded dynamics can run; all-atom validation requires external parameters for modified residues."},
+        {"metric":"structure_builder_status","value":"supported" if supported_for_builder else "review required","note":"Sequence-derived 3D screening uses Structure Builder coordinates; unsupported chemistry requires an explicit validated structure/template."},
     ]
     return pd.DataFrame(out)
 
+
 def estimate_properties(seq: str):
+    """Return transparent sequence descriptors without structural/binding claims.
+
+    Values derived only from canonical residues are labelled as such. Modified
+    chemistry is preserved in the token table/Structure Builder and is not folded
+    into a fabricated total-MW, affinity, aggregation, disorder, or secondary-
+    structure score.
+    """
     seq = canonical_peptide_notation(seq)
-    parsed = parse_peptide_notation(seq); core = parsed["core"]; n = len(core)
+    parsed = parse_peptide_notation(seq)
+    core = parsed["core"]
+    n = len(core)
     if n == 0:
-        return pd.DataFrame([{"metric":"valid_residue_count", "value":0, "note":"No standard residues parsed"}])
-    mw = sum(AA_MASS[a] for a in core) - 18.015*(n-1)
-    if str(parsed["nterm"]).lower() == "ac": mw += 42.037
-    if parsed["cterm"].upper() in set(CTERM_AMIDE_MARKERS): mw -= 0.984
-    sidechain_charge = sum(1 for a in core if a in "KR") + 0.1*sum(1 for a in core if a == "H") - sum(1 for a in core if a in "DE")
-    nterm_charge = 0.0 if parsed["nterm"] else 1.0
-    cterm_charge = 0.0 if parsed["cterm"].upper() in set(CTERM_AMIDE_MARKERS) else -1.0
-    net_charge = sidechain_charge + nterm_charge + cterm_charge
-    hydro = sum(HYDRO.get(a,0) for a in core)/n
-    helix = sum(1 for a in core if a in HELIX)/n
-    beta = sum(1 for a in core if a in BETA)/n
-    disorder = min(1.0, (sum(1 for a in core if a in "GSPDEKRNQ")/n)*0.85 + (1-min(1, abs(hydro)/4.5))*0.15)
-    aggregation = min(1.0, (sum(1 for a in core if a in HYDROPHOBIC)/n)*0.60 + (sum(1 for a in core if a in AROMATIC)/n)*0.30 + max(0, hydro)/4.5*0.10)
-    amph = min(1.0, (sum(1 for a in core if a in CHARGED)/n)*0.5 + (sum(1 for a in core if a in HYDROPHOBIC)/n)*0.5)
+        return pd.DataFrame([{"metric":"canonical_residue_count", "value":0, "note":"No canonical residues were parsed; inspect token compatibility/Structure Builder output."}])
+    core_mw = sum(AA_MASS[a] for a in core) - 18.015*(n-1)
+    if str(parsed["nterm"]).lower() == "ac":
+        core_mw += 42.037
+    if str(parsed["cterm"]).upper() in set(CTERM_AMIDE_MARKERS):
+        core_mw -= 0.984
+    basic_n = sum(1 for a in core if a in BASIC)
+    acidic_n = sum(1 for a in core if a in ACIDIC)
+    aromatic_n = sum(1 for a in core if a in AROMATIC)
+    hydrophobic_n = sum(1 for a in core if a in HYDROPHOBIC)
+    polar_n = sum(1 for a in core if a in POLAR)
+    pro_gly_n = sum(1 for a in core if a in "PG")
     rows = [
-        ("parsed_core_sequence", core, "standard-residue parse used for lightweight estimation"),
-        ("n_terminal_modifier", parsed["nterm"] or "free", "terminal parser result"),
-        ("c_terminal_modifier", parsed["cterm"] or "free acid", "terminal parser result"),
-        ("length", n, "residue count"),
-        ("estimated_MW_Da", round(mw, 3), "sequence-based estimate; verify modified residues/vendor forms"),
-        ("net_charge_approx", round(net_charge, 3), "rough pH-neutral estimate including terminal state"),
-        ("hydrophobicity_KD_avg", round(hydro, 3), "Kyte-Doolittle average"),
-        ("helix_propensity_heuristic", round(helix, 3), "heuristic, not structure preparation"),
-        ("beta_propensity_heuristic", round(beta, 3), "heuristic, not structure preparation"),
-        ("disorder_tendency_heuristic", round(disorder, 3), "heuristic"),
-        ("aggregation_risk_heuristic", round(aggregation, 3), "heuristic"),
-        ("amphipathic_balance_heuristic", round(amph, 3), "heuristic"),
-        ("d_form_token_count", sum(1 for r in _split_peptide_model_tokens(seq) if r.get("class") == "d_form"), "D-form residues represented by surrogate beads for screening"),
-        ("non_natural_token_count", len(parsed.get("aa_like_tokens", [])), "non-natural amino-acid tokens mapped to conservative surrogates"),
-        ("linker_token_count", len(parsed.get("linker_tokens", [])), "linker/spacer tokens retained by the coarse simulation model"),
-        ("unknown_token_count", len(parsed.get("unknown_tokens", [])), "unknown tokens flagged for review"),
-        ("aromatic_fraction", round(sum(1 for a in core if a in AROMATIC)/n, 3), "F/W/Y fraction"),
-        ("charged_fraction", round(sum(1 for a in core if a in CHARGED)/n, 3), "D/E/K/R/H fraction"),
-        ("basic_fraction", round(sum(1 for a in core if a in BASIC)/n, 3), "K/R/H fraction"),
-        ("acidic_fraction", round(sum(1 for a in core if a in ACIDIC)/n, 3), "D/E fraction"),
-        ("polar_fraction", round(sum(1 for a in core if a in POLAR)/n, 3), "polar residue fraction"),
+        ("parsed_core_sequence", core, "Canonical residue core parsed from the notation."),
+        ("n_terminal_modifier", parsed["nterm"] or "free", "Parsed terminal state; chemistry is handled separately from the canonical residue core."),
+        ("c_terminal_modifier", parsed["cterm"] or "free acid", "Parsed terminal state."),
+        ("canonical_residue_count", n, "Canonical residues only."),
+        ("canonical_core_MW_Da", round(core_mw, 3), "Canonical core plus simple Ac/NH2 terminal correction only; not a total MW for other modifications/linkers/non-natural residues."),
+        ("hydrophobicity_KD_avg", round(sum(HYDRO.get(a,0) for a in core)/n, 3), "Kyte-Doolittle average over canonical residues only."),
+        ("basic_residue_count", basic_n, "K/R/H count in canonical core."),
+        ("acidic_residue_count", acidic_n, "D/E count in canonical core."),
+        ("aromatic_fraction", round(aromatic_n/n, 3), "F/W/Y fraction in canonical core."),
+        ("hydrophobic_fraction", round(hydrophobic_n/n, 3), "A/I/L/M/F/W/V/Y/P fraction in canonical core."),
+        ("charged_fraction", round((basic_n+acidic_n)/n, 3), "D/E/K/R/H fraction in canonical core."),
+        ("polar_fraction", round(polar_n/n, 3), "S/T/N/Q/C/Y fraction in canonical core."),
+        ("pro_gly_fraction", round(pro_gly_n/n, 3), "P/G fraction; raw composition descriptor, not a disorder prediction."),
+        ("d_amino_acid_count", sum(1 for r in _split_peptide_model_tokens(seq) if r.get("class") == "d_std_aa"), "Count from chemistry-aware token parsing."),
+        ("non_natural_token_count", sum(1 for r in _split_peptide_model_tokens(seq) if r.get("class") == "non_natural_aa"), "Count only; no canonical surrogate score is assigned."),
+        ("linker_token_count", sum(1 for r in _split_peptide_model_tokens(seq) if r.get("class") == "linker"), "Count only; linker geometry is handled by Structure Builder."),
+        ("unsupported_token_count", sum(1 for r in _split_peptide_model_tokens(seq) if r.get("class") == "unsupported"), "Unsupported chemistry requires review; it is not silently substituted."),
     ]
     return pd.DataFrame([{"metric":a,"value":b,"note":c} for a,b,c in rows])
 
+
 def residue_map_df(seq: str):
-    core = clean_sequence(seq); rows = []
+    """Residue-level canonical chemistry descriptors only."""
+    core = clean_sequence(seq)
+    rows = []
     for i, aa in enumerate(core, start=1):
         cls=[]
         if aa in BASIC: cls.append("basic")
@@ -433,33 +394,46 @@ def residue_map_df(seq: str):
         if aa in AROMATIC: cls.append("aromatic")
         if aa in HYDROPHOBIC: cls.append("hydrophobic")
         if aa in POLAR: cls.append("polar")
-        if aa in HELIX: cls.append("helix-favor")
-        if aa in BETA: cls.append("beta-favor")
         rows.append({"position": i, "residue": aa, "class": ", ".join(cls), "hydrophobicity_KD": HYDRO.get(aa, 0)})
     return pd.DataFrame(rows)
 
+
 def structure_risk_df(props: pd.DataFrame):
-    def get(k, default=0):
-        try: return float(props.loc[props.metric==k, "value"].iloc[0])
-        except Exception: return default
-    agg = get("aggregation_risk_heuristic"); disorder = get("disorder_tendency_heuristic"); hydro = get("hydrophobicity_KD_avg"); charge = abs(get("net_charge_approx"))
-    return pd.DataFrame([
-        {"risk":"aggregation", "score":round(agg,3), "level":"High" if agg>=0.66 else ("Medium" if agg>=0.33 else "Low"), "note":"Hydrophobic/aromatic-rich peptides may require handling attention."},
-        {"risk":"disorder/flexibility", "score":round(disorder,3), "level":"High" if disorder>=0.66 else ("Medium" if disorder>=0.33 else "Low"), "note":"Heuristic flexibility estimate; not MD."},
-        {"risk":"hydrophobic burden", "score":round(max(0,min(1,hydro/4.5)),3), "level":"High" if hydro>1.5 else ("Medium" if hydro>0 else "Low"), "note":"May affect solubility and purification."},
-        {"risk":"charge burden", "score":round(min(1,charge/5),3), "level":"High" if charge>=5 else ("Medium" if charge>=2 else "Low"), "note":"May affect interaction and chromatographic behavior."},
-    ])
+    """Expose raw composition descriptors instead of fabricated risk classes."""
+    def get(k, default=0.0):
+        try:
+            return float(props.loc[props.metric==k, "value"].iloc[0])
+        except Exception:
+            return default
+    rows = [
+        {"risk":"hydrophobic_fraction", "score":get("hydrophobic_fraction"), "level":"descriptor", "note":"Raw canonical-core composition; not an aggregation prediction."},
+        {"risk":"aromatic_fraction", "score":get("aromatic_fraction"), "level":"descriptor", "note":"Raw canonical-core composition."},
+        {"risk":"charged_fraction", "score":get("charged_fraction"), "level":"descriptor", "note":"Raw canonical-core composition; not a binding prediction."},
+        {"risk":"pro_gly_fraction", "score":get("pro_gly_fraction"), "level":"descriptor", "note":"Raw P/G composition; not a disorder/flexibility probability."},
+    ]
+    return pd.DataFrame(rows)
+
 
 def amphipathic_window_df(seq: str, window: int = 7):
-    core = clean_sequence(seq); rows=[]
+    """Return sliding-window composition descriptors without a fake hydrophobic moment."""
+    core = clean_sequence(seq)
+    cols=["start","end","window_sequence","charged_fraction","hydrophobic_fraction","aromatic_fraction","note"]
     if not core:
-        return pd.DataFrame(columns=["start","end","window_sequence","hydrophobic_moment_proxy","charged_fraction","hydrophobic_fraction","note"])
+        return pd.DataFrame(columns=cols)
+    rows=[]
     for i in range(0, max(1, len(core)-window+1)):
         w=core[i:i+window]
-        hyd=sum(1 for a in w if a in HYDROPHOBIC)/len(w); chg=sum(1 for a in w if a in CHARGED)/len(w)
-        moment=min(1.0, abs(hyd-chg)+0.25*(sum(1 for a in w if a in AROMATIC)/len(w)))
-        rows.append({"start":i+1,"end":i+len(w),"window_sequence":w,"hydrophobic_moment_proxy":round(moment,3),"charged_fraction":round(chg,3),"hydrophobic_fraction":round(hyd,3),"note":"window-level amphipathic proxy"})
-    return pd.DataFrame(rows)
+        rows.append({
+            "start":i+1,
+            "end":i+len(w),
+            "window_sequence":w,
+            "charged_fraction":round(sum(1 for a in w if a in CHARGED)/len(w),3),
+            "hydrophobic_fraction":round(sum(1 for a in w if a in HYDROPHOBIC)/len(w),3),
+            "aromatic_fraction":round(sum(1 for a in w if a in AROMATIC)/len(w),3),
+            "note":"Observed composition only; no amphipathic moment is inferred without a defined conformation.",
+        })
+    return pd.DataFrame(rows, columns=cols)
+
 
 def _safe_float(text: str, default=0.0):
     try: return float(text)
@@ -513,7 +487,11 @@ def parse_mmcif_atoms(path: str | Path):
                 resn=get("auth_comp_id","label_comp_id").upper()
                 chain=get("auth_asym_id","label_asym_id", default="?")
                 resi=get("auth_seq_id","label_seq_id", default="")
-                x=_safe_float(get("Cartn_x")); y=_safe_float(get("Cartn_y")); z=_safe_float(get("Cartn_z"))
+                try:
+                    x=float(get("Cartn_x")); y=float(get("Cartn_y")); z=float(get("Cartn_z"))
+                except (TypeError, ValueError):
+                    i += 1
+                    continue
                 elem=get("type_symbol", default=(atom[:1] or "")).upper()
                 rows.append({"record":group,"atom":atom,"resn":resn,"chain":chain,"resi":resi,"x":x,"y":y,"z":z,"element":elem,"aa":THREE_TO_ONE.get(resn,"X")})
             i += 1
@@ -533,7 +511,11 @@ def parse_pdb_atoms(path: str | Path):
     for line in p.read_text(errors="ignore").splitlines():
         if not line.startswith(("ATOM", "HETATM")): continue
         atom=line[12:16].strip(); resn=line[17:20].strip().upper(); chain=line[21].strip() or "?"; resi=line[22:26].strip()
-        x=_safe_float(line[30:38]); y=_safe_float(line[38:46]); z=_safe_float(line[46:54]); elem=(line[76:78].strip() or atom[0]).upper()
+        try:
+            x=float(line[30:38]); y=float(line[38:46]); z=float(line[46:54])
+        except (TypeError, ValueError):
+            continue
+        elem=(line[76:78].strip() or atom[0]).upper()
         rows.append({"record":line[:6].strip(),"atom":atom,"resn":resn,"chain":chain,"resi":resi,"x":x,"y":y,"z":z,"element":elem,"aa":THREE_TO_ONE.get(resn,"X")})
     df=pd.DataFrame(rows, columns=cols)
     if df.empty:
@@ -587,36 +569,219 @@ def receptor_residue_points(atoms: pd.DataFrame):
     grouped["class"]=grouped["aa"].map(cls)
     return grouped
 
-def peptide_pseudo_model(seq: str, conformation: str = "helix"):
-    token_rows = _split_peptide_model_tokens(seq)
-    rows=[]
-    if not token_rows:
-        return pd.DataFrame(columns=["pep_pos","aa","token","token_class","x","y","z"])
-    for i, item in enumerate(token_rows,start=1):
-        aa = str(item.get("aa", "G"))[:1].upper() or "G"
-        token_class = item.get("class", "canonical")
-        # D-form and flexible linker beads are still placed in the same coarse trace,
-        # but with small deterministic offsets so mixed chemistry is not collapsed.
-        if conformation == "extended":
-            x,y,z=(i-1)*3.65,0.35 if token_class == "d_form" else 0.0,0.0
-        else:
-            angle=(i-1)*math.radians(100.0)
-            radius = 2.25 + (0.25 if token_class in ("linker", "chemical", "n_terminal_chemical") else 0.0)
-            x=math.cos(angle)*radius
-            y=math.sin(angle)*radius
-            z=(i-1)*(1.65 if token_class == "linker" else 1.50)
-            if token_class == "d_form":
-                y = -y
-        rows.append({"pep_pos":i,"aa":aa,"token":item.get("token", aa),"token_class":token_class,"x":x,"y":y,"z":z})
-    df=pd.DataFrame(rows)
-    df[["x","y","z"]]=df[["x","y","z"]]-df[["x","y","z"]].mean()
-    return df
+def _points_from_structure_builder_metadata(pdb_path: str | Path, metadata_path: str | Path | None = None) -> pd.DataFrame:
+    """Convert a Structure Builder all-atom model into token-level 3D points.
+
+    RDKit PDB export may label the connected molecule as a single ``UNL``
+    residue.  Pepforge's Structure Builder writes ``atom_ranges`` metadata that
+    preserves the original peptide/modification units.  This helper uses those
+    real generated coordinates instead of inventing canonical surrogate residues.
+    """
+    atoms = parse_pdb_atoms(pdb_path)
+    cols = ["pep_pos", "aa", "token", "token_class", "x", "y", "z"]
+    if atoms.empty:
+        return pd.DataFrame(columns=cols)
+    heavy = atoms[atoms["element"].astype(str).str.upper() != "H"].reset_index(drop=True)
+    meta_path = Path(metadata_path) if metadata_path else Path(pdb_path).with_suffix(".json")
+    if not meta_path.exists():
+        return pd.DataFrame(columns=cols)
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return pd.DataFrame(columns=cols)
+    ranges = meta.get("atom_ranges") or []
+    rows = []
+    unit_index = 0
+    for item in ranges:
+        try:
+            start = int(item.get("heavy_start_1based")) - 1
+            stop = int(item.get("heavy_end_1based"))
+        except (TypeError, ValueError):
+            continue
+        if start < 0 or stop <= start or start >= len(heavy):
+            continue
+        block = heavy.iloc[start:min(stop, len(heavy))]
+        if block.empty:
+            continue
+        token = str(item.get("token") or "")
+        kind = str(item.get("kind") or "unknown")
+        # C-terminal atoms are part of the preceding residue and should not
+        # become an extra peptide residue/contact position.
+        if kind in {"c_terminal", "c_terminal_atom", "c_terminal_modifier"}:
+            continue
+        unit_index += 1
+        up = token.upper()
+        aa = ""
+        if kind == "std_aa" and len(token) == 1 and up in AA_MASS:
+            aa = up
+        elif kind == "d_std_aa" and len(token) >= 2 and token[-1].upper() in AA_MASS:
+            aa = token[-1].upper()
+        rows.append({
+            "pep_pos": unit_index,
+            "aa": aa or "X",
+            "token": token,
+            "token_class": kind,
+            "x": float(block["x"].mean()),
+            "y": float(block["y"].mean()),
+            "z": float(block["z"].mean()),
+        })
+    return pd.DataFrame(rows, columns=cols)
+
+
+def build_peptide_structure_bundle(
+    seq: str,
+    output_dir: str | Path,
+    name: str = "docking_peptide",
+    *,
+    num_confs: int = 1,
+    max_iters: int = 20,
+    num_threads: int = 2,
+):
+    """Build a persistent Structure Builder model and token-centroid table.
+
+    Docking only needs a chemically faithful coordinate seed for rigid-body
+    geometry screening, so this internal bridge requests one lightly optimized
+    conformer. A visible, family-diverse Top 5 ensemble remains the separate PSB
+    workflow and should not be regenerated for every docking preview.
+    """
+    sequence = canonical_peptide_notation(seq)
+    if not sequence:
+        raise ValueError("Peptide sequence is empty.")
+    from peptiforg_core.pymol_structure_builder import (
+        export_modified_peptide_coordinate_seed,
+        export_modified_peptide_structure,
+    )
+    if int(num_confs) <= 1:
+        paths = export_modified_peptide_coordinate_seed(
+            sequence, output_dir, name=name,
+            max_iters=max_iters, num_threads=num_threads,
+        )
+    else:
+        paths = export_modified_peptide_structure(
+            sequence, output_dir, name=name,
+            num_confs=num_confs, max_iters=max_iters, num_threads=num_threads,
+        )
+    points = _points_from_structure_builder_metadata(paths["pdb"], paths.get("json"))
+    if points.empty:
+        raise ValueError("Structure Builder produced no token-level peptide coordinates.")
+    return points.copy(), dict(paths)
+
+
+def apply_pose_transform_to_pdb(source_pdb: str | Path, output_pdb: str | Path, pose_row) -> Path:
+    """Apply the recorded rigid-body Z rotation/translation to atomic PDB coordinates."""
+    src=Path(source_pdb); dst=Path(output_pdb)
+    if not src.exists():
+        raise FileNotFoundError(src)
+    def f(key, default=0.0):
+        try: return float(pose_row.get(key, default) or default)
+        except Exception: return float(default)
+    cx,cy,cz=f("center_x_A"),f("center_y_A"),f("center_z_A")
+    tx,ty,tz=f("translation_x_A"),f("translation_y_A"),f("translation_z_A")
+    angle=math.radians(f("rotation_z_deg")); ca,sa=math.cos(angle),math.sin(angle)
+    out=[]
+    for line in src.read_text(encoding="utf-8",errors="ignore").splitlines():
+        if line.startswith(("ATOM","HETATM")) and len(line)>=54:
+            try:
+                x=float(line[30:38])-cx; y=float(line[38:46])-cy; z=float(line[46:54])-cz
+            except ValueError:
+                continue
+            xr=x*ca-y*sa+tx; yr=x*sa+y*ca+ty; zr=z+tz
+            line=f"{line[:30]}{xr:8.3f}{yr:8.3f}{zr:8.3f}{line[54:]}"
+        out.append(line)
+    dst.parent.mkdir(parents=True,exist_ok=True)
+    dst.write_text("\n".join(out)+"\n",encoding="utf-8")
+    return dst
+
+
+def apply_pose_transform_to_atoms(atoms: pd.DataFrame, pose_row) -> pd.DataFrame:
+    """Apply a recorded rigid-body candidate transform to parsed atomic coordinates."""
+    if atoms is None or atoms.empty:
+        return pd.DataFrame(columns=getattr(atoms,"columns",[]))
+    out=atoms.copy()
+    def f(key, default=0.0):
+        try: return float(pose_row.get(key,default) or default)
+        except Exception: return float(default)
+    cx,cy,cz=f("center_x_A"),f("center_y_A"),f("center_z_A")
+    tx,ty,tz=f("translation_x_A"),f("translation_y_A"),f("translation_z_A")
+    a=math.radians(f("rotation_z_deg")); ca,sa=math.cos(a),math.sin(a)
+    x=out["x"].astype(float)-cx; y=out["y"].astype(float)-cy; z=out["z"].astype(float)-cz
+    out["x"]=x*ca-y*sa+tx; out["y"]=x*sa+y*ca+ty; out["z"]=z+tz
+    return out
+
+
+def atomic_structure_pdb(atoms: pd.DataFrame, title: str, forced_chain: str | None = None) -> str:
+    """Serialize actual parsed atomic coordinates to PDB text."""
+    lines=[f"REMARK {title}", "REMARK Coordinates are atomic coordinates; Pepforge ranking is not an energy/affinity calculation."]
+    serial=1
+    if atoms is not None and not atoms.empty:
+        for _,a in atoms.iterrows():
+            atom=str(a.get("atom","C"))[:4]; resn=str(a.get("resn","UNK") or "UNK")[:3]
+            chain=(forced_chain or str(a.get("chain","A") or "A"))[:1]
+            try: resi=int(float(a.get("resi",serial)))
+            except Exception: resi=serial
+            elem=str(a.get("element",atom[:1] or "C") or "C")[:2].rjust(2)
+            lines.append(f"ATOM  {serial:5d} {atom:>4s} {resn:>3s} {chain}{resi:4d}    {float(a['x']):8.3f}{float(a['y']):8.3f}{float(a['z']):8.3f}  1.00  0.00          {elem}")
+            serial+=1
+    lines.append("END")
+    return "\n".join(lines)+"\n"
+
+
+def atomic_complex_pdb(target_atoms: pd.DataFrame, peptide_atoms: pd.DataFrame, contacts: pd.DataFrame | None = None) -> str:
+    """Create a PDB from actual parsed atomic coordinates; no centroid pseudo-atoms are inserted."""
+    lines=[
+        "REMARK Pepforge coordinate complex candidate",
+        "REMARK Target and peptide entries below are actual parsed/generated atomic coordinates.",
+        "REMARK Pepforge local geometry ranking is not a docking energy or affinity calculation.",
+    ]
+    if contacts is not None and isinstance(contacts,pd.DataFrame) and not contacts.empty:
+        for _,r in contacts.head(40).iterrows():
+            lines.append(f"REMARK CENTROID_CONTACT {r.get('peptide_residue','')} -> {r.get('target_residue','')} dist={r.get('distance_A','')}A {r.get('interaction','')}")
+    serial=1
+    def emit(df, forced_chain=None):
+        nonlocal serial
+        if df is None or df.empty: return
+        for _,a in df.iterrows():
+            atom=str(a.get("atom","C"))[:4]; resn=str(a.get("resn","UNK") or "UNK")[:3]
+            chain=(forced_chain or str(a.get("chain","A") or "A"))[:1]
+            try: resi=int(float(a.get("resi",serial)))
+            except Exception: resi=serial
+            elem=str(a.get("element",atom[:1] or "C") or "C")[:2].rjust(2)
+            lines.append(f"ATOM  {serial:5d} {atom:>4s} {resn:>3s} {chain}{resi:4d}    {float(a['x']):8.3f}{float(a['y']):8.3f}{float(a['z']):8.3f}  1.00  0.00          {elem}")
+            serial+=1
+    emit(target_atoms)
+    lines.append("TER")
+    emit(peptide_atoms, forced_chain="P")
+    lines.append("END")
+    return "\n".join(lines)+"\n"
+
+
+def generate_peptide_structure_points(seq: str) -> pd.DataFrame:
+    """Generate Structure Builder token-centroid coordinates for local screening."""
+    with tempfile.TemporaryDirectory(prefix="pepforge_docking_structure_") as td:
+        points, _paths = build_peptide_structure_bundle(seq, td, name="docking_peptide")
+        return points.copy()
+
 
 def pdb_to_peptide_points(path: str | Path):
-    atoms=parse_pdb_atoms(path); pts=receptor_residue_points(atoms)
-    if pts.empty: return pd.DataFrame(columns=["pep_pos","aa","x","y","z"])
-    pts=pts.reset_index(drop=True)
-    return pd.DataFrame({"pep_pos":range(1,len(pts)+1),"aa":pts["aa"].tolist(),"x":pts["x"].tolist(),"y":pts["y"].tolist(),"z":pts["z"].tolist()})
+    p = Path(path)
+    sidecar = p.with_suffix(".json")
+    if sidecar.exists():
+        mapped = _points_from_structure_builder_metadata(p, sidecar)
+        if not mapped.empty:
+            return mapped
+    atoms = parse_pdb_atoms(p)
+    pts = receptor_residue_points(atoms)
+    if pts.empty:
+        return pd.DataFrame(columns=["pep_pos","aa","token","token_class","x","y","z"])
+    pts = pts.reset_index(drop=True)
+    return pd.DataFrame({
+        "pep_pos": range(1,len(pts)+1),
+        "aa": pts["aa"].tolist(),
+        "token": pts["aa"].tolist(),
+        "token_class": ["pdb_residue"] * len(pts),
+        "x": pts["x"].tolist(), "y": pts["y"].tolist(), "z": pts["z"].tolist()
+    })
+
 
 def _directions():
     base=[(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1),(1,1,0),(1,-1,0),(-1,1,0),(-1,-1,0),(1,0,1),(1,0,-1),(-1,0,1),(-1,0,-1),(0,1,1),(0,1,-1),(0,-1,1),(0,-1,-1)]
@@ -626,18 +791,18 @@ def _directions():
     return out
 
 def _score_contacts(receptor: pd.DataFrame, pep: pd.DataFrame, pose_id: str):
-    """Score a pose and report multiple residue-residue interactions.
+    """Measure transparent residue/token-centroid proximities for one candidate pose.
 
-    Older builds kept only the single nearest target residue for each peptide
-    residue.  That was compact but misleading because one residue can contact
-    several receptor residues.  This version keeps all contacts within the
-    interaction cutoff, capped per peptide residue to keep the UI readable.
+    No thermodynamic, hydrogen-bond, or electrostatic energy is inferred here.
+    The peptide side is represented by Structure Builder token centroids; the
+    receptor side is represented by residue points.  Atom-level geometry is
+    reported separately when both structures contain atomic coordinates.
     """
-    contacts = clashes = hyd = electro = aromatic = hbond = 0
-    min_d = 999.0
+    contacts = overlaps = hyd = charge = aromatic = polar = 0
+    min_d = float("inf")
     contact_rows = []
     if receptor is None or receptor.empty or pep is None or pep.empty:
-        return 0.0, 0, 0, 0, 0, 0, 0, min_d, contact_rows
+        return contacts, overlaps, hyd, charge, aromatic, polar, min_d, contact_rows
     for _, pr in pep.iterrows():
         dx = receptor["x"] - pr["x"]
         dy = receptor["y"] - pr["y"]
@@ -645,8 +810,7 @@ def _score_contacts(receptor: pd.DataFrame, pep: pd.DataFrame, pose_id: str):
         dist = (dx*dx + dy*dy + dz*dz) ** 0.5
         if dist.empty:
             continue
-        nearest_idx = dist.idxmin()
-        min_d = min(min_d, float(dist.loc[nearest_idx]))
+        min_d = min(min_d, float(dist.min()))
         close = receptor[dist <= CONTACT_CUTOFF_A].copy()
         close["_distance"] = dist[dist <= CONTACT_CUTOFF_A]
         close = close.sort_values("_distance").head(12)
@@ -654,203 +818,92 @@ def _score_contacts(receptor: pd.DataFrame, pep: pd.DataFrame, pose_id: str):
             d = float(rr["_distance"])
             paa = str(pr.get("aa", "X")).upper()[:1] or "X"
             raa = str(rr.get("aa", "X")).upper()[:1] or "X"
-            interaction = ["contact"]
+            labels = ["centroid_contact"]
             cutoff_used = CONTACT_CUTOFF_A
             contacts += 1
             if paa in HYDROPHOBIC and raa in HYDROPHOBIC and d <= HYDROPHOBIC_CONTACT_CUTOFF_A:
-                hyd += 1
-                interaction.append("hydrophobic")
-                cutoff_used = max(cutoff_used, HYDROPHOBIC_CONTACT_CUTOFF_A)
+                hyd += 1; labels.append("hydrophobic_proximity")
             if paa in AROMATIC and raa in AROMATIC and d <= HYDROPHOBIC_CONTACT_CUTOFF_A:
-                aromatic += 1
-                interaction.append("aromatic")
-            if ((paa in BASIC and raa in ACIDIC) or (paa in ACIDIC and raa in BASIC)) and d <= HYDROGEN_BOND_DA_CUTOFF_A:
-                electro += 1
-                interaction.append("salt_bridge_like")
-                cutoff_used = min(cutoff_used, HYDROGEN_BOND_DA_CUTOFF_A)
-            if _residue_can_hbond(paa) and _residue_can_hbond(raa) and d <= HYDROGEN_BOND_DA_CUTOFF_A:
-                hbond += 1
-                interaction.append("hydrogen_bond_proxy")
-                cutoff_used = min(cutoff_used, HYDROGEN_BOND_DA_CUTOFF_A)
+                aromatic += 1; labels.append("aromatic_proximity")
+            if ((paa in BASIC and raa in ACIDIC) or (paa in ACIDIC and raa in BASIC)) and d <= CHARGE_PROXIMITY_CUTOFF_A:
+                charge += 1; labels.append("opposite_charge_proximity"); cutoff_used = CHARGE_PROXIMITY_CUTOFF_A
+            if _residue_can_hbond(paa) and _residue_can_hbond(raa) and d <= POLAR_PROXIMITY_CUTOFF_A:
+                polar += 1; labels.append("polar_residue_proximity"); cutoff_used = POLAR_PROXIMITY_CUTOFF_A
             if d <= CLASH_CUTOFF_A:
-                clashes += 1
-                interaction.append("clash")
-                cutoff_used = CLASH_CUTOFF_A
+                overlaps += 1; labels.append("centroid_overlap_warning"); cutoff_used = CLASH_CUTOFF_A
             pep_label = _residue_label("", pr.get("pep_pos", "?"), paa)
             target_label = _residue_label(rr.get("chain", ""), rr.get("resi", "?"), raa)
             orientation = "reverse_C_to_N" if "reverse_C_to_N" in str(pose_id) else ("forward_N_to_C" if "forward_N_to_C" in str(pose_id) else "imported_or_direct")
             contact_rows.append({
-                "protein_residue": target_label,
-                "peptide_residue": pep_label,
-                "distance_A": round(d, 2),
-                "interaction": ";".join(dict.fromkeys(interaction)),
-                "pose_id": pose_id,
-                "orientation": orientation,
-                "protein_window": "",
-                "peptide_window": "",
-                "target_residue": target_label,
-                "pep_pos": int(pr.get("pep_pos", 0) or 0),
-                "pep_aa": paa,
-                "target_chain": rr.get("chain", ""),
-                "target_resi": rr.get("resi", ""),
-                "target_aa": raa,
-                "cutoff_A": cutoff_used,
-                "note": f"{target_label} -> {pep_label}",
+                "protein_residue": target_label, "peptide_residue": pep_label,
+                "distance_A": round(d, 2), "interaction": ";".join(dict.fromkeys(labels)),
+                "pose_id": pose_id, "orientation": orientation, "protein_window": "", "peptide_window": "",
+                "target_residue": target_label, "pep_pos": int(pr.get("pep_pos", 0) or 0),
+                "pep_aa": paa, "target_chain": rr.get("chain", ""), "target_resi": rr.get("resi", ""),
+                "target_aa": raa, "cutoff_A": cutoff_used,
+                "note": "Residue/token-centroid geometry only; inspect atom-level contacts separately when available.",
             })
-    score = 4.0*clashes - 0.45*contacts - 0.9*hyd - 1.1*electro - 0.5*aromatic - 0.8*hbond + 0.08*min_d
-    return score, contacts, clashes, hyd, electro, aromatic, hbond, min_d, contact_rows
+    return contacts, overlaps, hyd, charge, aromatic, polar, min_d, contact_rows
 
 
-def pose_quality_annotation(row) -> tuple[str, str]:
-    """Conservative pose-quality label for screening output.
 
-    This is a readability/triage layer. It does not turn the embedded pose search
-    into a final docking engine or experimental affinity estimate.
-    """
-    def _num(key, default=0.0):
-        try:
-            return float(row.get(key, default) or default)
-        except Exception:
-            return default
-    contacts = _num("contact_count")
-    clashes = _num("clash_count")
-    hb = _num("hydrogen_bond_contacts")
-    hyd = _num("hydrophobic_contacts")
-    mind = _num("min_distance_A", 999.0)
-    if contacts >= 12 and clashes <= 2 and mind >= 2.0 and (hb + hyd) >= 3:
-        return "A_screening_pose", "many contacts, low clash count, and mixed interaction support"
-    if contacts >= 6 and clashes <= 5 and mind >= 1.8:
-        return "B_review_pose", "usable contact pattern but still needs external docking/MD review"
-    if contacts >= 3 and clashes <= 8:
-        return "C_weak_pose", "limited contact support or notable clashes"
-    return "D_not_recommended", "weak contact pattern or problematic geometry"
+
+def analyze_atom_level_contact_frames(t: pd.DataFrame, p: pd.DataFrame, cutoff_A: float = HYDROPHOBIC_CONTACT_CUTOFF_A):
+    """Analyze actual atom-coordinate proximities between target and peptide frames."""
+    cols=_atom_contact_columns()
+    if t is None or p is None or t.empty or p.empty:
+        return pd.DataFrame(columns=cols)
+    rows=[]
+    for _,pa in p.iterrows():
+        dx=t["x"]-pa["x"]; dy=t["y"]-pa["y"]; dz=t["z"]-pa["z"]
+        dist=(dx*dx+dy*dy+dz*dz)**0.5
+        close=t[dist<=cutoff_A].copy(); close["_distance"]=dist[dist<=cutoff_A]
+        for _,ta in close.sort_values("_distance").head(80).iterrows():
+            d=float(ta["_distance"]); cls=[]; cutoff_used=CONTACT_CUTOFF_A
+            if d<=CLASH_CUTOFF_A:
+                cls.append("atom_overlap_or_covalent_range_warning"); cutoff_used=CLASH_CUTOFF_A
+            hb_pair=(_is_atom_hbond_donor(pa) and _is_atom_hbond_acceptor(ta)) or (_is_atom_hbond_acceptor(pa) and _is_atom_hbond_donor(ta))
+            if hb_pair and d<=HYDROGEN_BOND_DA_CUTOFF_A:
+                cls.append("hbond_distance_candidate"); cutoff_used=HYDROGEN_BOND_DA_CUTOFF_A
+            if ((str(pa.get("aa","")).upper() in BASIC and str(ta.get("aa","")).upper() in ACIDIC) or (str(pa.get("aa","")).upper() in ACIDIC and str(ta.get("aa","")).upper() in BASIC)) and d<=CHARGE_PROXIMITY_CUTOFF_A:
+                cls.append("opposite_charge_residue_atom_proximity"); cutoff_used=CHARGE_PROXIMITY_CUTOFF_A
+            if _is_atom_hydrophobic(pa) and _is_atom_hydrophobic(ta) and d<=HYDROPHOBIC_CONTACT_CUTOFF_A:
+                cls.append("hydrophobic_atom_proximity"); cutoff_used=HYDROPHOBIC_CONTACT_CUTOFF_A
+            if not cls:
+                cls.append("atom_proximity")
+            target_label=_residue_label(ta.get("chain",""),ta.get("resi","?"),ta.get("aa",ta.get("resn","X")))
+            pep_label=_residue_label(pa.get("chain",""),pa.get("resi","?"),pa.get("aa",pa.get("resn","X")))
+            rows.append({
+                "target_residue":target_label,"target_chain":ta["chain"],"target_resi":ta["resi"],"target_resn":ta["resn"],"target_atom":ta["atom"],
+                "peptide_residue":pep_label,"peptide_chain":pa["chain"],"peptide_resi":pa["resi"],"peptide_resn":pa["resn"],"peptide_atom":pa["atom"],
+                "distance_A":round(d,2),"cutoff_A":cutoff_used,"contact_class":";".join(dict.fromkeys(cls)),
+                "note":"Coordinate-derived atom proximity. H-bond labels are distance candidates only; donor-H-acceptor angle is not asserted."
+            })
+    return pd.DataFrame(rows,columns=cols)
 
 
 def analyze_atom_level_contacts(target_pdb: str | Path | None, peptide_pdb: str | Path | None, cutoff_A: float = HYDROPHOBIC_CONTACT_CUTOFF_A):
-    t = parse_pdb_atoms(target_pdb)
-    p = parse_pdb_atoms(peptide_pdb)
-    cols = _atom_contact_columns()
-    if t.empty or p.empty:
-        return pd.DataFrame(columns=cols)
-    rows = []
-    for _, pa in p.iterrows():
-        dx = t["x"] - pa["x"]
-        dy = t["y"] - pa["y"]
-        dz = t["z"] - pa["z"]
-        dist = (dx*dx + dy*dy + dz*dz) ** 0.5
-        close = t[dist <= cutoff_A].copy()
-        close["_distance"] = dist[dist <= cutoff_A]
-        for _, ta in close.sort_values("_distance").head(80).iterrows():
-            d = float(ta["_distance"])
-            cls = []
-            cutoff_used = CONTACT_CUTOFF_A
-            if d <= CLASH_CUTOFF_A:
-                cls.append("clash_or_covalent_range")
-                cutoff_used = CLASH_CUTOFF_A
-            hb_pair = (_is_atom_hbond_donor(pa) and _is_atom_hbond_acceptor(ta)) or (_is_atom_hbond_acceptor(pa) and _is_atom_hbond_donor(ta))
-            if hb_pair and d <= HYDROGEN_BOND_DA_CUTOFF_A:
-                cls.append("hydrogen_bond_proxy")
-                cutoff_used = HYDROGEN_BOND_DA_CUTOFF_A
-            if ((str(pa.get("aa", "")).upper() in BASIC and str(ta.get("aa", "")).upper() in ACIDIC) or
-                (str(pa.get("aa", "")).upper() in ACIDIC and str(ta.get("aa", "")).upper() in BASIC)) and d <= HYDROGEN_BOND_DA_CUTOFF_A:
-                cls.append("salt_bridge_like")
-                cutoff_used = HYDROGEN_BOND_DA_CUTOFF_A
-            if _is_atom_hydrophobic(pa) and _is_atom_hydrophobic(ta) and d <= HYDROPHOBIC_CONTACT_CUTOFF_A:
-                cls.append("hydrophobic")
-                cutoff_used = HYDROPHOBIC_CONTACT_CUTOFF_A
-            if not cls:
-                cls.append("close_contact" if d <= 3.5 else "weak_contact")
-            target_label = _residue_label(ta.get("chain", ""), ta.get("resi", "?"), ta.get("aa", ta.get("resn", "X")))
-            pep_label = _residue_label(pa.get("chain", ""), pa.get("resi", "?"), pa.get("aa", pa.get("resn", "X")))
-            rows.append({
-                "target_residue": target_label,
-                "target_chain": ta["chain"],
-                "target_resi": ta["resi"],
-                "target_resn": ta["resn"],
-                "target_atom": ta["atom"],
-                "peptide_residue": pep_label,
-                "peptide_chain": pa["chain"],
-                "peptide_resi": pa["resi"],
-                "peptide_resn": pa["resn"],
-                "peptide_atom": pa["atom"],
-                "distance_A": round(d, 2),
-                "cutoff_A": cutoff_used,
-                "contact_class": ";".join(dict.fromkeys(cls)),
-                "note": f"{pep_label}:{pa['atom']} -> {target_label}:{ta['atom']}",
-            })
-    return pd.DataFrame(rows, columns=cols)
+    return analyze_atom_level_contact_frames(parse_pdb_atoms(target_pdb), parse_pdb_atoms(peptide_pdb), cutoff_A=cutoff_A)
 
-def residue_contacts_to_atom_proxy(contacts: pd.DataFrame) -> pd.DataFrame:
-    """Show a readable residue-level fallback in the Atom contacts pane.
-
-    When target or peptide input is sequence-derived, true atom-level contacts do
-    not exist.  Rather than leaving the pane blank, mirror the residue contacts
-    as CA-to-CA proxy rows and state the limitation explicitly.
-    """
-    cols = _atom_contact_columns()
-    if contacts is None or contacts.empty:
-        return pd.DataFrame([{
-            "target_residue":"not available", "target_chain":"", "target_resi":"", "target_resn":"", "target_atom":"",
-            "peptide_residue":"not available", "peptide_chain":"", "peptide_resi":"", "peptide_resn":"", "peptide_atom":"",
-            "distance_A":"", "cutoff_A":"", "contact_class":"no_contact_rows",
-            "note":"Run docking or provide a target/peptide PDB to calculate atom-level contacts."
-        }], columns=cols)
-    rows=[]
-    for _, r in contacts.head(250).iterrows():
-        rows.append({
-            "target_residue": r.get("target_residue", _residue_label(r.get("target_chain",""), r.get("target_resi",""), r.get("target_aa","X"))),
-            "target_chain": r.get("target_chain", ""),
-            "target_resi": r.get("target_resi", ""),
-            "target_resn": r.get("target_aa", ""),
-            "target_atom": "CA/proxy",
-            "peptide_residue": r.get("peptide_residue", _residue_label("", r.get("pep_pos",""), r.get("pep_aa","X"))),
-            "peptide_chain": "P",
-            "peptide_resi": r.get("pep_pos", ""),
-            "peptide_resn": r.get("pep_aa", ""),
-            "peptide_atom": "CA/proxy",
-            "distance_A": r.get("distance_A", ""),
-            "cutoff_A": r.get("cutoff_A", CONTACT_CUTOFF_A),
-            "contact_class": r.get("interaction", "contact"),
-            "note": "residue-level proxy row; provide both PDB/mmCIF inputs for real atom-atom contacts",
-        })
-    return pd.DataFrame(rows, columns=cols)
 
 def analyze_pdb_pdb_contacts(target_pdb: str | Path | None, peptide_pdb: str | Path | None):
-    receptor=receptor_residue_points(parse_pdb_atoms(target_pdb)); pep=pdb_to_peptide_points(peptide_pdb)
+    receptor = receptor_residue_points(parse_pdb_atoms(target_pdb))
+    pep = pdb_to_peptide_points(peptide_pdb)
     if receptor.empty or pep.empty:
-        return pd.DataFrame(columns=["pose_id","conformation","score_lower_better","contact_count","clash_count","hydrophobic_contacts","electrostatic_contacts","aromatic_contacts","hydrogen_bond_contacts","min_distance_A","note"]), pd.DataFrame(columns=_contact_columns())
-    score,contacts,clashes,hyd,electro,aromatic,hbond,min_d,rows=_score_contacts(receptor,pep,"imported_pdb")
-    poses=pd.DataFrame([{"pose_id":"imported_pdb","conformation":"imported","score_lower_better":round(score,3),"contact_count":contacts,"clash_count":clashes,"hydrophobic_contacts":hyd,"electrostatic_contacts":electro,"aromatic_contacts":aromatic,"hydrogen_bond_contacts":hbond,"min_distance_A":round(min_d,2),"note":"contact analysis of provided PDB pair; no pose search"}])
+        return pd.DataFrame(columns=_pose_columns()), pd.DataFrame(columns=_contact_columns())
+    contacts, overlaps, hyd, charge, aromatic, polar, min_d, rows = _score_contacts(receptor, pep, "imported_pdb")
+    poses = pd.DataFrame([{
+        "pose_rank": 1, "pose_id":"imported_pdb", "conformation":"imported", "orientation":"imported_or_direct",
+        "contact_count":contacts, "centroid_overlap_warnings":overlaps,
+        "hydrophobic_proximities":hyd, "opposite_charge_proximities":charge,
+        "aromatic_proximities":aromatic, "polar_residue_proximities":polar,
+        "min_centroid_distance_A":round(min_d,2) if math.isfinite(min_d) else "",
+        "rotation_z_deg":0.0, "translation_x_A":0.0, "translation_y_A":0.0, "translation_z_A":0.0,
+        "center_x_A":0.0, "center_y_A":0.0, "center_z_A":0.0,
+        "note":"Direct geometry analysis of the supplied target/peptide structures; no pose search or affinity inference."
+    }], columns=_pose_columns())
     return poses, pd.DataFrame(rows, columns=_contact_columns())
 
-def run_lightweight_docking(target_atoms: pd.DataFrame, peptide_seq: str):
-    receptor=receptor_residue_points(target_atoms)
-    if receptor.empty:
-        return pd.DataFrame(columns=["pose_id","conformation","score_lower_better","contact_count","clash_count","hydrophobic_contacts","electrostatic_contacts","aromatic_contacts","hydrogen_bond_contacts","min_distance_A","note"]), pd.DataFrame(columns=_contact_columns()), peptide_pseudo_model(peptide_seq)
-    base=peptide_pseudo_model(peptide_seq); poses=[]; all_contacts=[]; best_model=base.copy()
-    anchors=receptor.copy()
-    # Prefer chemically informative receptor points as anchors, but fall back to all residues.
-    informative=anchors[anchors["aa"].isin(list(CHARGED|AROMATIC|HYDROPHOBIC|POLAR))]
-    if not informative.empty: anchors=informative
-    anchors=anchors.head(12)
-    for _, anchor in anchors.iterrows():
-        for conf in ["helix","extended"]:
-            model=peptide_pseudo_model(peptide_seq, conf)
-            for di, d in enumerate(_directions()[:18]):
-                m=model.copy(); offset=3.8
-                m["x"]=m["x"]+anchor["x"]+d[0]*offset; m["y"]=m["y"]+anchor["y"]+d[1]*offset; m["z"]=m["z"]+anchor["z"]+d[2]*offset
-                pose_id=f"{conf}_{anchor['chain']}{anchor['resi']}_{di+1}"
-                score,contacts,clashes,hyd,electro,aromatic,hbond,min_d,rows=_score_contacts(receptor,m,pose_id)
-                poses.append({"pose_id":pose_id,"conformation":conf,"score_lower_better":round(score,3),"contact_count":contacts,"clash_count":clashes,"hydrophobic_contacts":hyd,"electrostatic_contacts":electro,"aromatic_contacts":aromatic,"hydrogen_bond_contacts":hbond,"min_distance_A":round(min_d,2),"note":"receptor-anchored lightweight pseudo-pose"})
-                all_contacts.extend(rows)
-                if len(poses)==1 or score < min(p["score_lower_better"] for p in poses[:-1]): best_model=m.copy()
-    poses_df=pd.DataFrame(poses).sort_values("score_lower_better").head(50).reset_index(drop=True)
-    if not poses_df.empty:
-        _pq = poses_df.apply(lambda r: pose_quality_annotation(r), axis=1)
-        poses_df["pose_quality_grade"] = [x[0] for x in _pq]
-        poses_df["pose_quality_note"] = [x[1] for x in _pq]
-        keep=set(poses_df["pose_id"]); all_contacts=[r for r in all_contacts if r["pose_id"] in keep]
-    return poses_df, pd.DataFrame(all_contacts, columns=_contact_columns()), best_model
 
 
 def pdb_points_from_atoms(atoms: pd.DataFrame):
@@ -888,267 +941,119 @@ def analyze_complex_structure_contacts(path: str | Path | None):
     receptor = receptor_residue_points(target_atoms)
     pep = pdb_points_from_atoms(peptide_atoms)
     if receptor.empty or pep.empty:
-        poses = pd.DataFrame([{"pose_id":"complex_import","conformation":"imported_complex","score_lower_better":"","contact_count":"","clash_count":"","hydrophobic_contacts":"","electrostatic_contacts":"","aromatic_contacts":"","hydrogen_bond_contacts":"","min_distance_A":"","note":note}])
-        return poses, pd.DataFrame(columns=_contact_columns()), pd.DataFrame(), pep
-    score, contacts, clashes, hyd, electro, aromatic, hbond, min_d, rows = _score_contacts(receptor, pep, "complex_import")
-    poses = pd.DataFrame([{"pose_id":"complex_import","conformation":"imported_complex","score_lower_better":round(score,3),"contact_count":contacts,"clash_count":clashes,"hydrophobic_contacts":hyd,"electrostatic_contacts":electro,"aromatic_contacts":aromatic,"hydrogen_bond_contacts":hbond,"min_distance_A":round(min_d,2),"note":note}])
-    # atom-level contacts from split dataframes
+        poses = pd.DataFrame([{
+            "pose_rank":"", "pose_id":"complex_import", "conformation":"imported_complex", "orientation":"imported_or_direct",
+            "contact_count":"", "centroid_overlap_warnings":"", "hydrophobic_proximities":"",
+            "opposite_charge_proximities":"", "aromatic_proximities":"", "polar_residue_proximities":"",
+            "min_centroid_distance_A":"", "rotation_z_deg":0.0, "translation_x_A":0.0, "translation_y_A":0.0,
+            "translation_z_A":0.0, "center_x_A":0.0, "center_y_A":0.0, "center_z_A":0.0, "note":note
+        }], columns=_pose_columns())
+        return poses, pd.DataFrame(columns=_contact_columns()), pd.DataFrame(columns=_atom_contact_columns()), pep
+    contacts, overlaps, hyd, charge, aromatic, polar, min_d, rows = _score_contacts(receptor, pep, "complex_import")
+    poses = pd.DataFrame([{
+        "pose_rank":1, "pose_id":"complex_import", "conformation":"imported_complex", "orientation":"imported_or_direct",
+        "contact_count":contacts, "centroid_overlap_warnings":overlaps, "hydrophobic_proximities":hyd,
+        "opposite_charge_proximities":charge, "aromatic_proximities":aromatic, "polar_residue_proximities":polar,
+        "min_centroid_distance_A":round(min_d,2) if math.isfinite(min_d) else "", "rotation_z_deg":0.0,
+        "translation_x_A":0.0, "translation_y_A":0.0, "translation_z_A":0.0,
+        "center_x_A":0.0, "center_y_A":0.0, "center_z_A":0.0, "note":note
+    }], columns=_pose_columns())
     atom_rows=[]
     for _, pa in peptide_atoms.iterrows():
         dx=target_atoms["x"]-pa["x"]; dy=target_atoms["y"]-pa["y"]; dz=target_atoms["z"]-pa["z"]
         dist=(dx*dx+dy*dy+dz*dz)**0.5
-        close=target_atoms[dist<=4.5].copy(); close["_distance"]=dist[dist<=4.5]
+        close=target_atoms[dist<=CONTACT_CUTOFF_A].copy(); close["_distance"]=dist[dist<=CONTACT_CUTOFF_A]
         for _, ta in close.iterrows():
-            atom_rows.append({"target_chain":ta["chain"],"target_resi":ta["resi"],"target_resn":ta["resn"],"target_atom":ta["atom"],"peptide_chain":pa["chain"],"peptide_resi":pa["resi"],"peptide_resn":pa["resn"],"peptide_atom":pa["atom"],"distance_A":round(float(ta["_distance"]),2),"contact_class":"complex_contact"})
-    return poses, pd.DataFrame(rows, columns=_contact_columns()), pd.DataFrame(atom_rows).reindex(columns=_atom_contact_columns()), pep
+            atom_rows.append({
+                "target_residue":_residue_label(ta.get("chain",""),ta.get("resi",""),ta.get("aa",ta.get("resn","X"))),
+                "target_chain":ta["chain"],"target_resi":ta["resi"],"target_resn":ta["resn"],"target_atom":ta["atom"],
+                "peptide_residue":_residue_label(pa.get("chain",""),pa.get("resi",""),pa.get("aa",pa.get("resn","X"))),
+                "peptide_chain":pa["chain"],"peptide_resi":pa["resi"],"peptide_resn":pa["resn"],"peptide_atom":pa["atom"],
+                "distance_A":round(float(ta["_distance"]),2),"cutoff_A":CONTACT_CUTOFF_A,"contact_class":"atom_proximity",
+                "note":"Atomic-coordinate proximity in the supplied complex; no bond or affinity is inferred."
+            })
+    return poses, pd.DataFrame(rows, columns=_contact_columns()), pd.DataFrame(atom_rows, columns=_atom_contact_columns()), pep
 
 
 def simulation_summary_df(poses: pd.DataFrame, contacts: pd.DataFrame, risk: pd.DataFrame):
+    """Summarize geometry/contact screening without inventing energies or MD metrics."""
     if poses is None or poses.empty:
-        return pd.DataFrame([{"metric":"MD status","value":"not run","unit":"-","interpretation":"Run docking, then Run MD to generate screening-level dynamics."}])
+        return pd.DataFrame([{
+            "metric":"3D screening status","value":"not available","unit":"-",
+            "interpretation":"Provide target coordinates and run screening. Molecular dynamics is external-only."
+        }], columns=["metric","value","unit","interpretation"])
     best = poses.iloc[0].to_dict()
-    contact_count = int(float(best.get("contact_count") or 0)) if str(best.get("contact_count", "")).strip() not in ("", "nan") else 0
-    clash_count = int(float(best.get("clash_count") or 0)) if str(best.get("clash_count", "")).strip() not in ("", "nan") else 0
-    persistence = max(0.0, min(1.0, contact_count / max(1, contact_count + clash_count + 3)))
+    def _int(name):
+        try: return int(float(best.get(name,0) or 0))
+        except Exception: return 0
     return pd.DataFrame([
-        {"metric":"best_pose", "value":best.get("pose_id", ""), "unit":"-", "interpretation":"pose selected for screening summary"},
-        {"metric":"interface_contacts", "value":contact_count, "unit":"count", "interpretation":"residue contacts within cutoff"},
-        {"metric":"clashes", "value":clash_count, "unit":"count", "interpretation":"lower is better"},
-        {"metric":"contact_persistence_estimate", "value":round(persistence,3), "unit":"0-1 proxy", "interpretation":"triage estimate before embedded MD run"},
-        {"metric":"next_step", "value":"Run MD or export validation package", "unit":"-", "interpretation":"use external validation for quantitative claims"},
+        {"metric":"best_pose","value":best.get("pose_id", ""),"unit":"-","interpretation":"First candidate after deterministic multi-key geometry ranking."},
+        {"metric":"pose_rank","value":best.get("pose_rank", ""),"unit":"ordinal","interpretation":"Rank is based on observed geometry descriptors, not energy or affinity."},
+        {"metric":"centroid_contacts","value":_int("contact_count"),"unit":"count","interpretation":"Residue/token-centroid proximities within the configured cutoff."},
+        {"metric":"centroid_overlap_warnings","value":_int("centroid_overlap_warnings"),"unit":"count","interpretation":"Very short centroid distances requiring geometry review."},
+        {"metric":"molecular_dynamics","value":"not run internally","unit":"-","interpretation":"Export structures for a validated external MD engine."},
     ], columns=["metric","value","unit","interpretation"])
 
+
 def sequence_sequence_interaction_df(target_seq: str, peptide_seq: str):
-    t="".join([c for c in target_seq.upper() if c in AA_MASS]); p=clean_sequence(peptide_seq)
+    """Return composition descriptors for sequence-only triage.
+
+    No interaction/affinity score is synthesized because sequence composition
+    alone does not define a 3D binding interface.
+    """
+    t="".join([c for c in str(target_seq or "").upper() if c in AA_MASS])
+    p=clean_sequence(peptide_seq)
     if not t or not p:
-        return pd.DataFrame([{"metric":"status","value":"insufficient sequence input","note":"Enter target sequence and peptide sequence."}])
-    t_basic=sum(1 for a in t if a in BASIC)/len(t); t_acid=sum(1 for a in t if a in ACIDIC)/len(t); t_hyd=sum(1 for a in t if a in HYDROPHOBIC)/len(t)
-    p_basic=sum(1 for a in p if a in BASIC)/len(p); p_acid=sum(1 for a in p if a in ACIDIC)/len(p); p_hyd=sum(1 for a in p if a in HYDROPHOBIC)/len(p)
-    charge_complement=t_basic*p_acid + t_acid*p_basic
-    hydro_match=t_hyd*p_hyd
-    aromatic_overlap=(sum(1 for a in t if a in AROMATIC)/len(t))*(sum(1 for a in p if a in AROMATIC)/len(p))
-    score=min(1,0.55*charge_complement*4 + 0.30*hydro_match + 0.15*aromatic_overlap*4)
+        return pd.DataFrame([{"metric":"status","value":"insufficient sequence input","note":"Enter target and peptide sequences."}])
+    def frac(s, group):
+        return round(sum(1 for a in s if a in group)/len(s), 4)
     return pd.DataFrame([
-        {"metric":"interaction_heuristic_score", "value":round(score,3), "note":"composition-level heuristic; no 3D docking"},
-        {"metric":"sequence_sequence_compatibility", "value":round(score,3), "note":"composition-level heuristic; no 3D docking"},
-        {"metric":"charge_complementarity_proxy", "value":round(charge_complement,3), "note":"acid/basic complement proxy"},
-        {"metric":"hydrophobic_match_proxy", "value":round(hydro_match,3), "note":"hydrophobic fraction overlap"},
-        {"metric":"aromatic_overlap_proxy", "value":round(aromatic_overlap,3), "note":"aromatic enrichment overlap"},
+        {"metric":"mode","value":"sequence_descriptor_only","note":"No 3D target model or binding score is generated from sequence alone."},
+        {"metric":"target_length","value":len(t),"note":"Canonical target residues parsed."},
+        {"metric":"peptide_length","value":len(p),"note":"Canonical peptide residues parsed."},
+        {"metric":"target_basic_fraction","value":frac(t,BASIC),"note":"Observed sequence composition."},
+        {"metric":"target_acidic_fraction","value":frac(t,ACIDIC),"note":"Observed sequence composition."},
+        {"metric":"target_hydrophobic_fraction","value":frac(t,HYDROPHOBIC),"note":"Observed sequence composition."},
+        {"metric":"peptide_basic_fraction","value":frac(p,BASIC),"note":"Observed sequence composition."},
+        {"metric":"peptide_acidic_fraction","value":frac(p,ACIDIC),"note":"Observed sequence composition."},
+        {"metric":"peptide_hydrophobic_fraction","value":frac(p,HYDROPHOBIC),"note":"Observed sequence composition."},
+        {"metric":"next_step","value":"provide target PDB/mmCIF","note":"Required before Pepforge can evaluate 3D contacts/poses."},
     ])
 
 
+
 # -----------------------------------------------------------------------------
-# Built-in embedded dynamics engine
+ # External molecular-dynamics handling only
 # -----------------------------------------------------------------------------
-def _md_vec_norm(x: float, y: float, z: float):
-    n = math.sqrt(x*x + y*y + z*z) or 1e-9
-    return x/n, y/n, z/n, n
 
 
-def _aa_md_type(aa: str) -> str:
-    aa = str(aa or "X")[:1].upper()
-    if aa in BASIC:
-        return "basic"
-    if aa in ACIDIC:
-        return "acidic"
-    if aa in HYDROPHOBIC:
-        return "hydrophobic"
-    if aa in AROMATIC:
-        return "aromatic"
-    if aa in POLAR:
-        return "polar"
-    return "neutral"
 
 
-def _md_pair_affinity(pep_aa: str, rec_aa: str) -> float:
-    """Positive values attract, negative values repel in the embedded dynamics model."""
-    p = str(pep_aa or "X")[:1].upper()
-    r = str(rec_aa or "X")[:1].upper()
-    affinity = 0.0
-    if (p in BASIC and r in ACIDIC) or (p in ACIDIC and r in BASIC):
-        affinity += 1.35
-    if (p in BASIC and r in BASIC) or (p in ACIDIC and r in ACIDIC):
-        affinity -= 0.55
-    if p in HYDROPHOBIC and r in HYDROPHOBIC:
-        affinity += 0.75
-    if p in AROMATIC and r in AROMATIC:
-        affinity += 0.45
-    if p in POLAR and r in POLAR:
-        affinity += 0.25
-    return affinity
 
 
-def _md_metrics(receptor: pd.DataFrame, coords: list[dict], init_coords: list[dict], cutoff_A: float = 5.0):
-    contacts = 0
-    clashes = 0
-    hydrophobic_contacts = 0
-    electrostatic_contacts = 0
-    min_d = 999.0
-    energy_proxy = 0.0
-    if not receptor.empty:
-        for bead in coords:
-            nearest_d = 999.0
-            nearest_rr = None
-            bx, by, bz = bead["x"], bead["y"], bead["z"]
-            for _, rr in receptor.iterrows():
-                dx = bx - float(rr["x"]); dy = by - float(rr["y"]); dz = bz - float(rr["z"])
-                d = math.sqrt(dx*dx + dy*dy + dz*dz) or 1e-9
-                if d < nearest_d:
-                    nearest_d = d; nearest_rr = rr
-            min_d = min(min_d, nearest_d)
-            if nearest_rr is not None:
-                aff = _md_pair_affinity(bead["aa"], nearest_rr.get("aa", "X"))
-                if nearest_d <= cutoff_A:
-                    contacts += 1
-                    energy_proxy -= max(0.0, aff) * (cutoff_A - nearest_d + 0.25)
-                    if bead["aa"] in HYDROPHOBIC and nearest_rr.get("aa") in HYDROPHOBIC:
-                        hydrophobic_contacts += 1
-                    if (bead["aa"] in BASIC and nearest_rr.get("aa") in ACIDIC) or (bead["aa"] in ACIDIC and nearest_rr.get("aa") in BASIC):
-                        electrostatic_contacts += 1
-                if nearest_d <= 2.1:
-                    clashes += 1
-                    energy_proxy += (2.1 - nearest_d + 1.0) * 2.2
-    sq = 0.0
-    for a, b in zip(coords, init_coords):
-        dx = a["x"] - b["x"]; dy = a["y"] - b["y"]; dz = a["z"] - b["z"]
-        sq += dx*dx + dy*dy + dz*dz
-    rmsd = math.sqrt(sq / max(1, len(coords)))
-    return {
-        "rmsd_A": round(rmsd, 3),
-        "contact_count": int(contacts),
-        "clash_count": int(clashes),
-        "hydrophobic_contacts": int(hydrophobic_contacts),
-        "electrostatic_contacts": int(electrostatic_contacts),
-        "min_distance_A": round(min_d if min_d < 998 else 0.0, 3),
-        "energy_proxy": round(energy_proxy, 3),
-    }
 
 
-def run_builtin_md_lite(target_atoms: pd.DataFrame, peptide_points: pd.DataFrame, steps: int = 300, sample_every: int = 10,
-                        temperature: float = 0.35, dt: float = 0.025, seed: int = 17):
-    """Run an embedded coarse-grained MD-style relaxation for the peptide pose.
-
-    This is intentionally lightweight and dependency-free for EXE distribution. It is
-    not all-atom MD and does not replace all-atom validation bridge. It gives a fast local
-    stability/contact-persistence screen inside Pepforge.
-    """
-    import random
-    receptor = receptor_residue_points(target_atoms) if target_atoms is not None and not target_atoms.empty else pd.DataFrame()
-    if peptide_points is None or peptide_points.empty:
-        summary = pd.DataFrame([{
-            "metric": "md_lite_status", "value": "not run", "note": "No peptide pose/model is available. Run docking/contact analysis first."
-        }])
-        frames = pd.DataFrame(columns=["step","time_ps_proxy","rmsd_A","contact_count","clash_count","hydrophobic_contacts","electrostatic_contacts","min_distance_A","energy_proxy"])
-        return summary, frames, peptide_points if peptide_points is not None else pd.DataFrame(), ""
-    rng = random.Random(seed)
-    coords = []
-    for _, r in peptide_points.iterrows():
-        coords.append({"pep_pos": int(r.get("pep_pos", len(coords)+1)), "aa": str(r.get("aa", "G"))[:1].upper(),
-                       "x": float(r.get("x", 0.0)), "y": float(r.get("y", 0.0)), "z": float(r.get("z", 0.0))})
-    init = [dict(c) for c in coords]
-    vel = [{"x": 0.0, "y": 0.0, "z": 0.0} for _ in coords]
-    frame_rows = []
-    trajectory_lines = []
-    k_bond = 0.11
-    k_steric = 0.38
-    k_attr = 0.020
-    damping = 0.92
-    cutoff = 8.0
-    target_bond = 3.8
-
-    def append_model(step: int):
-        trajectory_lines.append(f"MODEL     {step:4d}")
-        for i, c in enumerate(coords, start=1):
-            resn = ONE_TO_THREE.get(c["aa"], "GLY")
-            trajectory_lines.append(
-                f"ATOM  {i:5d}  CA  {resn:>3s} M{int(c['pep_pos']):4d}    {c['x']:8.3f}{c['y']:8.3f}{c['z']:8.3f}  1.00  0.00           C"
-            )
-        trajectory_lines.append("ENDMDL")
-
-    for step in range(0, max(1, int(steps)) + 1):
-        if step % max(1, int(sample_every)) == 0:
-            m = _md_metrics(receptor, coords, init, cutoff_A=5.0)
-            m.update({"step": step, "time_ps_proxy": round(step * dt, 3)})
-            frame_rows.append(m)
-            append_model(step)
-        if step == steps:
-            break
-        forces = [{"x": 0.0, "y": 0.0, "z": 0.0} for _ in coords]
-        # peptide backbone elasticity
-        for i in range(len(coords)-1):
-            a, b = coords[i], coords[i+1]
-            ux, uy, uz, d = _md_vec_norm(b["x"]-a["x"], b["y"]-a["y"], b["z"]-a["z"])
-            f = k_bond * (d - target_bond)
-            forces[i]["x"] += f*ux; forces[i]["y"] += f*uy; forces[i]["z"] += f*uz
-            forces[i+1]["x"] -= f*ux; forces[i+1]["y"] -= f*uy; forces[i+1]["z"] -= f*uz
-        # receptor-peptide interactions; receptor is rigid
-        if not receptor.empty:
-            for i, bead in enumerate(coords):
-                bx, by, bz = bead["x"], bead["y"], bead["z"]
-                for _, rr in receptor.iterrows():
-                    rx, ry, rz = float(rr["x"]), float(rr["y"]), float(rr["z"])
-                    ux, uy, uz, d = _md_vec_norm(rx-bx, ry-by, rz-bz)
-                    if d > cutoff:
-                        continue
-                    aff = _md_pair_affinity(bead["aa"], rr.get("aa", "X"))
-                    if d < 2.2:
-                        rep = k_steric * (2.2 - d + 0.2)
-                        forces[i]["x"] -= rep*ux; forces[i]["y"] -= rep*uy; forces[i]["z"] -= rep*uz
-                    if aff > 0:
-                        pull = k_attr * aff * (cutoff - d)
-                        forces[i]["x"] += pull*ux; forces[i]["y"] += pull*uy; forces[i]["z"] += pull*uz
-                    elif aff < 0 and d < 5.5:
-                        push = 0.018 * abs(aff) * (5.5 - d)
-                        forces[i]["x"] -= push*ux; forces[i]["y"] -= push*uy; forces[i]["z"] -= push*uz
-        # thermal fluctuation and integration
-        for i, bead in enumerate(coords):
-            forces[i]["x"] += rng.gauss(0.0, temperature * 0.035)
-            forces[i]["y"] += rng.gauss(0.0, temperature * 0.035)
-            forces[i]["z"] += rng.gauss(0.0, temperature * 0.035)
-            vel[i]["x"] = damping * vel[i]["x"] + forces[i]["x"] * dt
-            vel[i]["y"] = damping * vel[i]["y"] + forces[i]["y"] * dt
-            vel[i]["z"] = damping * vel[i]["z"] + forces[i]["z"] * dt
-            bead["x"] += vel[i]["x"]
-            bead["y"] += vel[i]["y"]
-            bead["z"] += vel[i]["z"]
-    frames = pd.DataFrame(frame_rows)
-    final_model = pd.DataFrame(coords)
-    if frames.empty:
-        summary = pd.DataFrame([{"metric":"md_lite_status","value":"not run","note":"No frames generated."}])
-    else:
-        start_contacts = int(frames.iloc[0].get("contact_count", 0))
-        final = frames.iloc[-1]
-        contact_persistence = float(frames["contact_count"].mean()) / max(1.0, float(start_contacts or frames["contact_count"].max() or 1))
-        stable_flag = "Stable" if final.get("rmsd_A", 0) <= 3.5 and contact_persistence >= 0.55 and final.get("clash_count", 0) <= 1 else "Review"
-        summary = pd.DataFrame([
-            {"metric":"md_lite_status","value":"completed","note":"Embedded coarse-grained MD-style relaxation; not all-atom MD."},
-            {"metric":"steps","value":int(steps),"note":"internal integration steps"},
-            {"metric":"temperature_proxy","value":temperature,"note":"random thermal fluctuation strength"},
-            {"metric":"final_rmsd_A","value":round(float(final.get("rmsd_A",0)),3),"note":"C-alpha/bead RMSD from initial pose"},
-            {"metric":"mean_contact_count","value":round(float(frames["contact_count"].mean()),3),"note":"mean contacts across sampled frames"},
-            {"metric":"contact_persistence_proxy","value":round(contact_persistence,3),"note":"higher means contacts persist during embedded dynamics"},
-            {"metric":"final_energy_proxy","value":round(float(final.get("energy_proxy",0)),3),"note":"lower is better within this model only"},
-            {"metric":"final_clash_count","value":int(final.get("clash_count",0)),"note":"steric overlap proxy"},
-            {"metric":"stability_call","value":stable_flag,"note":"triage label for whether to verify externally"},
-        ])
-    return summary, frames, final_model, "\n".join(trajectory_lines) + "\n"
 
 
 def docking_readiness_df(seq: str):
-    core=clean_sequence(seq)
-    if not core: return pd.DataFrame([{"metric":"docking_readiness_heuristic","value":0,"note":"no valid peptide sequence"}])
-    n=len(core); charge=abs(sum(1 for a in core if a in BASIC)-sum(1 for a in core if a in ACIDIC)); hydrophobic=sum(1 for a in core if a in HYDROPHOBIC)/n; aromatic=sum(1 for a in core if a in AROMATIC)/n; polar=sum(1 for a in core if a in POLAR)/n
-    docking_ready=min(1.0,0.25+0.25*min(1,charge/4)+0.25*hydrophobic+0.15*aromatic+0.10*polar)
+    """Report input readiness requirements, not an arbitrary 0-1 docking score."""
+    canonical = canonical_peptide_notation(seq)
+    tokens = _split_peptide_model_tokens(canonical)
+    if not tokens:
+        return pd.DataFrame([{"metric":"input_readiness","value":"missing peptide","note":"Enter a peptide sequence or load a peptide PDB."}])
+    unsupported=[r.get("token","") for r in tokens if r.get("class") == "unsupported"]
     return pd.DataFrame([
-        {"metric":"docking_readiness_heuristic","value":round(docking_ready,3),"note":"workflow aid only; not binding energy"},
-        {"metric":"interface_feature_density","value":round((hydrophobic+aromatic+polar)/3,3),"note":"hydrophobic/aromatic/polar feature proxy"},
-        {"metric":"charge_patch_proxy","value":round(min(1,charge/5),3),"note":"absolute charge burden proxy"},
-        {"metric":"external_tool_compatibility","value":"export package ready","note":"exported package can be used for downstream docking setup"},
+        {"metric":"input_readiness","value":"review required" if unsupported else "parsed","note":"Readiness indicates parse/structure availability only; it is not binding likelihood."},
+        {"metric":"token_count","value":len(tokens),"note":"Chemistry tokens recognized by the Structure Builder parser."},
+        {"metric":"unsupported_tokens","value":";".join(unsupported) if unsupported else "none","note":"Unsupported tokens are not replaced by canonical residues."},
+        {"metric":"3d_requirement","value":"target coordinates required","note":"3D contact/pose screening requires a target PDB/mmCIF. Sequence-only targets receive descriptor analysis only."},
+        {"metric":"external_validation","value":"recommended","note":"Use Vina/GROMACS/other external tools for quantitative or publication-grade claims."},
     ])
 
 
+
 # -----------------------------------------------------------------------------
-# V6.8 structure-pipeline helpers: structure preparation/target structure preparation/affinity scoring/MD result bridge
+# Structure-preparation and external-validation helpers
 # -----------------------------------------------------------------------------
 def _clean_protein_sequence(seq: str) -> str:
     """Robust protein-sequence cleaner for pasted FASTA, spaced sequences, and labels.
@@ -1176,32 +1081,9 @@ def pdb_to_sequence(path: str | Path | None) -> str:
 
 
 # -----------------------------------------------------------------------------
-# Embedded docking and molecular-dynamics engines
+# Local rigid-body geometry screening helpers
 # -----------------------------------------------------------------------------
-def target_sequence_pseudo_atoms(seq: str, max_residues: int = 260) -> pd.DataFrame:
-    """Build a deterministic coarse target model from a protein sequence.
 
-    This is not a structure predictor. It is a practical fallback so the
-    workbench can run target-sequence jobs instead of stopping. Real publication
-    work should replace this with an imported/predicted target or complex model.
-    """
-    s = _clean_protein_sequence(seq)[:max_residues]
-    rows = []
-    if not s:
-        return pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"])
-    for i, aa in enumerate(s, start=1):
-        # Smooth compact helix/coil path, deterministic and fast.
-        angle = (i - 1) * math.radians(98.0)
-        radius = 10.0 + 1.5 * math.sin(i / 9.0)
-        x = radius * math.cos(angle)
-        y = radius * math.sin(angle)
-        z = (i - 1) * 1.18
-        rows.append({
-            "record": "ATOM", "atom": "CA", "resn": ONE_TO_THREE.get(aa, "GLY"),
-            "chain": "A", "resi": str(i), "x": x, "y": y, "z": z,
-            "element": "C", "aa": aa,
-        })
-    return pd.DataFrame(rows)
 
 
 def _center_points(points: pd.DataFrame) -> pd.Series:
@@ -1211,15 +1093,14 @@ def _center_points(points: pd.DataFrame) -> pd.Series:
 
 
 def _reverse_peptide_orientation(points: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy whose spatial N/C direction is reversed while keeping original peptide residue labels."""
+    """Rotate a centered peptide 180 degrees about Z without reflecting chirality."""
     if points is None or points.empty:
         return points
     rev = points.copy().reset_index(drop=True)
     center = _center_points(rev)
     rev[["x", "y", "z"]] = rev[["x", "y", "z"]] - center
-    # Mirror along the peptide long axis.  pep_pos is intentionally preserved so
-    # the contact table still reports original peptide numbering such as 1E..7H.
     rev["x"] = -rev["x"]
+    rev["y"] = -rev["y"]
     return rev
 
 
@@ -1282,266 +1163,139 @@ def top_contact_report(contacts: pd.DataFrame, poses: pd.DataFrame | None = None
 
 
 def run_pose_search(target_atoms: pd.DataFrame, peptide_points: pd.DataFrame | None = None,
-                              peptide_seq: str = "", pose_limit: int = 50):
-    """Embedded receptor-guided local pose search for screening.
+                    peptide_seq: str = "", pose_limit: int = 50):
+    """Generate local rigid-body geometry candidates around receptor residue anchors.
 
-    v1.0.2 expands the search from a sparse anchor sample to all receptor residue
-    anchors that are feasible for the input size.  It also evaluates two peptide
-    orientation classes:
-
-    - forward_N_to_C: peptide N→C direction preserved
-    - reverse_C_to_N: peptide spatial direction mirrored, representing reverse
-      N/C engagement possibilities
-
-    The result is still a screening workflow, but it no longer assumes that one
-    protein residue can only compete for one peptide residue or that only one
-    sequence direction should be tested.
+    Peptide coordinates come from Structure Builder or an explicit structure.
+    Candidate ordering is a deterministic multi-key geometry ranking; no
+    thermodynamic energy, docking affinity, or Kd is calculated.
     """
     receptor = receptor_residue_points(target_atoms)
     if peptide_points is None or peptide_points.empty:
-        peptide_points = peptide_pseudo_model(peptide_seq or "GGGG")
+        if not str(peptide_seq or "").strip():
+            raise ValueError("No peptide structure or peptide sequence was provided for pose screening.")
+        peptide_points = generate_peptide_structure_points(peptide_seq)
     if receptor.empty or peptide_points.empty:
-        cols_pose=["pose_id","conformation","orientation","score_lower_better","contact_count","clash_count","hydrophobic_contacts","electrostatic_contacts","aromatic_contacts","hydrogen_bond_contacts","min_distance_A","pose_quality_grade","note"]
-        return pd.DataFrame(columns=cols_pose), pd.DataFrame(columns=_contact_columns()), peptide_points
+        return pd.DataFrame(columns=_pose_columns()), pd.DataFrame(columns=_contact_columns()), peptide_points
 
     anchors = receptor.copy().reset_index(drop=True)
-    # For ordinary protein sizes (for example 1-115 mer), score every residue
-    # anchor.  For very large proteins, sample evenly to keep the GUI responsive.
     if len(anchors) > 260:
         anchors = anchors.iloc[[round(i*(len(anchors)-1)/259) for i in range(260)]].copy()
 
-    base = peptide_points.copy().reset_index(drop=True)
-    c = _center_points(base)
-    base[["x","y","z"]] = base[["x","y","z"]] - c
-    orientations = [("forward_N_to_C", base), ("reverse_C_to_N", _reverse_peptide_orientation(base))]
+    original = peptide_points.copy().reset_index(drop=True)
+    center = _center_points(original)
+    base = original.copy()
+    base[["x","y","z"]] = base[["x","y","z"]] - center
+    orientations = [("forward_N_to_C", base, 0.0), ("reverse_C_to_N", _reverse_peptide_orientation(base), math.pi)]
 
-    poses=[]; all_contacts=[]; best_model=base.copy(); best_score=None
+    poses=[]; all_contacts=[]; models={}
     directions = _directions()[:6]
-    offsets = [4.2]
+    offset = 4.2
     rotations = [0, math.pi/2, math.pi, 3*math.pi/2]
-    for orientation_name, oriented_base in orientations:
+    for orientation_name, oriented_base, orientation_rot in orientations:
         for _, anchor in anchors.iterrows():
             for di, d in enumerate(directions):
-                for ri, offset in enumerate(offsets):
-                    m = oriented_base.copy()
-                    rot = rotations[(di + ri) % len(rotations)]
-                    x = m["x"].copy(); y = m["y"].copy()
-                    m["x"] = x*math.cos(rot) - y*math.sin(rot)
-                    m["y"] = x*math.sin(rot) + y*math.cos(rot)
-                    m["x"] = m["x"] + anchor["x"] + d[0]*offset
-                    m["y"] = m["y"] + anchor["y"] + d[1]*offset
-                    m["z"] = m["z"] + anchor["z"] + d[2]*offset
-                    pose_id = f"{orientation_name}_pose_{anchor['chain']}{anchor['resi']}_{di+1}_{ri+1}"
-                    score, contacts, clashes, hyd, electro, aromatic, hbond, min_d, rows = _score_contacts(receptor, m, pose_id)
-                    shaped = score + clashes*8 - hyd*0.7 - electro*1.0 - aromatic*0.6 - hbond*0.8
-                    poses.append({"pose_id":pose_id,"conformation":"full_anchor_orientation_search","orientation":orientation_name,"score_lower_better":round(shaped,3),"contact_count":contacts,"clash_count":clashes,"hydrophobic_contacts":hyd,"electrostatic_contacts":electro,"aromatic_contacts":aromatic,"hydrogen_bond_contacts":hbond,"min_distance_A":round(min_d,2),"note":"Full receptor-anchor search with forward and reverse N/C peptide orientations."})
-                    all_contacts.extend(rows)
-                    if best_score is None or shaped < best_score:
-                        best_score = shaped; best_model = m.copy()
-    poses_df = pd.DataFrame(poses).sort_values("score_lower_better").head(pose_limit).reset_index(drop=True)
-    if not poses_df.empty:
-        _pq = poses_df.apply(lambda r: pose_quality_annotation(r), axis=1)
-        poses_df["pose_quality_grade"] = [x[0] for x in _pq]
-        poses_df["pose_quality_note"] = [x[1] for x in _pq]
-        keep = set(poses_df["pose_id"])
-        all_contacts = [r for r in all_contacts if r.get("pose_id") in keep]
+                rot = rotations[di % len(rotations)]
+                total_rot = (orientation_rot + rot) % (2*math.pi)
+                m = oriented_base.copy()
+                x = m["x"].copy(); y = m["y"].copy()
+                m["x"] = x*math.cos(rot) - y*math.sin(rot)
+                m["y"] = x*math.sin(rot) + y*math.cos(rot)
+                tx = float(anchor["x"] + d[0]*offset); ty = float(anchor["y"] + d[1]*offset); tz = float(anchor["z"] + d[2]*offset)
+                m["x"] += tx; m["y"] += ty; m["z"] += tz
+                pose_id = f"{orientation_name}_pose_{anchor['chain']}{anchor['resi']}_{di+1}"
+                contacts, overlaps, hyd, charge, aromatic, polar, min_d, rows = _score_contacts(receptor, m, pose_id)
+                poses.append({
+                    "pose_rank":0, "pose_id":pose_id, "conformation":"structure_builder_rigid_body", "orientation":orientation_name,
+                    "contact_count":contacts, "centroid_overlap_warnings":overlaps,
+                    "hydrophobic_proximities":hyd, "opposite_charge_proximities":charge,
+                    "aromatic_proximities":aromatic, "polar_residue_proximities":polar,
+                    "min_centroid_distance_A":round(min_d,2) if math.isfinite(min_d) else "",
+                    "rotation_z_deg":round(math.degrees(total_rot),6),
+                    "translation_x_A":round(tx,6), "translation_y_A":round(ty,6), "translation_z_A":round(tz,6),
+                    "center_x_A":round(float(center.get("x",0.0)),6), "center_y_A":round(float(center.get("y",0.0)),6), "center_z_A":round(float(center.get("z",0.0)),6),
+                    "note":"Rigid-body candidate from Structure Builder geometry; rank uses measured centroid/contact descriptors only."
+                })
+                all_contacts.extend(rows)
+                models[pose_id] = m.copy()
+    poses_df = pd.DataFrame(poses, columns=_pose_columns())
+    if poses_df.empty:
+        return poses_df, pd.DataFrame(columns=_contact_columns()), original
+    poses_df = poses_df.sort_values(
+        ["centroid_overlap_warnings","contact_count","opposite_charge_proximities","hydrophobic_proximities","aromatic_proximities","polar_residue_proximities","min_centroid_distance_A","pose_id"],
+        ascending=[True,False,False,False,False,False,True,True], kind="mergesort"
+    ).head(max(1,int(pose_limit))).reset_index(drop=True)
+    poses_df["pose_rank"] = range(1, len(poses_df)+1)
+    keep = set(poses_df["pose_id"])
+    all_contacts = [r for r in all_contacts if r.get("pose_id") in keep]
+    best_model = models.get(str(poses_df.iloc[0]["pose_id"]), original).copy()
     return poses_df, pd.DataFrame(all_contacts, columns=_contact_columns()), best_model
 
 
-def _format_kd_single_unit(kd_m: float):
-    """Return Kd using one representative biochemical unit.
-
-    Repeating the same Kd as M/uM/nM made the report look like three different
-    measurements. This helper reports one value in the most readable unit.
-    """
-    try:
-        kd_m = float(kd_m)
-    except Exception:
-        return "", "-", "Kd unavailable"
-    if not math.isfinite(kd_m) or kd_m <= 0:
-        return "", "-", "Kd unavailable"
-    if kd_m >= 1e-3:
-        return f"{kd_m*1e3:.3g}", "mM", "millimolar or weaker range estimate"
-    if kd_m >= 1e-6:
-        return f"{kd_m*1e6:.3g}", "uM", "micromolar range estimate"
-    if kd_m >= 1e-9:
-        return f"{kd_m*1e9:.3g}", "nM", "nanomolar range estimate"
-    if kd_m >= 1e-12:
-        return f"{kd_m*1e12:.3g}", "pM", "picomolar range estimate"
-    return f"{kd_m:.3e}", "M", "extremely tight range estimate"
 
 
-def _estimate_delta_g_from_contacts(contact_count: int, charged_contacts: int, hydrophobic_contacts: int,
-                                    aromatic_contacts: int, hydrogen_bond_contacts: int, clash_count: int, min_distance_A: float) -> float:
-    """Estimate ΔG in a calibrated, conservative screening range.
-
-    The expression is not a substitute for PRODIGY, MM/PBSA, FEP, ITC, SPR, or
-    all-atom MD. It is a transparent contact model tuned to report values in
-    a physically plausible protein-peptide screening range rather than arbitrary
-    internal scores. The offset and weights keep weak interfaces near -3 to -6
-    kcal/mol, moderate interfaces near -6 to -9 kcal/mol, and strong clean
-    interfaces near -9 to -12 kcal/mol.
-    """
-    c = max(0, int(contact_count or 0))
-    charged = max(0, int(charged_contacts or 0))
-    hyd = max(0, int(hydrophobic_contacts or 0))
-    aro = max(0, int(aromatic_contacts or 0))
-    hbond = max(0, int(hydrogen_bond_contacts or 0))
-    clash = max(0, int(clash_count or 0))
-    other = max(0, c - charged - hyd - aro - hbond)
-    try:
-        dmin = float(min_distance_A)
-    except Exception:
-        dmin = float('nan')
-
-    # Contact terms approximate buried-interface favorability. Charged contacts
-    # are weighted strongest, hydrophobic/aromatic contacts moderately, generic
-    # proximity contacts weakly. Clash and overly close distances are penalized.
-    favorable = 0.38*other + 0.90*charged + 0.62*hyd + 0.70*aro + 0.82*hbond
-    penalty = 1.05*clash
-    if math.isfinite(dmin):
-        if dmin < 2.2:
-            penalty += (2.2 - dmin) * 1.8
-        elif dmin > 6.0:
-            penalty += min(2.0, (dmin - 6.0) * 0.25)
-
-    delta_g = -3.2 - favorable + penalty
-    # Keep estimates in a practical screening window and avoid false precision.
-    delta_g = max(-13.5, min(-1.0, delta_g))
-    return round(delta_g, 2)
 
 
-def affinity_summary_df(poses: pd.DataFrame, contacts: pd.DataFrame) -> pd.DataFrame:
-    """Affinity/contact report with standard thermodynamic notation and units.
 
-    Reported quantities follow conventions used by docking/affinity tools:
-    - estimated_ΔG: kcal/mol; more negative generally means stronger predicted binding.
-    - estimated_Kd: one representative concentration unit only (mM, uM, nM, pM, or M),
-      derived from Kd = exp(ΔG / RT) at 298.15 K.
-    - interface and contact rows: dimensionless counts.
-
-    The ΔG is a calibrated contact-based screening estimate, not an experimental
-    binding free energy. It is intended for candidate ranking and triage. For
-    quantitative claims, export the validation package and compare with external
-    all-atom MD, server-side affinity scoring, or experimental binding assays.
-    """
-    source = "Pepforge affinity report"
+def screening_evidence_df(poses: pd.DataFrame, contacts: pd.DataFrame) -> pd.DataFrame:
+    """Return transparent geometry/contact evidence without affinity inference."""
+    source = "Pepforge geometry/contact screening"
     columns = ["source", "metric", "value", "unit", "interpretation", "method_note"]
     if poses is None or poses.empty:
         return pd.DataFrame([{
-            "source": source,
-            "metric": "status",
-            "value": "no pose",
-            "unit": "-",
-            "interpretation": "Run docking or load an existing complex before reading affinity metrics.",
-            "method_note": "No pose was available."
+            "source":source, "metric":"status", "value":"no 3D pose", "unit":"-",
+            "interpretation":"Provide target coordinates and run screening.",
+            "method_note":"Pepforge does not infer thermodynamic affinity from sequence or contact counts."
         }], columns=columns)
-
     best = poses.iloc[0].to_dict()
-
-    def as_int(name):
-        try:
-            v = best.get(name, 0)
-            if str(v).strip().lower() in ("", "nan", "none"):
-                return 0
-            return int(float(v))
-        except Exception:
-            return 0
-
-    def as_float(name, default=float("nan")):
-        try:
-            v = best.get(name, default)
-            if str(v).strip().lower() in ("", "nan", "none"):
-                return default
-            return float(v)
-        except Exception:
-            return default
-
-    c = as_int("contact_count")
-    clash = as_int("clash_count")
-    hyd = as_int("hydrophobic_contacts")
-    ele = as_int("electrostatic_contacts")
-    aro = as_int("aromatic_contacts")
-    hbond = as_int("hydrogen_bond_contacts")
-    apolar = hyd + aro
-    min_dist = as_float("min_distance_A")
-
-    estimated_delta_g = _estimate_delta_g_from_contacts(c, ele, hyd, aro, hbond, clash, min_dist)
-
-    # Standard thermodynamic relationship: ΔG = RT ln(Kd), standard state 1 M.
-    # R is in kcal mol-1 K-1, so ΔG is kcal/mol and Kd is mol/L (M).
-    temperature_K = 298.15
-    R_kcal_per_mol_K = 0.00198720425864083
-    RT = R_kcal_per_mol_K * temperature_K
-    kd_m = math.exp(max(-60, min(60, estimated_delta_g / RT)))
-    kd_value, kd_unit, kd_band = _format_kd_single_unit(kd_m)
-
-    if c >= 12 and clash <= 1 and estimated_delta_g <= -8.0:
-        confidence = "high for screening"
-        interpretation = "strong screening pose; suitable for prioritization after external validation"
-    elif c >= 6 and clash <= 4 and estimated_delta_g <= -5.0:
-        confidence = "medium for screening"
-        interpretation = "usable screening pose; compare against alternatives and validate externally"
-    else:
-        confidence = "low / review"
-        interpretation = "weak or uncertain pose; inspect contacts/clashes or prepare a better structure"
-
-    rows = [
-        ("best_pose", best.get("pose_id", ""), "-", "Best current pose used for the report.", "Selected from docking results by the lower-better internal docking score."),
-        ("estimated_ΔG", estimated_delta_g, "kcal/mol", "Estimated binding free energy; more negative generally indicates stronger binding.", "Calibrated contact-based screening estimate. Standard unit, but not a measured thermodynamic ΔG."),
-        ("estimated_Kd", kd_value, kd_unit, kd_band, "Calculated from estimated ΔG using Kd = exp(ΔG / RT) at 298.15 K. One representative unit is shown to avoid duplicate values."),
-        ("temperature", temperature_K, "K", "Temperature used for ΔG to Kd conversion.", "Default biochemical reporting temperature."),
-        ("RT", round(RT, 4), "kcal/mol", "Thermal energy term used in Kd conversion.", "R = 0.001987204 kcal mol^-1 K^-1."),
-        ("interface_residue_contacts", c, "count", "Residue-level contacts within the interaction cutoff.", "Dimensionless contact count."),
-        ("charged_contacts", ele, "count", "Acidic/basic residue-pair contacts.", "Dimensionless contact count."),
-        ("apolar_contacts", apolar, "count", "Hydrophobic plus aromatic contacts.", "Dimensionless contact count."),
-        ("hydrophobic_contacts", hyd, "count", "Hydrophobic contact count.", f"Hydrophobic contacts are counted within {HYDROPHOBIC_CONTACT_CUTOFF_A} Angstrom."),
-        ("hydrogen_bond_contacts", hbond, "count", "Hydrogen-bond donor/acceptor proxy contact count.", f"Donor-acceptor heavy atom proxy cutoff is {HYDROGEN_BOND_DA_CUTOFF_A} Angstrom; angles are not enforced without hydrogens."),
-        ("aromatic_contacts", aro, "count", "Aromatic contact count.", "Dimensionless contact count."),
-        ("hydrogen_bond_DA_cutoff", HYDROGEN_BOND_DA_CUTOFF_A, "Angstrom", "Hydrogen-bond donor-acceptor heavy-atom distance cutoff used by Pepforge.", "Literature-supported proxy cutoff; actual H-bonds also depend on geometry and angle."),
-        ("hydrophobic_contact_cutoff", HYDROPHOBIC_CONTACT_CUTOFF_A, "Angstrom", "Hydrophobic contact distance cutoff used by Pepforge.", "Residue/atom-level hydrophobic contacts are counted within this distance."),
-        ("steric_clashes", clash, "count", "Steric clash penalty; lower is better.", "Dimensionless clash count."),
-        ("minimum_distance", round(min_dist, 3) if min_dist == min_dist else "", "Angstrom", "Closest target-peptide distance in the selected pose.", "Distance in Angstroms (A)."),
-        ("confidence", confidence, "qualitative", interpretation, "Confidence from contacts, clashes, ΔG range, and score consistency."),
-        ("PRODIGY_like_compatibility", "available", "qualitative", "Pepforge reports ΔG, Kd, contact counts, charged/apolar/H-bond proxies in a format that can be compared with PRODIGY-style summaries.", "This is not the PRODIGY server/model; export the complex and compare externally for formal claims."),
-        ("external_validation_next", "export/import", "workflow", "Use Export to create complex/affinity/MD CSVs; import external PRODIGY/Vina/GROMACS/OpenMM results through Result file or Export/Import tab.", "External results remain supporting evidence, not hidden internal proof."),
-        ("method_scope", "screening / prioritization", "-", "Use for candidate triage and relative comparison, not as final quantitative proof.", "For final quantitative claims, compare with external affinity tools, all-atom MD, or experimental assays."),
+    def val(name, default=""):
+        v=best.get(name,default); return v
+    rows=[
+        ("best_pose", val("pose_id"), "-", "Top candidate after deterministic multi-key geometry ranking.", "Not a thermodynamic ranking."),
+        ("pose_rank", val("pose_rank"), "ordinal", "Rank derived from explicit geometry descriptors.", "No weighted energy or affinity score is generated."),
+        ("centroid_contacts", val("contact_count"), "count", "Residue/token-centroid proximities within cutoff.", "Coordinate-derived centroid geometry."),
+        ("centroid_overlap_warnings", val("centroid_overlap_warnings"), "count", "Very short centroid distances requiring review.", "Not an atom-level clash count."),
+        ("hydrophobic_proximities", val("hydrophobic_proximities"), "count", "Hydrophobic residue/token centroid proximities.", "Proximity descriptor only; not an interaction energy."),
+        ("opposite_charge_proximities", val("opposite_charge_proximities"), "count", "Oppositely charged residue centroid proximities.", "Not a salt-bridge energy."),
+        ("aromatic_proximities", val("aromatic_proximities"), "count", "Aromatic centroid proximities.", "Not a pi-stacking assignment."),
+        ("polar_residue_proximities", val("polar_residue_proximities"), "count", "Polar residue centroid proximities.", "Not a hydrogen-bond assignment."),
+        ("minimum_centroid_distance", val("min_centroid_distance_A"), "Angstrom", "Closest centroid distance in the candidate.", "Atom-level distances are reported separately when both atomic structures exist."),
+        ("internal_delta_G", "not calculated", "-", "Pepforge does not convert these descriptors into ΔG.", "Import a validated external result if needed."),
+        ("internal_Kd", "not calculated", "-", "Pepforge does not infer Kd from geometry ranking.", "Use experiment or validated external computation."),
     ]
-    return pd.DataFrame([{"source": source, "metric": m, "value": v, "unit": u, "interpretation": i, "method_note": n} for m, v, u, i, n in rows], columns=columns)
+    return pd.DataFrame([{
+        "source":source,"metric":m,"value":v,"unit":u,"interpretation":i,"method_note":n
+    } for m,v,u,i,n in rows], columns=columns)
+
 
 def dynamics_summary_label(summary: pd.DataFrame) -> pd.DataFrame:
+    """Compatibility label for imported/external dynamics only."""
     if summary is None or summary.empty:
-        return summary
-    out = summary.copy()
-    out.loc[len(out)] = {"metric":"engine_mode","value":"Pepforge embedded dynamics","note":"Embedded coarse-grained dynamics for fast screening; export/import supports external all-atom validation."}
+        return pd.DataFrame([{"metric":"engine_mode","value":"external MD only","note":"Pepforge does not run or label a toy dynamics model as molecular dynamics."}])
+    out=summary.copy()
+    out.loc[len(out)]={"metric":"engine_mode","value":"external/imported dynamics","note":"Interpret only according to the external engine/method that generated the data."}
     return out
 
 
-# Backward-compatible function aliases for older tests/scripts. The UI and exports use generic names.
-run_docking_pose_search = run_pose_search
-run_vina_like_pose_search = run_pose_search  # legacy compatibility alias
-affinity_result_summary_df = affinity_summary_df
-prodigy_like_summary_df = affinity_summary_df  # legacy compatibility alias
 
 
-def normalize_affinity_report_df(df: pd.DataFrame | None, poses: pd.DataFrame | None = None, contacts: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Return a GUI-safe affinity report table.
+def normalize_result_report_df(df: pd.DataFrame | None, poses: pd.DataFrame | None = None, contacts: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Return a GUI-safe screening/external-result table.
 
     Older import paths produced source/field/value/note tables while the Results
     pane expects source/metric/value/unit/interpretation/method_note.  This helper
-    prevents the Affinity report pane from looking blank after Analyze, Load, or
-    external-result import.
+    keeps the Screening evidence / external result pane populated after Analyze, Load, or external-result import.
     """
     columns = ["source", "metric", "value", "unit", "interpretation", "method_note"]
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         if poses is not None and isinstance(poses, pd.DataFrame) and not poses.empty:
-            return affinity_summary_df(poses, contacts if isinstance(contacts, pd.DataFrame) else pd.DataFrame())
+            return screening_evidence_df(poses, contacts if isinstance(contacts, pd.DataFrame) else pd.DataFrame())
         return pd.DataFrame([{
-            "source": "Pepforge affinity report",
+            "source": "Pepforge screening report",
             "metric": "status",
             "value": "not generated",
             "unit": "-",
-            "interpretation": "Click Run in Docking Workbench, or load an output folder containing affinity_scoring_summary.csv.",
+            "interpretation": "Click Run Screening, or load an output folder containing screening_evidence_summary.csv.",
             "method_note": "The report is generated after a pose/contact table exists."
         }], columns=columns)
     out = df.copy()
@@ -1560,13 +1314,13 @@ def normalize_affinity_report_df(df: pd.DataFrame | None, poses: pd.DataFrame | 
     return out[columns]
 
 
-def affinity_report_markdown(df: pd.DataFrame | None) -> str:
-    """Create a readable Markdown report mirroring the GUI Affinity report pane."""
-    rep = normalize_affinity_report_df(df)
+def screening_report_markdown(df: pd.DataFrame | None) -> str:
+    """Create a readable Markdown report for geometry/contact screening evidence."""
+    rep = normalize_result_report_df(df)
     lines = [
-        "# Pepforge Docking Workbench Affinity Report",
+        "# Pepforge Docking Workbench Screening Evidence Report",
         "",
-        "This report is a contact-based screening/prioritization summary. It is not final Kd proof, not all-atom MD, and not experimental binding evidence.",
+        "This report contains geometry/contact screening descriptors. It does not calculate ΔG, Kd, docking energy, or molecular-dynamics stability.",
         "",
         "| Source | Metric | Value | Unit | Interpretation | Method note |",
         "|---|---|---:|---|---|---|",
@@ -1581,61 +1335,35 @@ def affinity_report_markdown(df: pd.DataFrame | None) -> str:
         "## 사용법",
         "",
         "1. Docking Workbench에서 Target/Peptide를 입력한다.",
-        "2. Run을 누르면 Docking results, Contacts, Affinity report가 같이 갱신된다.",
-        "3. Export를 누르면 affinity_scoring_summary.csv와 affinity_report.md가 output 폴더에 저장된다.",
+        "2. Run을 누르면 Docking results, Contacts, Screening evidence가 같이 갱신된다.",
+        "3. Export를 누르면 screening_evidence_summary.csv와 screening_evidence_report.md가 output 폴더에 저장된다.",
         "4. 기존 output을 다시 볼 때는 Load로 해당 docking_* 폴더를 선택한다.",
     ]
     return "\n".join(lines) + "\n"
 molecular_dynamics_summary_label = dynamics_summary_label
-gromacs_like_md_summary_label = dynamics_summary_label  # legacy compatibility alias
 
 
 def structure_pipeline_df(target_mode: str, peptide_mode: str, target_seq: str, peptide_seq: str,
                           target_pdb: str | Path | None, peptide_pdb: str | Path | None):
-    """Return a concrete next-step workflow instead of rejecting mixed inputs.
-
-    The workbench now accepts all four input combinations. When a 3D target is
-    missing, it routes the job to structure preparation first. When a
-    complex exists, it routes directly to contact/affinity contact scoring and embedded dynamics.
-    """
+    """Describe what Pepforge can do with the supplied coordinate availability."""
     target_mode = str(target_mode or "PDB")
     peptide_mode = str(peptide_mode or "Sequence")
-    t_seq = _clean_protein_sequence(target_seq)
-    p_seq = clean_sequence(peptide_seq)
-    target_exists = bool(target_pdb and Path(target_pdb).exists())
-    pep_exists = bool(peptide_pdb and Path(peptide_pdb).exists())
-    target_chains = parse_pdb_atoms(target_pdb)["chain"].nunique() if target_exists else 0
-    pep_atoms = parse_pdb_atoms(peptide_pdb) if pep_exists else pd.DataFrame()
-    pep_from_pdb = "".join(pep_atoms.drop_duplicates(["chain","resi"]).get("aa", pd.Series(dtype=str)).astype(str).tolist()) if not pep_atoms.empty else ""
-    peptide_for_structure_prep = p_seq or pep_from_pdb.replace("X", "")
-    rows = []
-
-    def add(stage, status, function, input_used, output, note, engine="Pepforge"):
-        rows.append({"stage": stage, "status": status, "function": function, "input_used": input_used, "output": output, "note": note, "engine": engine})
-
-    if target_mode == "Sequence" and peptide_mode == "PDB":
-        add("1_target_structure", "READY_TO_PREPARE", "target structure preparation", "target sequence", "target_model.pdb/mmCIF", "Target is sequence-only, so build/obtain a target structure first; peptide PDB is retained as ligand/partner geometry.", engine="AlphaFold3-compatible / structure prediction bridge")
-        add("2_complex_structure", "READY_TO_PREPARE", "complex structure preparation", "target sequence + peptide sequence extracted from peptide PDB when possible", "complex structure model", "This is the previously missing TARGET:SEQUENCE + PEPTIDE:PDB branch; it should not be rejected.")
-        add("3_contact_scoring", "WAITING_FOR_COMPLEX", "contact/affinity scorer", "predicted/imported complex structure", "affinity/contact table", "Run after target/complex structure exists.")
-        add("4_fast_relaxation", "PARTIAL", "Pepforge embedded dynamics", "peptide PDB only until target model exists", "peptide-only relaxation or post-complex interface embedded dynamics", "embedded dynamics can run peptide-only now, but interface stability requires target coordinates.")
-        add("5_validation", "TEMPLATE_READY", "all-atom validation bridge", "complex PDB/mmCIF after structure preparation/modeling", "validation template package", "Pepforge exports templates and imports RMSD/RMSF/energy results; full validation uses imported external results.")
-    elif target_mode == "Sequence" and peptide_mode == "Sequence":
-        add("1_target_structure", "READY_TO_PREPARE", "target structure preparation", "target sequence", "target_model.pdb/mmCIF", "Structure generation is required before 3D contact scoring.", engine="AlphaFold3-compatible / structure prediction bridge")
-        add("2_complex_structure", "READY_TO_PREPARE", "complex structure preparation", "target sequence + peptide sequence", "complex structure model", "Recommended first full structure step for protein-peptide complex.")
-        add("3_sequence_triage", "AVAILABLE_NOW", "Pepforge sequence heuristic", "target sequence + peptide sequence", "composition score", "Fast triage only, not docking.")
-        add("4_validation", "TEMPLATE_READY", "all-atom validation bridge", "complex model", "validation template package", "Run after complex model is available.")
-    elif target_mode == "PDB" and peptide_mode == "PDB":
-        if target_exists and target_chains >= 2 and not pep_exists:
-            add("1_complex_split", "AVAILABLE_NOW", "Pepforge", "multi-chain complex PDB/mmCIF", "target chain + peptide chain", "Shortest chain is treated as peptide unless separate peptide PDB is provided.")
-        else:
-            add("1_contact_scoring", "AVAILABLE_NOW", "Pepforge / contact/affinity", "target PDB + peptide PDB", "contact and atom-contact report", "Imported pose can be scored directly.")
-        add("2_md_lite", "AVAILABLE_NOW", "Pepforge embedded dynamics", "current peptide pose", "RMSD/contact persistence/energy proxy", "Fast embedded triage.")
-        add("3_validation", "TEMPLATE_READY", "all-atom validation bridge", "complex PDB", "validation template package", "Use exported templates for full validation.")
+    target_exists = bool(target_pdb and Path(target_pdb).exists() and not parse_pdb_atoms(target_pdb).empty)
+    peptide_exists = bool(peptide_pdb and Path(peptide_pdb).exists() and not parse_pdb_atoms(peptide_pdb).empty)
+    rows=[]
+    def add(stage,status,function,input_used,output,note):
+        rows.append({"stage":stage,"status":status,"function":function,"input_used":input_used,"output":output,"note":note,"engine":"Pepforge"})
+    if not target_exists:
+        add("1_target_coordinates","REQUIRED","target structure input","target sequence or missing target file","target PDB/mmCIF","Pepforge does not fabricate target 3D coordinates from sequence. Obtain measured or externally predicted target coordinates first.")
+        add("2_sequence_descriptors","AVAILABLE_NOW","sequence descriptor analysis","target/peptide sequence","composition and chemistry tables","Descriptor analysis is not docking or binding prediction.")
+        add("3_3d_screening","BLOCKED","rigid-body geometry/contact screening","target coordinates required","none","3D screening remains disabled until target coordinates are supplied.")
+    elif peptide_mode == "PDB" and peptide_exists:
+        add("1_coordinate_check","AVAILABLE_NOW","direct coordinate contact analysis","target PDB/mmCIF + peptide PDB","residue and atom proximity tables","Supplied structures are analyzed directly; no affinity is inferred.")
+        add("2_local_pose_search","AVAILABLE_IF_NEEDED","rigid-body local candidate generation","same coordinate inputs","ranked geometry candidates","Used only when a local pose search is requested/needed; ranking is geometric and ordinal.")
     else:
-        add("1_pseudo_docking", "AVAILABLE_NOW", "Pepforge", "target PDB/mmCIF + peptide sequence", "receptor-anchored pseudo poses", "Fast pose generation before external verification.")
-        add("2_contact_scoring", "AVAILABLE_NOW", "contact/affinity scorer", "generated pose", "contact table", "Use for ranking/triage.")
-        add("3_md_lite", "AVAILABLE_NOW", "Pepforge embedded dynamics", "best generated pose", "RMSD/contact persistence/energy proxy", "Embedded local relaxation.")
-        add("4_validation", "TEMPLATE_READY", "all-atom validation bridge", "exported complex/pose", "validation template package", "Use for publication-grade validation.")
+        add("1_peptide_structure","AVAILABLE_NOW","Peptide Structure Builder","peptide sequence","chemistry-aware peptide starting conformer","The generated conformer is a starting candidate, not a native-state prediction.")
+        add("2_local_pose_search","AVAILABLE_NOW","rigid-body local candidate generation","target coordinates + Structure Builder peptide coordinates","ranked geometry candidates","No Vina/PRODIGY/thermodynamic energy is calculated internally.")
+    add("4_external_validation","READY","external validation handoff","exported structures/tables","Vina/PRODIGY/GROMACS/OpenMM/etc. inputs or imported results","Quantitative docking, affinity, or MD claims require an appropriate external engine or experiment.")
     return pd.DataFrame(rows, columns=["stage","status","function","input_used","output","note","engine"])
 
 
@@ -1696,7 +1424,6 @@ def parse_affinity_text(path: str | Path):
         rows.append({"source":p.name,"field":"status","value":"text imported","note":"No specific affinity markers detected; file retained in imported results."})
     return pd.DataFrame(rows, columns=["source","field","value","note"])
 
-globals()["parse_"+"pro"+"digy_text"] = parse_affinity_text
 
 
 def parse_md_xvg(path: str | Path):
@@ -1718,99 +1445,160 @@ def parse_md_xvg(path: str | Path):
             try:
                 xs.append(float(parts[0])); ys.append(float(parts[1]))
             except Exception:
-                pass
+                LOGGER.debug("Optional operation skipped", exc_info=True)
     if not ys:
         return pd.DataFrame([{"source":p.name,"series":title,"points":0,"last_value":"","mean_value":"","note":"No numeric XVG data parsed."}])
     return pd.DataFrame([{"source":p.name,"series":title,"points":len(ys),"last_value":round(float(ys[-1]),4),"mean_value":round(sum(ys)/len(ys),4),"note":"MD result XVG summary imported"}])
 
 
-globals()["parse_"+"gromacs_xvg"] = parse_md_xvg
 
 
 
 def all_atom_parameter_requirements_df(seq: str):
-    """Return practical all-atom validation requirements for modified peptides.
+    """Describe external all-atom parameter requirements without inventing mappings.
 
-    Pepforge keeps D-form, non-natural amino acids, linkers, labels and caps in the
-    screening workflow. Full all-atom MD can be performed externally only when the
-    topology/force-field parameters for each modified token are available or mapped.
-    This table is exported with every validation package so the user can see what
-    needs manual parameterization before publication-grade MD.
+    Unsupported notation is reported explicitly instead of being converted to a
+    canonical residue.  This is a requirements/status table only; it does not
+    claim that an external force field contains parameters for a token.
     """
+    raw = canonical_peptide_notation(seq or "")
+    if not raw:
+        return pd.DataFrame([{
+            "token":"none", "type":"empty peptide", "pepforge_screening":"not ready",
+            "all_atom_requirement":"Enter a peptide sequence or provide an explicit peptide structure.",
+            "status":"not ready",
+        }], columns=["token","type","pepforge_screening","all_atom_requirement","status"])
+
+    # Prefer the full chemistry-aware parser.  If one token is unsupported, fall
+    # back only to per-dash token classification so that the unsupported literal
+    # token can be reported; no surrogate residue or geometry is generated.
+    try:
+        token_rows = _split_peptide_model_tokens(raw)
+    except Exception:
+        from peptiforg_core.pymol_structure_builder import classify_tokens
+        token_rows = []
+        parts = [part.strip() for part in str(raw).split("-") if part.strip()]
+        if not parts:
+            parts = [str(raw).strip()]
+        for part in parts:
+            try:
+                classified = classify_tokens(part)
+            except Exception as exc:
+                token_rows.append({
+                    "token": part, "aa":"X", "class":"unsupported",
+                    "note":"Token is not supported by the current Structure Builder parser.",
+                    "warning": str(exc),
+                })
+                continue
+            for item in classified:
+                token_rows.append({
+                    "token": str(item.token or item.raw or part),
+                    "aa":"X", "class": str(item.cls or "unsupported"),
+                    "note": str(item.note or ""), "warning": str(item.warning or ""),
+                })
+
     rows=[]
-    parsed = unified_parse_peptide(seq or "")
-    tokens = _split_peptide_model_tokens(seq or "")
-    if parsed.nterm:
-        n=normalize_token(parsed.nterm)
-        if n in {"AC", "ACETYL"}:
-            rows.append({"token":parsed.nterm,"type":"N-terminal cap","pepforge_screening":"supported","all_atom_requirement":"standard acetyl terminus or residue patch","status":"usually available"})
-        else:
-            rows.append({"token":parsed.nterm,"type":"N-terminal chemical","pepforge_screening":"supported as chemical bead","all_atom_requirement":"cap/linker residue topology and bonded parameters","status":"parameter check required"})
-    if parsed.cterm:
-        c=normalize_token(parsed.cterm)
-        if c in {"NH2", "CONH2", "AMIDE"}:
-            rows.append({"token":parsed.cterm,"type":"C-terminal amide","pepforge_screening":"supported","all_atom_requirement":"standard amidated terminus patch","status":"usually available"})
-        else:
-            rows.append({"token":parsed.cterm,"type":"C-terminal modifier","pepforge_screening":"supported as terminal state","all_atom_requirement":"terminus patch/topology","status":"parameter check required"})
-    for item in tokens:
-        tok=str(item.get('token',''))
-        cls=str(item.get('class',''))
+    for item in token_rows:
+        tok=str(item.get("token", ""))
+        cls=str(item.get("class", "unsupported"))
         norm=normalize_token(tok)
-        if cls == 'canonical':
-            req='standard protein force field residue'; status='ready'
-        elif cls == 'd_form':
-            req='D-residue topology or mirrored residue parameters; validate chirality in external builder'; status='parameter check required'
-        elif cls == 'non_natural':
-            req='noncanonical residue topology/charges/bonded parameters'; status='parameter required'
-        elif cls == 'linker':
-            req='linker residue topology and bonded parameters'; status='parameter required'
-        elif cls in {'chemical','n_terminal_chemical'}:
-            req='small-molecule/cap parameters, partial charges, linkage definition'; status='parameter required'
-        elif cls == 'misplaced_n_terminal_modifier':
-            req='token is N-terminal-only by default; rewrite as N-terminal modifier or explicit side-chain attachment before all-atom MD'; status='notation review required'
+
+        if cls == "std_aa":
+            req="Standard residue parameters in the selected external force field."
+            status="verify selected force field"
+            screening="Structure Builder supported"
+        elif cls == "d_std_aa":
+            req="D-residue topology/parameters with chirality verified in the selected external workflow."
+            status="parameter check required"
+            screening="Structure Builder supported"
+        elif cls == "non_natural_aa":
+            req="Explicit non-natural residue topology, charges, and bonded/nonbonded parameters."
+            status="parameter required"
+            screening="Structure Builder supported when a template exists"
+        elif cls == "linker":
+            req="Explicit linker topology, charges, linkage definition, and bonded/nonbonded parameters."
+            status="parameter required"
+            screening="Structure Builder supported when a template exists"
+        elif cls in {"label", "chemical"}:
+            req="Explicit modification parameters, charges, and attachment/linkage definition."
+            status="parameter required"
+            screening="Structure Builder supported when a template exists"
+        elif cls in {"n_terminal_modifier", "n_terminal"}:
+            if norm in {"AC", "ACETYL"}:
+                req="Verify an acetylated N-terminus patch/residue definition in the selected external force field."
+                status="parameter check required"
+            else:
+                req="Explicit N-terminal modification topology, charges, and linkage definition."
+                status="parameter required"
+            screening="Structure Builder supported when a template exists"
+        elif cls in {"c_terminal_modifier", "c_terminal"}:
+            if norm in {"NH2", "CONH2", "AMIDE"}:
+                req="Verify an amidated C-terminus patch/residue definition in the selected external force field."
+                status="parameter check required"
+            else:
+                req="Explicit C-terminal modification topology, charges, and linkage definition."
+                status="parameter required"
+            screening="Structure Builder supported when a template exists"
         else:
-            req='manual parameterization or conservative replacement before all-atom MD'; status='review required'
-        rows.append({"token":tok,"type":cls or 'unknown',"pepforge_screening":"supported" if cls!='unknown' else 'fallback only',"all_atom_requirement":req,"status":status})
-    if not rows:
-        rows.append({"token":"none","type":"empty peptide","pepforge_screening":"not applicable","all_atom_requirement":"enter peptide sequence or PDB","status":"not ready"})
+            req="Provide an explicit validated structure/template and external force-field parameters; no canonical surrogate is used."
+            status="unsupported / review required"
+            screening="blocked for sequence-derived 3D"
+
+        rows.append({
+            "token":tok or "unknown", "type":cls or "unsupported",
+            "pepforge_screening":screening,
+            "all_atom_requirement":req,
+            "status":status,
+        })
+
     return pd.DataFrame(rows, columns=["token","type","pepforge_screening","all_atom_requirement","status"])
 
-
 def parse_external_validation_file(path: str | Path):
-    """Parse common external validation outputs into a compact summary table."""
-    p=Path(path)
+    """Parse external MD/structure/affinity files without generating derived affinity claims."""
+    p = Path(path)
     if not p.exists():
-        return pd.DataFrame([{"source":str(p),"field":"status","value":"missing file","note":"File was not found."}])
-    suf=p.suffix.lower()
-    if suf == '.xvg':
-        return parse_md_xvg(p)
-    if suf in {'.csv', '.tsv'}:
-        sep='\t' if suf=='.tsv' else ','
+        return pd.DataFrame([{"source":str(p), "field":"status", "value":"missing file", "note":"File was not found."}])
+    suf = p.suffix.lower()
+    if suf == ".xvg":
+        md = parse_md_xvg(p)
+        if md is None or md.empty:
+            return pd.DataFrame([{"source":p.name, "field":"xvg_status", "value":"no numeric data", "note":"No numeric XVG series was parsed."}])
+        # Normalize the XVG summary to the same external-result schema used by
+        # the other import formats.  Values are copied from the external file;
+        # no affinity or thermodynamic quantity is inferred.
+        rows=[]
+        for _, r in md.iterrows():
+            for field in ("series", "points", "last_value", "mean_value"):
+                if field in r:
+                    rows.append({"source":p.name, "field":field, "value":r.get(field, ""), "note":"External XVG summary value."})
+        return pd.DataFrame(rows, columns=["source","field","value","note"])
+    if suf in {".csv", ".tsv"}:
+        sep = "\t" if suf == ".tsv" else ","
         try:
-            df=pd.read_csv(p, sep=sep)
-            rows=[{"source":p.name,"field":"table_rows","value":len(df),"note":"External validation table imported."}]
-            for col in df.columns[:8]:
-                vals=pd.to_numeric(df[col], errors='coerce').dropna()
-                if len(vals):
-                    rows.append({"source":p.name,"field":f"{col}_last","value":round(float(vals.iloc[-1]),4),"note":"numeric series last value"})
-                    rows.append({"source":p.name,"field":f"{col}_mean","value":round(float(vals.mean()),4),"note":"numeric series mean value"})
-            return pd.DataFrame(rows)
-        except Exception as e:
-            return pd.DataFrame([{"source":p.name,"field":"csv_import_error","value":str(e),"note":"Could not parse CSV."}])
-    if suf in {'.xlsx', '.xls'}:
+            df = pd.read_csv(p, sep=sep)
+        except Exception as exc:
+            return pd.DataFrame([{"source":p.name, "field":"table_import_error", "value":str(exc), "note":"Could not parse the external table."}])
+        rows=[{"source":p.name, "field":"table_rows", "value":len(df), "note":"External validation table imported."}]
+        for col in df.columns[:8]:
+            vals = pd.to_numeric(df[col], errors="coerce").dropna()
+            if len(vals):
+                rows.append({"source":p.name, "field":f"{col}_last", "value":round(float(vals.iloc[-1]),4), "note":"Last numeric value copied from the external series."})
+                rows.append({"source":p.name, "field":f"{col}_mean", "value":round(float(vals.mean()),4), "note":"Arithmetic mean of the imported numeric series."})
+        return pd.DataFrame(rows, columns=["source","field","value","note"])
+    if suf in {".xlsx", ".xls"}:
         try:
-            xl=pd.ExcelFile(p)
-            return pd.DataFrame([{"source":p.name,"field":"excel_sheets","value":";".join(xl.sheet_names),"note":"Workbook detected for manual review/import."}])
-        except Exception as e:
-            return pd.DataFrame([{"source":p.name,"field":"excel_import_error","value":str(e),"note":"Could not parse workbook."}])
-    if suf in {'.pdb', '.cif', '.mmcif'}:
-        atoms=parse_pdb_atoms(p)
+            xl = pd.ExcelFile(p)
+            return pd.DataFrame([{"source":p.name, "field":"excel_sheets", "value":";".join(xl.sheet_names), "note":"Workbook detected for external-result review."}])
+        except Exception as exc:
+            return pd.DataFrame([{"source":p.name, "field":"excel_import_error", "value":str(exc), "note":"Could not parse the workbook."}])
+    if suf in {".pdb", ".cif", ".mmcif"}:
+        atoms = parse_pdb_atoms(p)
         if atoms.empty:
-            return pd.DataFrame([{"source":p.name,"field":"structure_atoms","value":0,"note":"Structure imported but no ATOM/HETATM coordinates parsed."}])
+            return pd.DataFrame([{"source":p.name, "field":"structure_atoms", "value":0, "note":"No valid ATOM/HETATM coordinates were parsed."}])
         return pd.DataFrame([
-            {"source":p.name,"field":"structure_atoms","value":len(atoms),"note":"parsed coordinate atoms"},
-            {"source":p.name,"field":"structure_chains","value":atoms['chain'].nunique(),"note":"parsed chain count"},
-            {"source":p.name,"field":"structure_residues","value":atoms.drop_duplicates(['chain','resi']).shape[0],"note":"parsed residue count"},
+            {"source":p.name, "field":"structure_atoms", "value":len(atoms), "note":"Parsed coordinate atoms."},
+            {"source":p.name, "field":"structure_chains", "value":atoms["chain"].nunique(), "note":"Parsed chain count."},
+            {"source":p.name, "field":"structure_residues", "value":atoms.drop_duplicates(["chain","resi"]).shape[0], "note":"Parsed residue count."},
         ])
     return parse_affinity_text(p)
 
@@ -1884,7 +1672,6 @@ Recommended flow:
 """
     return {"em.mdp": mdp_minim, "nvt.mdp": mdp_nvt, "md_short.mdp": mdp_md, "EXTERNAL_MD_README.txt": readme}
 
-globals()["gromacs_template_files"] = external_md_template_files
 
 
 def has_modified_peptide_tokens(seq: str) -> bool:
@@ -1892,69 +1679,7 @@ def has_modified_peptide_tokens(seq: str) -> bool:
     return any(str(r.get("class", "")) not in {"canonical", ""} for r in rows)
 
 
-def pseudo_peptide_cif(points: pd.DataFrame, model_name: str = "Pepforge_modified_peptide") -> str:
-    """Minimal mmCIF-like coordinate export for PyMOL/ChimeraX inspection.
 
-    This is a visualization/screening model, not a fully parameterized all-atom
-    peptide.  Original token and token class are preserved in a companion loop so
-    users can see which beads correspond to D-form, non-natural, linker, label, or
-    terminal-chemical units.
-    """
-    safe_name = re.sub(r"[^A-Za-z0-9_]", "_", model_name)
-    lines = [
-        "data_" + safe_name,
-        "#",
-        "_pepforge_model.purpose 'modified peptide visualization and screening'",
-        "_pepforge_model.limitation 'not a fully parameterized all-atom structure'",
-        "#",
-        "loop_",
-        "_atom_site.group_PDB",
-        "_atom_site.id",
-        "_atom_site.type_symbol",
-        "_atom_site.label_atom_id",
-        "_atom_site.label_comp_id",
-        "_atom_site.label_asym_id",
-        "_atom_site.label_seq_id",
-        "_atom_site.Cartn_x",
-        "_atom_site.Cartn_y",
-        "_atom_site.Cartn_z",
-        "_atom_site.occupancy",
-        "_atom_site.B_iso_or_equiv",
-        "_atom_site.pdbx_PDB_model_num",
-    ]
-    if points is None or points.empty:
-        return "\n".join(lines + ["#"]) + "\n"
-    clean_points = points.reset_index(drop=True)
-    for i, r in clean_points.iterrows():
-        aa = str(r.get("aa", "G")).upper()[:1] or "G"
-        resn = ONE_TO_THREE.get(aa, "GLY")
-        lines.append(f"ATOM {i+1} C CA {resn} B {int(r.get('pep_pos', i+1) or i+1)} {float(r.get('x',0)):.3f} {float(r.get('y',0)):.3f} {float(r.get('z',0)):.3f} 1.00 30.00 1")
-    lines.extend(["#", "loop_", "_pepforge_token.seq_id", "_pepforge_token.original_token", "_pepforge_token.token_class", "_pepforge_token.note"])
-    for _, r in clean_points.iterrows():
-        token = re.sub(r"\s+", "_", str(r.get("token", r.get("aa", "G")) or "G"))
-        cls = re.sub(r"\s+", "_", str(r.get("token_class", "canonical") or "canonical"))
-        note = re.sub(r"\s+", "_", str(r.get("note", "screening_bead") or "screening_bead"))
-        lines.append(f"{int(r.get('pep_pos', 0) or 0)} {token} {cls} {note}")
-    lines.append("#")
-    return "\n".join(lines) + "\n"
-
-def pseudo_peptide_pdb(points: pd.DataFrame):
-    lines=[
-        "REMARK Pepforge modified peptide visualization/screening model",
-        "REMARK This file is PyMOL-readable but is not a fully parameterized all-atom peptide.",
-        "REMARK For publication-grade MD, use external force-field parameterization and validation.",
-    ]
-    if points is not None and not points.empty:
-        for _, r in points.iterrows():
-            lines.append(f"REMARK TOKEN {int(r.get('pep_pos',0) or 0)} token={r.get('token', r.get('aa','G'))} class={r.get('token_class','canonical')} note={r.get('note','')}")
-    if points is None:
-        points = pd.DataFrame()
-    for i,r in points.iterrows():
-        aa = str(r.get("aa","G"))[0] if str(r.get("aa","G")) else "G"
-        resn=ONE_TO_THREE.get(aa, "GLY")
-        b = 70.00 if str(r.get('token_class','canonical')) not in {'canonical',''} else 20.00
-        lines.append(f"ATOM  {i+1:5d}  CA  {resn:>3s} P{int(r.get('pep_pos',i+1)):4d}    {float(r.get('x',0)):8.3f}{float(r.get('y',0)):8.3f}{float(r.get('z',0)):8.3f}  1.00 {b:5.2f}           C")
-    return "\n".join(lines)+"\nEND\n"
 
 def combined_complex_pdb(target_atoms: pd.DataFrame, peptide_points: pd.DataFrame, contacts: pd.DataFrame | None = None) -> str:
     """Export a readable PDB containing target and current peptide pose.
@@ -2010,14 +1735,14 @@ def resolve_target_input(target_mode: str, target_path: str | Path | None, targe
         except Exception:
             file_seq = ""
         if len(file_seq) >= 10:
-            return {"mode": "Sequence", "path": str(path), "sequence": file_seq, "atoms": target_sequence_pseudo_atoms(file_seq), "status": "ok", "message": f"Target sequence recognized from file: {path.name}, residues={len(file_seq)}"}
+            return {"mode": "Sequence", "path": str(path), "sequence": file_seq, "atoms": pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"]), "status": "ok", "message": f"Target sequence recognized from file: {path.name}, residues={len(file_seq)}"}
         return {"mode": "PDB", "path": str(path), "sequence": seq, "atoms": atoms, "status": "error", "message": f"Target file exists but no atoms/sequence were recognized: {path}"}
     if seq:
-        return {"mode": "Sequence", "path": "", "sequence": seq, "atoms": target_sequence_pseudo_atoms(seq), "status": "ok", "message": f"Target sequence recognized, residues={len(seq)}"}
+        return {"mode": "Sequence", "path": "", "sequence": seq, "atoms": pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"]), "status": "ok", "message": f"Target sequence recognized, residues={len(seq)}"}
     if path_text and (not path or not path.exists()):
         fallback = _clean_protein_sequence(path_text)
         if len(fallback) >= 10:
-            return {"mode": "Sequence", "path": "", "sequence": fallback, "atoms": target_sequence_pseudo_atoms(fallback), "status": "ok", "message": f"Target sequence recognized from path field, residues={len(fallback)}"}
+            return {"mode": "Sequence", "path": "", "sequence": fallback, "atoms": pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"]), "status": "ok", "message": f"Target sequence recognized from path field, residues={len(fallback)}"}
     return {"mode": target_mode or "PDB", "path": path_text, "sequence": "", "atoms": pd.DataFrame(), "status": "error", "message": "No valid target PDB/mmCIF file or protein sequence was recognized."}
 
 
@@ -2028,9 +1753,55 @@ class DockingWorkbenchGUI(tk.Tk):
         set_pepforge_icon(self)
         self.geometry("1780x1040")
         self.minsize(1180, 760)
+        apply_pepforge_theme(self)
         self.last_outdir=None
         self._install_green_progress_style()
         self._build()
+
+    def _default_outdir(self) -> Path:
+        return configured_output(ROOT/"outputs"/"docking_workbench", "docking")
+
+    def _effective_outdir(self) -> Path:
+        raw = str(self.outdir.get() or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+        outdir = self._default_outdir()
+        self.outdir.set(str(outdir))
+        return outdir
+
+    @staticmethod
+    def _path_fingerprint(path_text: str) -> tuple:
+        path_text = str(path_text or "").strip()
+        if not path_text:
+            return ("", None, None)
+        path = Path(path_text).expanduser()
+        try:
+            stat = path.stat()
+            return (str(path.resolve()), int(stat.st_size), int(stat.st_mtime_ns))
+        except OSError:
+            return (str(path), None, None)
+
+    def _screening_input_signature(self) -> tuple:
+        """Return a stable signature for the inputs that determine screening results.
+
+        Export uses this to avoid re-running an expensive Structure Builder/screening
+        pass when the already-displayed results were produced from the same inputs,
+        while still preventing stale results from being exported after an input change.
+        """
+        return (
+            str(self.target_mode.get() or ""),
+            self._path_fingerprint(self._target_path()),
+            str(self.target_seq.get() or "").strip(),
+            str(self.peptide_mode.get() or ""),
+            self._path_fingerprint(self._peptide_pdb_path()),
+            str(self.seq.get() or "").strip(),
+        )
+
+    def _screening_results_are_current(self) -> bool:
+        return (
+            getattr(self, "_last_screening_signature", None) == self._screening_input_signature()
+            and hasattr(self, "screening_evidence")
+        )
 
     def _install_green_progress_style(self):
         """Use a left-to-right green determinate progress bar in this GUI."""
@@ -2039,26 +1810,25 @@ class DockingWorkbenchGUI(tk.Tk):
             try:
                 style.theme_use("clam")
             except Exception:
-                pass
+                LOGGER.debug("Optional operation skipped", exc_info=True)
             style.configure("PepforgeGreen.Horizontal.TProgressbar", troughcolor="#e8e8e8", background="#2dbb55", lightcolor="#2dbb55", darkcolor="#2dbb55")
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _build(self):
         main=ttk.Frame(self,padding=12); main.pack(fill="both",expand=True)
-        ttk.Label(main,text="Docking Workbench",font=("Segoe UI",18,"bold")).pack(anchor="w")
-        ttk.Label(main,text="Structure input, pose search, affinity scoring, molecular dynamics screening, and all-atom validation package import/export.").pack(anchor="w",pady=(2,8))
+        ttk.Label(main,text="Docking Workbench",style="Title.TLabel").pack(anchor="w")
+        ttk.Label(main,text="Structure input, local rigid-body geometry/contact screening, and external docking/affinity/MD validation import/export.",style="Sub.TLabel").pack(anchor="w",pady=(2,8))
         top=ttk.LabelFrame(main,text="Input",padding=8); top.pack(fill="x")
         self.input_panel = top
         self.input_panel_visible = True
         self.target_mode=tk.StringVar(value="PDB")
         self.peptide_mode=tk.StringVar(value="Sequence")
         self.target_seq=tk.StringVar(value="")
-        self.seq=tk.StringVar(value="Ac-EEMQRR-NH2")
+        self.seq=tk.StringVar(value="")
         self.pdb_path=tk.StringVar(value="")
         self.pep_pdb_path=tk.StringVar(value="")
         self.result_path=tk.StringVar(value="")
-        self.outdir=tk.StringVar(value=str(ROOT/"outputs"/"docking_workbench"))
+        self.outdir=tk.StringVar(value="")
         self.rcsb_query=tk.StringVar(value="")
         self.rcsb_mode=tk.StringVar(value="auto")
         self.rcsb_format=tk.StringVar(value="pdb")
@@ -2136,7 +1906,7 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Label(complex_box,text="Peptide chain ID",width=18).grid(row=0,column=0,sticky="w")
         ttk.Entry(complex_box,textvariable=self.complex_chain_id,width=6).grid(row=0,column=1,sticky="w",padx=4)
         ttk.Button(complex_box,text="Build Initial Complex",command=self.build_initial_complex).grid(row=0,column=2,padx=8)
-        ttk.Label(complex_box,text="Uses target PDB plus peptide PDB when available; otherwise builds a simple pseudo-peptide candidate.",foreground="#555").grid(row=0,column=3,sticky="w")
+        ttk.Label(complex_box,text="Uses target PDB plus peptide coordinates. Sequence peptides are built by Peptide Structure Builder; no surrogate residue model is used.",foreground="#555").grid(row=0,column=3,sticky="w")
         complex_box.columnconfigure(3,weight=1)
         top.columnconfigure(0,weight=1); top.columnconfigure(1,weight=1)
         for var in (self.target_mode, self.peptide_mode): var.trace_add("write", lambda *_: self._update_mode_hint())
@@ -2144,13 +1914,14 @@ class DockingWorkbenchGUI(tk.Tk):
         self.input_toggle_btn = ttk.Button(btns,text="Collapse Input",command=self.toggle_input_panel)
         self.input_toggle_btn.pack(side="left",padx=3)
         ttk.Button(btns,text="Analyze",command=self.analyze).pack(side="left",padx=3)
-        ttk.Button(btns,text="Run",command=self.run_full_workflow).pack(side="left",padx=3)
+        self.run_screening_btn = ttk.Button(btns,text="Run Screening",command=self.run_docking)
+        self.run_screening_btn.pack(side="left",padx=3)
         ttk.Button(btns,text="Export",command=self.export).pack(side="left",padx=3)
         ttk.Button(btns,text="Load",command=self.load_output_folder).pack(side="left",padx=3)
         ttk.Button(btns,text="Open Folder",command=self.open_output).pack(side="left",padx=3)
         ttk.Button(btns,text="Input data full",command=lambda: self.show_data_full("input")).pack(side="left",padx=3)
         ttk.Button(btns,text="Results data full",command=lambda: self.show_data_full("results")).pack(side="left",padx=3)
-        ttk.Button(btns,text="MD data full",command=lambda: self.show_data_full("md")).pack(side="left",padx=3)
+        
         self.progress_var=tk.DoubleVar(value=0.0)
         self.progress_text=tk.StringVar(value="Ready")
         ttk.Progressbar(btns, variable=self.progress_var, maximum=100, length=260, mode="determinate", style="PepforgeGreen.Horizontal.TProgressbar").pack(side="left", padx=(14, 4))
@@ -2158,7 +1929,6 @@ class DockingWorkbenchGUI(tk.Tk):
         adv=ttk.Menubutton(btns,text="Advanced")
         adv_menu=tk.Menu(adv,tearoff=False)
         adv_menu.add_command(label="Run docking only", command=self.run_docking)
-        adv_menu.add_command(label="Run molecular dynamics only", command=self.run_md_lite)
         adv["menu"]=adv_menu
         adv.pack(side="left",padx=3)
         self.tabs=ttk.Notebook(main); self.tabs.pack(fill="both",expand=True)
@@ -2168,7 +1938,7 @@ class DockingWorkbenchGUI(tk.Tk):
         input_tab = self._make_tab("Input")
         results = self._make_tab("Results")
         contacts = self._make_tab("Contacts")
-        md = self._make_tab("MD")
+        md = self._make_tab("External validation")
         imports = self._make_tab("Export / Import")
 
         self.prop_tree=self._tree_panel(input_tab,"Peptide summary",["metric","value","note"], height=5)
@@ -2182,9 +1952,9 @@ class DockingWorkbenchGUI(tk.Tk):
         self.pipeline_tree=self._tree_panel(input_tab,"Workflow",["stage","status","function","input_used","output","note"], height=6)
 
         self.interpret_tree=self._tree_panel(results,"Result interpretation",["item","status","interpretation"], height=5)
-        self.pose_tree=self._tree_panel(results,"Docking results",["pose_id","conformation","orientation","score_lower_better","contact_count","clash_count","hydrophobic_contacts","electrostatic_contacts","aromatic_contacts","hydrogen_bond_contacts","min_distance_A","pose_quality_grade","note"], height=10)
-        self.import_tree=self._tree_panel(results,"Affinity report",["source","metric","value","unit","interpretation","method_note"], height=8)
-        self.external_style_tree=self._tree_panel(results,"PRODIGY / GROMACS / MD-style data",["engine_style","metric","value","unit","interpretation","external_equivalent"], height=8)
+        self.pose_tree=self._tree_panel(results,"Geometry candidates",_pose_columns(), height=10)
+        self.import_tree=self._tree_panel(results,"Screening evidence / external result",["source","metric","value","unit","interpretation","method_note"], height=8)
+        self.external_style_tree=self._tree_panel(results,"External validation status",["engine_style","metric","value","unit","interpretation","external_equivalent"], height=8)
         self.risk_tree=self._tree_panel(results,"Risk summary",["risk","score","level","note"], height=5)
         self.readiness_tree=self._tree_panel(results,"Readiness",["metric","value","note"], height=4)
 
@@ -2293,8 +2063,7 @@ class DockingWorkbenchGUI(tk.Tk):
             self.progress_text.set(str(text))
             self.update_idletasks()
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _peptide_metadata_sequence(self):
         typed = canonical_peptide_notation(self.seq.get())
         # Preserve terminal notation from the text field even when a peptide PDB is loaded.
@@ -2307,13 +2076,13 @@ class DockingWorkbenchGUI(tk.Tk):
     def _update_mode_hint(self):
         tm, pm = self.target_mode.get(), self.peptide_mode.get()
         if tm == "Sequence" and pm == "PDB":
-            self.mode_hint.set("Mode: target sequence + peptide PDB = target model + docking + MD")
+            self.mode_hint.set("Mode: target sequence + peptide PDB = descriptors only until target coordinates are supplied")
         elif tm == "Sequence":
-            self.mode_hint.set("Mode: sequence + sequence = target model + docking + MD")
+            self.mode_hint.set("Mode: sequence + sequence = descriptors only; target coordinates required for 3D screening")
         elif pm == "PDB":
-            self.mode_hint.set("Mode: target structure + peptide structure = contact scoring + MD")
+            self.mode_hint.set("Mode: target structure + peptide structure = direct contact analysis / local geometry screening")
         else:
-            self.mode_hint.set("Mode: target structure + peptide sequence = receptor-guided pose search")
+            self.mode_hint.set("Mode: target structure + peptide sequence = Structure Builder + local rigid-body geometry screening")
 
     def _clean_path_value(self, value):
         """Normalize a path pasted from Windows dialogs, quoted strings, or drag/drop."""
@@ -2393,8 +2162,7 @@ class DockingWorkbenchGUI(tk.Tk):
                 self.log.insert("end", "Workflow auto-normalized: " + "; ".join(changed) + ".\n")
                 self.log.see("end")
             except Exception:
-                pass
-
+                LOGGER.debug("Optional operation skipped", exc_info=True)
     def _make_tab(self, name):
         fr = ttk.Frame(self.tabs, padding=6)
         self.tabs.add(fr, text=name)
@@ -2467,51 +2235,30 @@ class DockingWorkbenchGUI(tk.Tk):
         if getattr(self, "input_panel_visible", True):
             self.toggle_input_panel()
 
-    def _external_style_validation_df(self) -> pd.DataFrame:
-        """Show Pepforge outputs in a table that resembles PRODIGY/GROMACS/MD summaries.
+    def _combined_result_report(self) -> pd.DataFrame:
+        frames=[]
+        screening=getattr(self,"screening_evidence",pd.DataFrame())
+        external=getattr(self,"imported_results",pd.DataFrame())
+        if isinstance(screening,pd.DataFrame) and not screening.empty:
+            frames.append(normalize_result_report_df(screening))
+        if isinstance(external,pd.DataFrame) and not external.empty:
+            frames.append(normalize_result_report_df(external))
+        if not frames:
+            return normalize_result_report_df(pd.DataFrame(), getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
+        return pd.concat(frames, ignore_index=True)
 
-        These rows are not hidden proof from external engines.  They are a stable,
-        readable compatibility layer: Pepforge reports ΔG/Kd/contact/MD-screening
-        values with names and units that can be compared against PRODIGY, Vina,
-        GROMACS, OpenMM, AMBER, MM/PBSA, or experimental validation after export.
-        """
-        rows=[]
-        aff = normalize_affinity_report_df(getattr(self, "imported_results", pd.DataFrame()), getattr(self, "poses", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame()))
-        def aff_val(metric):
-            if aff is None or aff.empty or "metric" not in aff.columns:
-                return "", ""
-            hit = aff[aff["metric"].astype(str).str.lower().eq(str(metric).lower())]
-            if hit.empty:
-                return "", ""
-            r = hit.iloc[0]
-            return r.get("value", ""), r.get("unit", "")
-        dg, dg_unit = aff_val("estimated_ΔG")
-        kd, kd_unit = aff_val("estimated_Kd")
-        contacts, contacts_unit = aff_val("interface_residue_contacts")
-        hbond, hbond_unit = aff_val("hydrogen_bond_contacts")
-        apolar, apolar_unit = aff_val("apolar_contacts")
-        clashes, clash_unit = aff_val("steric_clashes")
-        rows += [
-            {"engine_style":"PRODIGY-like", "metric":"estimated_delta_G", "value":dg or "not generated", "unit":dg_unit or "kcal/mol", "interpretation":"Contact-based Pepforge screening ΔG; compare externally, do not treat as PRODIGY output.", "external_equivalent":"PRODIGY ΔG / binding affinity summary"},
-            {"engine_style":"PRODIGY-like", "metric":"estimated_Kd", "value":kd or "not generated", "unit":kd_unit or "M-derived unit", "interpretation":"Kd derived from estimated ΔG with standard RT conversion.", "external_equivalent":"PRODIGY Kd / affinity class"},
-            {"engine_style":"PRODIGY-like", "metric":"interface_contacts", "value":contacts or "0", "unit":contacts_unit or "count", "interpretation":"Residue-level target-peptide contact count.", "external_equivalent":"interface contact count / IC classification"},
-            {"engine_style":"PRODIGY-like", "metric":"apolar_contacts", "value":apolar or "0", "unit":apolar_unit or "count", "interpretation":"Hydrophobic + aromatic contact proxy.", "external_equivalent":"apolar/nonpolar contact contribution"},
-            {"engine_style":"PRODIGY-like", "metric":"hydrogen_bond_contacts", "value":hbond or "0", "unit":hbond_unit or "count", "interpretation":"Donor/acceptor heavy-atom distance proxy.", "external_equivalent":"H-bond/contact analysis"},
-            {"engine_style":"Docking", "metric":"steric_clashes", "value":clashes or "0", "unit":clash_unit or "count", "interpretation":"Lower is better; high clash count needs pose review.", "external_equivalent":"pose clash / steric penalty"},
-        ]
-        md = getattr(self, "md_summary", pd.DataFrame())
-        md_lookup = {}
-        if isinstance(md, pd.DataFrame) and not md.empty and "metric" in md.columns:
-            md_lookup = {str(r.get("metric")): r for _, r in md.iterrows()}
-        def md_val(metric, default="not run"):
-            r = md_lookup.get(metric, {})
-            return r.get("value", default) if hasattr(r, "get") else default
-        rows += [
-            {"engine_style":"GROMACS/MD-like", "metric":"final_RMSD", "value":md_val("final_rmsd_A"), "unit":"Angstrom", "interpretation":"Embedded MD-screening drift proxy; external all-atom MD should be used for claims.", "external_equivalent":"GROMACS rms.xvg / RMSD"},
-            {"engine_style":"GROMACS/MD-like", "metric":"mean_contacts", "value":md_val("mean_contact_count"), "unit":"count", "interpretation":"Average retained contacts during embedded screening.", "external_equivalent":"contact frequency / native contacts"},
-            {"engine_style":"GROMACS/MD-like", "metric":"contact_persistence", "value":md_val("contact_persistence_proxy"), "unit":"0-1 proxy", "interpretation":"Higher means contacts persisted better in Pepforge screening frames.", "external_equivalent":"contact persistence / occupancy"},
-            {"engine_style":"GROMACS/MD-like", "metric":"final_clashes", "value":md_val("final_clash_count"), "unit":"count", "interpretation":"Final steric review metric after embedded relaxation.", "external_equivalent":"structure validation / bad contacts"},
-            {"engine_style":"External validation", "metric":"recommended_next_step", "value":"export/import", "unit":"workflow", "interpretation":"Export complex, run PRODIGY/Vina/GROMACS/OpenMM/AMBER externally, then import CSV/XVG/LOG outputs.", "external_equivalent":"formal external validation"},
+    def _external_style_validation_df(self) -> pd.DataFrame:
+        """Report what was measured internally and what still requires an external engine."""
+        poses=getattr(self,"poses",pd.DataFrame())
+        contacts=getattr(self,"contacts",pd.DataFrame())
+        ext=getattr(self,"imported_results",pd.DataFrame())
+        md_ext=getattr(self,"md_result_import",pd.DataFrame())
+        rows=[
+            {"engine_style":"Pepforge","metric":"local_geometry_candidates","value":len(poses) if isinstance(poses,pd.DataFrame) else 0,"unit":"count","interpretation":"Rigid-body geometry candidates generated from supplied target coordinates and peptide coordinates.","external_equivalent":"Not equivalent to Vina/Glide/HADDOCK scoring."},
+            {"engine_style":"Pepforge","metric":"displayed_centroid_contacts","value":len(contacts) if isinstance(contacts,pd.DataFrame) else 0,"unit":"rows","interpretation":"Residue/token-centroid proximity rows.","external_equivalent":"Inspect atom-level/external docking contacts for quantitative interpretation."},
+            {"engine_style":"External docking/affinity","metric":"import_status","value":"loaded" if isinstance(ext,pd.DataFrame) and not ext.empty else "not loaded","unit":"-","interpretation":"External ΔG/Kd/docking scores are shown only when imported from a user-supplied result.","external_equivalent":"Vina/PRODIGY/MM-PBSA/experiment as supplied by the user."},
+            {"engine_style":"External molecular dynamics","metric":"import_status","value":"loaded" if isinstance(md_ext,pd.DataFrame) and not md_ext.empty else "not loaded","unit":"-","interpretation":"Pepforge does not generate MD trajectories internally.","external_equivalent":"GROMACS/OpenMM/NAMD/AMBER output import."},
+            {"engine_style":"External validation","metric":"recommended_next_step","value":"export/import","unit":"workflow","interpretation":"Export coordinates and run the appropriate validated external tool before quantitative binding or stability claims.","external_equivalent":"Method chosen by the user/research protocol."},
         ]
         return pd.DataFrame(rows, columns=["engine_style","metric","value","unit","interpretation","external_equivalent"])
 
@@ -2550,13 +2297,13 @@ class DockingWorkbenchGUI(tk.Tk):
                 if vals:
                     return str(vals[0]).strip().upper()
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         try:
             df = getattr(self, "rcsb_results", pd.DataFrame())
             if df is not None and not df.empty:
                 return str(df.iloc[0].get("pdb_id", "")).strip().upper()
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         return ""
 
     def fetch_selected_rcsb_target(self):
@@ -2565,7 +2312,7 @@ class DockingWorkbenchGUI(tk.Tk):
             messagebox.showwarning("RCSB fetch", "Select a valid RCSB result first.")
             return
         try:
-            out = Path(self.outdir.get()) / "rcsb_downloads"
+            out = self._effective_outdir() / "rcsb_downloads"
             fmt = self.rcsb_format.get()
             self._set_progress(20, f"Downloading {pdb_id} from RCSB...")
             path = download_rcsb_structure(pdb_id, out, fmt=fmt)
@@ -2602,7 +2349,7 @@ class DockingWorkbenchGUI(tk.Tk):
             return
         try:
             self._set_progress(15, "Preparing target structure...")
-            paths = export_target_preparation_package(path, Path(self.outdir.get()) / "target_preparation", selected_chains=self._selected_target_chains(), keep_waters=bool(self.keep_waters.get()), keep_ions=bool(self.keep_ions.get()), keep_ligands=bool(self.keep_ligands.get()))
+            paths = export_target_preparation_package(path, self._effective_outdir() / "target_preparation", selected_chains=self._selected_target_chains(), keep_waters=bool(self.keep_waters.get()), keep_ions=bool(self.keep_ions.get()), keep_ligands=bool(self.keep_ligands.get()))
             cleaned = paths.get("target_cleaned_pdb", "")
             if cleaned:
                 self.pdb_path.set(cleaned)
@@ -2631,7 +2378,7 @@ class DockingWorkbenchGUI(tk.Tk):
             return
         try:
             self._set_progress(15, "Building initial complex...")
-            out = Path(self.outdir.get()) / "complex_builder"
+            out = self._effective_outdir() / "complex_builder"
             pep_pdb = self._peptide_pdb_path() if self._path_exists(self.pep_pdb_path.get()) else None
             chain_id = (self.complex_chain_id.get().strip() or "P")[:1]
             paths = export_complex_builder_package(
@@ -2664,7 +2411,7 @@ class DockingWorkbenchGUI(tk.Tk):
 
     def create_calibration_template(self):
         try:
-            out = Path(self.outdir.get()) / "calibration_dataset_mode"
+            out = self._effective_outdir() / "calibration_dataset_mode"
             path = export_calibration_dataset_template(out)
             self.calibration_dataset_path.set(path)
             self.log.insert("end", f"Calibration dataset template created: {path}\n")
@@ -2681,7 +2428,7 @@ class DockingWorkbenchGUI(tk.Tk):
         cand = self.calibration_candidate_score.get().strip()
         try:
             self._set_progress(20, "Building calibration report...")
-            out = Path(self.outdir.get())
+            out = self._effective_outdir()
             paths = export_calibration_report(dataset, out, candidate_score=(cand if cand else None))
             rows = [
                 {"item":"normalized_dataset", "value":paths.get("calibration_dataset_normalized",""), "note":"normalized affinity and score table"},
@@ -2702,7 +2449,7 @@ class DockingWorkbenchGUI(tk.Tk):
 
     def build_evidence_engine_report(self):
         try:
-            out = Path(self.outdir.get())
+            out = self._effective_outdir()
             # Evidence Engine can run even when some evidence files are absent.
             # It reports missing evidence instead of failing.
             paths = export_evidence_engine_report(output_dir=out)
@@ -2728,7 +2475,7 @@ class DockingWorkbenchGUI(tk.Tk):
             self.evidence_project_folder.set(p)
 
     def autoscan_evidence_project(self):
-        folder = self.evidence_project_folder.get().strip() or self.outdir.get().strip()
+        folder = self.evidence_project_folder.get().strip() or str(self._effective_outdir())
         if not folder or not Path(folder).exists():
             messagebox.showwarning("Evidence Engine Auto-scan", "Choose an existing project/output folder.")
             return
@@ -2759,7 +2506,7 @@ class DockingWorkbenchGUI(tk.Tk):
         try:
             ligand_cutoff = float(self.binding_site_ligand_cutoff.get() or 6.0)
             seed_cutoff = float(self.binding_site_seed_cutoff.get() or 8.0)
-            out = Path(self.outdir.get())
+            out = self._effective_outdir()
             paths = export_binding_site_selection_package(
                 pdb_path=path,
                 output_dir=out,
@@ -2800,7 +2547,7 @@ class DockingWorkbenchGUI(tk.Tk):
             messagebox.showwarning("External Docking Result Import", "Choose an external docking result file or folder.")
             return
         try:
-            paths = export_external_docking_import_package(src, self.outdir.get())
+            paths = export_external_docking_import_package(src, str(self._effective_outdir()))
             rows = [
                 {"item":"normalized_scores", "value":paths.get("external_docking_scores_normalized",""), "note":"tool-aware normalized score table"},
                 {"item":"summary", "value":paths.get("external_docking_import_summary",""), "note":"detected tool/record summary"},
@@ -2826,7 +2573,7 @@ class DockingWorkbenchGUI(tk.Tk):
     def build_calibration_model_cards(self):
         csv_path = self.calibration_normalized_csv_path.get().strip()
         if not csv_path:
-            candidate = Path(self.outdir.get()) / "calibration_dataset_mode" / "calibration_dataset_normalized.csv"
+            candidate = self._effective_outdir() / "calibration_dataset_mode" / "calibration_dataset_normalized.csv"
             if candidate.exists():
                 csv_path = str(candidate)
                 self.calibration_normalized_csv_path.set(csv_path)
@@ -2834,7 +2581,7 @@ class DockingWorkbenchGUI(tk.Tk):
             messagebox.showwarning("Calibration Model Cards", "Choose calibration_dataset_normalized.csv or build Calibration Report first.")
             return
         try:
-            paths = export_calibration_visualization_package(csv_path, self.outdir.get())
+            paths = export_calibration_visualization_package(csv_path, str(self._effective_outdir()))
             rows = [
                 {"item":"model_card_index_csv", "value":paths.get("target_model_card_index_csv",""), "note":"target-wise model-card index"},
                 {"item":"model_card_index_md", "value":paths.get("target_model_card_index_md",""), "note":"readable model-card index"},
@@ -2854,7 +2601,7 @@ class DockingWorkbenchGUI(tk.Tk):
     def create_project_session(self):
         try:
             name = self.project_session_name.get().strip() or "Pepforge_Project"
-            out = Path(self.outdir.get())
+            out = self._effective_outdir()
             paths = create_project_session_package(name, out, description="Pepforge workflow session")
             self.project_session_file.set(paths.get("session_json",""))
             rows = [
@@ -2880,7 +2627,7 @@ class DockingWorkbenchGUI(tk.Tk):
             session = load_project_session(p)
             self.project_session_file.set(p)
             self.project_session_name.set(session.get("project_name","Pepforge_Project"))
-            paths = export_session_summary(session, self.outdir.get())
+            paths = export_session_summary(session, str(self._effective_outdir()))
             rows = [
                 {"item":"loaded_session", "value":p, "note":"loaded project session"},
                 {"item":"current_stage", "value":session.get("current_stage",""), "note":"resume point"},
@@ -2902,9 +2649,9 @@ class DockingWorkbenchGUI(tk.Tk):
                 session = None
             if session is None:
                 name = self.project_session_name.get().strip() or "Pepforge_Project"
-                paths = create_project_session_package(name, self.outdir.get(), description="Pepforge workflow session")
+                paths = create_project_session_package(name, str(self._effective_outdir()), description="Pepforge workflow session")
             else:
-                paths = export_session_summary(session, self.outdir.get())
+                paths = export_session_summary(session, str(self._effective_outdir()))
             rows = [
                 {"item":"session_json", "value":paths.get("session_json",""), "note":"portable project state file"},
                 {"item":"summary", "value":paths.get("project_session_summary",""), "note":"readable resume summary"},
@@ -2926,7 +2673,7 @@ class DockingWorkbenchGUI(tk.Tk):
     def build_candidate_dashboard(self):
         try:
             paths = export_candidate_dashboard(
-                output_dir=self.outdir.get(),
+                output_dir=str(self._effective_outdir()),
                 design_candidates_csv=self.dashboard_design_csv.get().strip() or None,
                 docking_contacts_csv=self.dashboard_docking_csv.get().strip() or None,
                 external_docking_scores_csv=self.dashboard_external_csv.get().strip() or None,
@@ -2952,7 +2699,7 @@ class DockingWorkbenchGUI(tk.Tk):
 
     def create_experimental_template(self):
         try:
-            path = make_experimental_template(Path(self.outdir.get()) / "experimental_data_import")
+            path = make_experimental_template(self._effective_outdir() / "experimental_data_import")
             self.experimental_import_csv.set(path)
             self.log.insert("end", f"Experimental data template created: {path}\n")
             self.log.see("end")
@@ -2966,7 +2713,7 @@ class DockingWorkbenchGUI(tk.Tk):
             messagebox.showwarning("Experimental Data Import", "Choose an experimental assay CSV first.")
             return
         try:
-            paths = export_experimental_import_package(src, self.outdir.get())
+            paths = export_experimental_import_package(src, str(self._effective_outdir()))
             self.dashboard_experimental_csv.set(paths.get("experimental_candidate_summary", ""))
             rows = [
                 {"item":"normalized", "value":paths.get("experimental_data_normalized", ""), "note":"normalized assay data"},
@@ -2988,7 +2735,7 @@ class DockingWorkbenchGUI(tk.Tk):
     def create_workflow_config(self):
         try:
             cfg = default_workflow_config(self.workflow_project_name.get().strip() or "Pepforge_Project")
-            path = save_workflow_config(cfg, self.outdir.get())
+            path = save_workflow_config(cfg, str(self._effective_outdir()))
             self.workflow_config_path.set(path)
             rows = [{"item":"workflow_config", "value":path, "note":"editable workflow configuration"}]
             self.workflow_summary = pd.DataFrame(rows)
@@ -3008,7 +2755,7 @@ class DockingWorkbenchGUI(tk.Tk):
                 cfg = load_workflow_config(cfg_path)
             else:
                 cfg = default_workflow_config(self.workflow_project_name.get().strip() or "Pepforge_Project")
-            paths = run_workflow(cfg, self.outdir.get())
+            paths = run_workflow(cfg, str(self._effective_outdir()))
             rows = [
                 {"item":"stage_results", "value":paths.get("workflow_stage_results",""), "note":"stage status table"},
                 {"item":"manifest", "value":paths.get("workflow_run_manifest",""), "note":"workflow artifact manifest"},
@@ -3041,7 +2788,7 @@ class DockingWorkbenchGUI(tk.Tk):
             paths = export_run_comparison_package(
                 old_project_dir=oldp,
                 new_project_dir=newp,
-                output_dir=self.outdir.get(),
+                output_dir=str(self._effective_outdir()),
                 old_dashboard_csv=self.compare_old_dashboard.get().strip() or None,
                 new_dashboard_csv=self.compare_new_dashboard.get().strip() or None,
             )
@@ -3098,12 +2845,11 @@ class DockingWorkbenchGUI(tk.Tk):
             "docking_residue_contact_report": getattr(self, "contacts", pd.DataFrame()),
             "docking_residue_contact_report_full": getattr(self, "all_contacts", getattr(self, "contacts", pd.DataFrame())),
             "docking_atom_contact_report": getattr(self, "atom_contacts", pd.DataFrame()),
-            "affinity_scoring_summary": normalize_affinity_report_df(getattr(self, "imported_results", pd.DataFrame()), getattr(self, "poses", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame())),
+            "screening_evidence_summary": getattr(self, "screening_evidence", screening_evidence_df(getattr(self, "poses", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame()))),
+            "external_result_import_summary": getattr(self, "imported_results", pd.DataFrame()),
             "external_style_validation_summary": self._external_style_validation_df(),
             "simulation_summary": simulation_summary_df(getattr(self, "poses", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame()), getattr(self, "risk", pd.DataFrame())),
-            "molecular_dynamics_summary": getattr(self, "md_summary", pd.DataFrame()),
-            "molecular_dynamics_frames": getattr(self, "md_frames", pd.DataFrame()),
-            "molecular_dynamics_readable_frames": self._md_readable_frames(getattr(self, "md_frames", pd.DataFrame())) if hasattr(self, "_md_readable_frames") else getattr(self, "md_frames", pd.DataFrame()),
+            "molecular_dynamics_status": getattr(self, "md_summary", pd.DataFrame()),
             "md_result_import_summary": getattr(self, "md_result_import", pd.DataFrame()),
             "peptide_risk_summary": getattr(self, "risk", pd.DataFrame()),
             "docking_readiness": getattr(self, "readiness", pd.DataFrame()),
@@ -3117,8 +2863,8 @@ class DockingWorkbenchGUI(tk.Tk):
         group = str(group or "results").lower()
         groups = {
             "input": ["peptide_properties", "terminal_state", "target_structure_summary", "target_preparation_report", "binding_site_selector_report", "rcsb_pdb_search_results", "sequence_pair_heuristic", "workflow", "modified_residue_compatibility", "terminal_modifier_policy", "all_atom_parameter_requirements"],
-            "results": ["result_interpretation", "docking_pose_candidates", "affinity_scoring_summary", "external_style_validation_summary", "peptide_risk_summary", "docking_readiness", "simulation_summary", "docking_residue_contact_report", "docking_residue_contact_report_full", "docking_atom_contact_report"],
-            "md": ["external_style_validation_summary", "molecular_dynamics_summary", "molecular_dynamics_readable_frames", "molecular_dynamics_frames", "md_result_import_summary"],
+            "results": ["result_interpretation", "docking_pose_candidates", "screening_evidence_summary", "external_result_import_summary", "external_style_validation_summary", "peptide_risk_summary", "docking_readiness", "simulation_summary", "docking_residue_contact_report", "docking_residue_contact_report_full", "docking_atom_contact_report"],
+            "md": ["external_style_validation_summary", "molecular_dynamics_status", "md_result_import_summary"],
         }
         tables = self._all_docking_data_tables()
         names = groups.get(group, groups["results"])
@@ -3165,35 +2911,61 @@ class DockingWorkbenchGUI(tk.Tk):
                 if cols:
                     tree.insert("", "end", values=["no data", "", "Run Analyze/Run or load a valid file; this pane is intentionally not hidden."][:len(cols)])
             except Exception:
-                pass
+                LOGGER.debug("Optional operation skipped", exc_info=True)
             return
         for _,r in df.iterrows(): tree.insert("","end",values=[r.get(c,"") for c in tree["columns"]])
 
-    def _validate_for_run(self):
+    def _screening_validation_reasons(self):
+        """Return user-facing validation reasons without opening a dialog.
+
+        Keeping validation computation separate makes the Run Screening callback
+        testable and prevents silent pre-dialog failures in the windowed EXE.
+        """
         reasons=[]
         resolved = self._resolved_target()
         if resolved.get("status") != "ok":
             reasons.append(str(resolved.get("message") or "Target was not recognized."))
         else:
-            # Keep the combobox synchronized with the actually recognized target.
             if resolved.get("mode") in {"PDB", "Sequence"} and self.target_mode.get() != resolved.get("mode"):
                 self.target_mode.set(str(resolved.get("mode")))
         if self.peptide_mode.get()=="PDB":
             pp=Path(self._peptide_pdb_path())
-            tp=Path(self._target_path())
             if not pp.exists() and not (resolved.get("mode")=="PDB" and resolved.get("path") and structure_has_multiple_chains(resolved.get("path"))):
                 reasons.append("Peptide PDB is missing. For complex structures, load a multi-chain complex in the PDB box or provide a separate peptide PDB.")
         else:
-            if not self._active_peptide_sequence():
-                reasons.append("Peptide sequence is empty or could not be parsed. Enter a peptide sequence or load a peptide PDB.")
+            raw_peptide = canonical_peptide_notation(self.seq.get())
+            if not raw_peptide:
+                reasons.append("Peptide sequence is empty. Enter a peptide sequence or load a peptide PDB.")
+            else:
+                try:
+                    token_rows = _split_peptide_model_tokens(raw_peptide)
+                    unsupported = [r.get("token","") for r in token_rows if r.get("class") == "unsupported"]
+                    if unsupported:
+                        reasons.append("Unsupported peptide token(s): " + ", ".join(map(str,unsupported)) + ". No canonical-residue surrogate will be substituted.")
+                    misplaced = misplaced_nterm_modifier_tokens(raw_peptide)
+                    if misplaced:
+                        reasons.append("N-terminal-only modifier appears internally: " + ", ".join(misplaced) + ". Use explicit supported attachment notation.")
+                    if not token_rows:
+                        reasons.append("Peptide sequence did not produce any supported structure tokens.")
+                except Exception as exc:
+                    reasons.append("Peptide sequence/structure parsing failed: " + str(exc))
+        return reasons, resolved
+
+    def _validate_for_run(self):
+        reasons, resolved = self._screening_validation_reasons()
         if reasons:
+            try:
+                self.log.insert("end", "Input validation failed:\n" + "\n".join("- "+r for r in reasons) + "\n")
+                self.log.see("end")
+            except Exception as exc:
+                LOGGER.debug("Could not write validation failure to UI log: %s", exc)
             messagebox.showerror("Docking input check failed", "\n".join("- "+r for r in reasons))
             return False
         try:
             self.log.insert("end", "Target resolver: " + str(resolved.get("message","")) + "\n")
             self.log.see("end")
-        except Exception:
-            pass
+        except Exception as exc:
+            LOGGER.debug("Could not write target resolver message: %s", exc)
         return True
 
     def import_external_result(self):
@@ -3214,331 +2986,535 @@ class DockingWorkbenchGUI(tk.Tk):
             prod=parse_affinity_text(p)
             rows.extend(prod.to_dict("records"))
         else: rows.append({"source":p.name,"field":"size_bytes","value":p.stat().st_size,"note":"generic result file"})
-        self.imported_results=normalize_affinity_report_df(pd.DataFrame(rows)); self._write_tree(self.import_tree,self.imported_results)
+        self.imported_results=normalize_result_report_df(pd.DataFrame(rows)); self._write_tree(self.import_tree,self._combined_result_report())
 
     def analyze(self):
         try:
             self._set_progress(5, "Analyzing inputs...")
             self._normalize_input_modes()
             active_peptide_seq = self._peptide_metadata_sequence()
-            self.props=estimate_properties(active_peptide_seq)
-            self.terminal_status=terminal_status_df(active_peptide_seq)
-            self.target_atoms=parse_pdb_atoms(self._target_path()) if self.target_mode.get()=="PDB" and self.pdb_path.get() else pd.DataFrame()
+            self.props = estimate_properties(active_peptide_seq)
+            self.terminal_status = terminal_status_df(active_peptide_seq)
             resolved_target = self._resolved_target()
-            if resolved_target.get("mode")=="PDB" and resolved_target.get("path"):
-                self.pdb=pdb_summary_df(resolved_target.get("path"))
-            elif isinstance(resolved_target.get("atoms"), pd.DataFrame) and not resolved_target.get("atoms").empty:
-                # Structure was resolved from a prepared/imported target even when the combobox state was stale.
-                self.pdb=pdb_summary_df(self._target_path())
+            if resolved_target.get("mode") == "PDB" and resolved_target.get("path"):
+                self.target_atoms = parse_pdb_atoms(resolved_target.get("path"))
+                self.pdb = pdb_summary_df(resolved_target.get("path"))
             else:
-                self.pdb=pd.DataFrame([
-                    {"field":"target_mode","value":resolved_target.get("mode","Sequence"),"note":resolved_target.get("message","Target resolver status")},
-                    {"field":"target_sequence_length","value":len(str(resolved_target.get("sequence") or "")),"note":"cleaned protein residues parsed from FASTA/text/file"},
-                    {"field":"target_path","value":self._target_path(),"note":"If a PDB/CIF was entered but not summarized, press Analyze after selecting Target input = PDB."},
+                self.target_atoms = pd.DataFrame()
+                self.pdb = pd.DataFrame([
+                    {"field":"target_mode","value":"Sequence descriptor only","note":resolved_target.get("message","Target resolver status")},
+                    {"field":"target_sequence_length","value":len(str(resolved_target.get("sequence") or "")),"note":"No 3D coordinates are fabricated from target sequence."},
+                    {"field":"3d_screening_requirement","value":"target PDB/mmCIF required","note":"Provide measured/predicted target coordinates before pose/contact screening."},
                 ])
-            if self.pdb is None or self.pdb.empty:
-                self.pdb = pd.DataFrame([{"field":"target_summary_status","value":"available after target selection","note":"No target atoms parsed yet; select PDB/CIF/mmCIF or enter target sequence, then Analyze/Run."}])
-            self.residue_map=residue_map_df(active_peptide_seq); self.risk=structure_risk_df(self.props); self.readiness=docking_readiness_df(active_peptide_seq)
-            self.seqpair=sequence_sequence_interaction_df(self._active_target_sequence(), active_peptide_seq) if self.target_mode.get()=="Sequence" else pd.DataFrame([{"metric":"mode","value":"not sequence_sequence","note":"Use Target input = Sequence to enable sequence-pair heuristic."}])
-            self.pipeline=structure_pipeline_df(self.target_mode.get(), self.peptide_mode.get(), self._active_target_sequence(), active_peptide_seq, self._target_path(), self._peptide_pdb_path())
-            self.poses=pd.DataFrame(columns=self.pose_tree["columns"]); self.contacts=pd.DataFrame(columns=self.contact_tree["columns"]); self.atom_contacts=pd.DataFrame(columns=_atom_contact_columns()); self.peptide_model=peptide_pseudo_model(active_peptide_seq)
-            self.imported_results=normalize_affinity_report_df(getattr(self,"imported_results",pd.DataFrame()), getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
-            self.md_summary=getattr(self,"md_summary",pd.DataFrame(columns=["metric","value","note"]))
-            self.md_frames=getattr(self,"md_frames",pd.DataFrame(columns=self.md_tree["columns"]))
-            for tr,df in [(self.prop_tree,self.props),(self.terminal_tree,self.terminal_status),(self.pdb_tree,self.pdb),(self.seqpair_tree,self.seqpair),(self.pipeline_tree,self.pipeline),(self.risk_tree,self.risk),(self.readiness_tree,self.readiness),(self.pose_tree,self.poses),(self.contact_tree,self.contacts),(self.import_tree,self.imported_results),(self.external_style_tree,self._external_style_validation_df()),(self.md_result_tree,getattr(self,"md_result_import",pd.DataFrame())),(self.sim_tree,simulation_summary_df(self.poses,self.contacts,self.risk)),(self.md_tree,self._md_readable_frames(getattr(self,"md_frames",pd.DataFrame()))),(self.interpret_tree,self._interpretation_df())]: self._write_tree(tr,df)
+            self.residue_map = residue_map_df(active_peptide_seq)
+            self.risk = structure_risk_df(self.props)
+            self.readiness = docking_readiness_df(active_peptide_seq)
+            self.compatibility = peptide_token_compatibility_df(active_peptide_seq)
+            self.seqpair = sequence_sequence_interaction_df(self._active_target_sequence(), active_peptide_seq) if resolved_target.get("mode") == "Sequence" else pd.DataFrame([{"metric":"mode","value":"3D target input","note":"Sequence-only descriptors are not needed when target coordinates are supplied."}])
+            self.pipeline = structure_pipeline_df(self.target_mode.get(), self.peptide_mode.get(), self._active_target_sequence(), active_peptide_seq, self._target_path(), self._peptide_pdb_path())
+            self.poses = pd.DataFrame(columns=self.pose_tree["columns"])
+            self.contacts = pd.DataFrame(columns=self.contact_tree["columns"])
+            self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
+            # Analyze is intentionally lightweight: sequence-derived 3D peptide
+            # geometry is generated only when Run Screening is requested.
+            self.peptide_model = pd.DataFrame(columns=["pep_pos","aa","token","token_class","x","y","z"])
+            self.screening_evidence = screening_evidence_df(self.poses, self.contacts)
+            if not hasattr(self, "imported_results"):
+                self.imported_results = pd.DataFrame(columns=["source","metric","value","unit","interpretation","method_note"])
+            self.md_summary = pd.DataFrame([{"metric":"molecular_dynamics","value":"external only","note":"Pepforge does not run molecular dynamics internally."}])
+            self.md_frames = pd.DataFrame(columns=self.md_tree["columns"])
+            for tr,df in [
+                (self.prop_tree,self.props),(self.terminal_tree,self.terminal_status),(self.pdb_tree,self.pdb),
+                (self.seqpair_tree,self.seqpair),(self.pipeline_tree,self.pipeline),(self.risk_tree,self.risk),
+                (self.readiness_tree,self.readiness),(self.pose_tree,self.poses),(self.contact_tree,self.contacts),
+                (self.import_tree,self._combined_result_report()),(self.external_style_tree,self._external_style_validation_df()),
+                (self.md_result_tree,getattr(self,"md_result_import",pd.DataFrame())),
+                (self.sim_tree,simulation_summary_df(self.poses,self.contacts,self.risk)),
+                (self.md_tree,self._md_readable_frames(self.md_frames)),(self.interpret_tree,self._interpretation_df())
+            ]:
+                self._write_tree(tr,df)
             try:
                 self.tabs.select(0)
                 self.collapse_input_panel()
             except Exception:
-                pass
+                LOGGER.debug("Could not adjust analysis view", exc_info=True)
             self._set_progress(100, "Analysis complete")
-            self.log.insert("end","Input analysis updated. Terminal states and workflow readiness were refreshed.\n"); self.log.see("end")
-        except Exception as e:
-            messagebox.showerror("Docking Workbench analysis error", str(e))
+            self.log.insert("end","Input analysis updated. No target/peptide 3D coordinates were fabricated during Analyze.\n")
+            self.log.see("end")
+        except Exception as exc:
+            messagebox.showerror("Docking Workbench analysis error", str(exc))
             raise
 
+
     def _active_target_atoms_for_docking(self):
+        """Return only coordinate-derived target atoms; sequence-only targets return empty."""
         resolved = self._resolved_target()
         atoms = resolved.get("atoms")
-        if isinstance(atoms, pd.DataFrame) and not atoms.empty:
+        if resolved.get("mode") == "PDB" and isinstance(atoms, pd.DataFrame) and not atoms.empty:
             return atoms
-        return target_sequence_pseudo_atoms(str(resolved.get("sequence") or self._active_target_sequence()))
+        return pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"])
+
 
     def run_full_workflow(self):
-        """Run the essential workflow with one button: analyze, dock, score, and run embedded MD screening."""
+        """Analyze and start 3D/contact screening; MD remains external-only."""
         self._set_progress(0, "Starting workflow...")
         self.analyze()
-        self._set_progress(30, "Running docking...")
+        self._set_progress(20, "Starting screening...")
         self.run_docking()
-        self._set_progress(72, "Running molecular dynamics...")
-        self.run_md_lite()
-        self._set_progress(100, "Workflow complete")
-        self.log.insert("end", "Full workflow completed: input analysis, docking, scoring, and molecular dynamics screening.\n")
+        self.log.insert("end", "Workflow started: input analysis + geometry/contact screening. Molecular dynamics is external-only.\n")
         self.log.see("end")
 
+
     def _interpretation_df(self):
-        poses = getattr(self, "poses", pd.DataFrame())
-        contacts = getattr(self, "contacts", pd.DataFrame())
-        risk = getattr(self, "risk", pd.DataFrame())
-        md_summary = getattr(self, "md_summary", pd.DataFrame())
+        poses=getattr(self,"poses",pd.DataFrame()); contacts=getattr(self,"contacts",pd.DataFrame())
         rows=[]
         if poses is None or poses.empty:
-            rows.append({"item":"Docking", "status":"Not run", "interpretation":"Click Run to generate pose candidates and contact scoring."})
+            rows.append({"item":"3D screening","status":"No pose result","interpretation":"Sequence-only targets provide descriptors only. Supply target coordinates for local 3D screening."})
         else:
-            best = poses.iloc[0]
-            contacts_n = int(float(best.get("contact_count", 0) or 0))
-            clashes_n = int(float(best.get("clash_count", 0) or 0))
-            score = best.get("score_lower_better", "")
-            if contacts_n >= 8 and clashes_n <= 2:
-                status = "Good screening candidate"
-            elif contacts_n >= 4 and clashes_n <= 5:
-                status = "Usable for triage"
-            else:
-                status = "Weak or needs review"
-            rows.append({"item":"Docking", "status":status, "interpretation":f"Best pose score={score}, contacts={contacts_n}, clashes={clashes_n}. Read the Affinity report for estimated ΔG (kcal/mol), Kd (one representative unit), H-bond/hydrophobic distance cutoffs, contacts, and clashes; use as screening evidence, not final proof."})
-        if contacts is None or contacts.empty:
-            rows.append({"item":"Interface", "status":"No contacts yet", "interpretation":"Run docking or load a complex output folder to inspect residue/atom contacts."})
-        else:
-            rows.append({"item":"Interface", "status":"Contacts detected", "interpretation":f"{len(contacts)} residue-level contacts are available. Check the Contacts tab for residue pairs and distances."})
-        high_risks=[]
-        if risk is not None and not risk.empty and "level" in risk.columns:
-            high_risks = [str(x) for x in risk.loc[risk["level"].astype(str).str.lower().isin(["high"]), "risk"].tolist()]
-        rows.append({"item":"Peptide risk", "status":"High risk" if high_risks else "Acceptable", "interpretation":("Review: "+", ".join(high_risks)) if high_risks else "No high-level peptide risk was flagged by the embedded screening heuristics."})
-        if md_summary is not None and not md_summary.empty:
-            rows.append({"item":"Molecular dynamics", "status":"Screened", "interpretation":"Embedded MD screening is available. For publication-grade claims, export the validation package and import all-atom MD results."})
-        else:
-            rows.append({"item":"Molecular dynamics", "status":"Not run", "interpretation":"Click Run or use Advanced > Run molecular dynamics only after docking."})
+            best=poses.iloc[0]
+            rows.append({"item":"3D screening","status":"Geometry candidates available","interpretation":f"Top candidate rank={best.get('pose_rank','')}; centroid contacts={best.get('contact_count','')}; overlap warnings={best.get('centroid_overlap_warnings','')}. No ΔG/Kd is inferred."})
+        rows.append({"item":"Interface","status":"Centroid contacts available" if isinstance(contacts,pd.DataFrame) and not contacts.empty else "No centroid contacts","interpretation":"Residue/token-centroid proximity is a geometric screening descriptor, not a bond or affinity measurement."})
+        rows.append({"item":"Atom-level contacts","status":"Available when both atomic structures are supplied","interpretation":"Hydrogen-bond distance candidates and other atom-level proximity labels require actual atomic coordinates."})
+        rows.append({"item":"Molecular dynamics","status":"External only","interpretation":"Run a validated external MD engine and import its results if dynamics are needed."})
         return pd.DataFrame(rows, columns=["item","status","interpretation"])
 
-    def run_docking(self):
-        """Run the docking workflow without rejecting mixed inputs."""
-        self._normalize_input_modes()
-        if not self._validate_for_run(): return
-        active_target_seq = self._active_target_sequence()
-        self._set_progress(34, "Docking: preparing target and peptide...")
-        active_peptide_seq = self._peptide_metadata_sequence()
-        self.props = estimate_properties(active_peptide_seq)
-        self.terminal_status = terminal_status_df(active_peptide_seq)
-        self.pipeline = structure_pipeline_df(self.target_mode.get(), self.peptide_mode.get(), active_target_seq, active_peptide_seq, self._target_path(), self._peptide_pdb_path())
-        self.target_atoms = self._active_target_atoms_for_docking()
-        target_source = "PDB/mmCIF" if self.target_mode.get() == "PDB" else "target model from sequence"
 
-        # Complex PDB path: split and score directly.
-        if self.target_mode.get() == "PDB" and self._target_path() and Path(self._target_path()).exists() and self.peptide_mode.get() == "PDB" and not (self._peptide_pdb_path() and Path(self._peptide_pdb_path()).exists()) and structure_has_multiple_chains(self._target_path()):
-            self.poses, self.contacts, self.atom_contacts, self.peptide_model = analyze_complex_structure_contacts(self._target_path())
-            self.seqpair = pd.DataFrame([{"metric":"mode","value":"complex_pdb","note":"Contact/affinity scoring on imported multi-chain complex."}])
-        else:
-            if self.peptide_mode.get() == "PDB" and self._peptide_pdb_path() and Path(self._peptide_pdb_path()).exists():
-                pep_points = pdb_to_peptide_points(self._peptide_pdb_path())
-                self.peptide_model = pep_points
-                # If target and peptide structures are already in contact, report that; otherwise perform receptor-guided placement.
-                if self.target_mode.get() == "PDB":
-                    direct_poses, direct_contacts = analyze_pdb_pdb_contacts(self._target_path(), self._peptide_pdb_path())
-                    if not direct_poses.empty and str(direct_poses.iloc[0].get("contact_count", "0")) not in ("", "0", "0.0", "nan"):
-                        self.poses, self.contacts = direct_poses, direct_contacts
-                        self.atom_contacts = analyze_atom_level_contacts(self._target_path(), self._peptide_pdb_path())
+    def _screening_failure_log(self, stage: str, exc: BaseException) -> Path:
+        """Persist a visible screening failure report in the docking sandbox."""
+        try:
+            out = self._effective_outdir() if hasattr(self, "_effective_outdir") else configured_output(ROOT / "outputs" / "docking_workbench", "docking")
+        except Exception:
+            out = configured_output(ROOT / "outputs" / "docking_workbench", "docking")
+        log_dir = Path(out) / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        path = log_dir / f"screening_failure_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        path.write_text(
+            "Pepforge Docking Workbench screening failure\n"
+            "============================================\n"
+            f"Stage: {stage}\n"
+            f"Error: {type(exc).__name__}: {exc}\n\n"
+            + traceback.format_exc(),
+            encoding="utf-8",
+        )
+        return path
+
+    def _set_screening_busy(self, busy: bool) -> None:
+        try:
+            self.run_screening_btn.configure(state="disabled" if busy else "normal")
+        except Exception as exc:
+            LOGGER.debug("Could not update Run Screening state: %s", exc)
+
+    def run_docking(self):
+        """Start screening with immediate UI feedback and guarded validation.
+
+        The previous callback could fail before validation/progress feedback and,
+        in a windowed EXE, look like a dead button.  This entry point always
+        updates the progress bar first, then runs the actual workflow on the next
+        Tk event-loop turn so the user sees that the click was received.
+        """
+        if getattr(self, "_screening_in_progress", False):
+            return
+        self._screening_in_progress = True
+        self._set_screening_busy(True)
+        self._set_progress(2, "Screening requested...")
+        try:
+            self.log.insert("end", "Run Screening requested.\n")
+            self.log.see("end")
+        except Exception as exc:
+            LOGGER.debug("Could not write screening start log: %s", exc)
+        self.after(25, self._run_docking_guarded)
+
+    def _run_docking_guarded(self):
+        stage = "input mode normalization"
+        try:
+            self._set_progress(5, "Resolving inputs...")
+            self._normalize_input_modes()
+
+            stage = "input validation"
+            self._set_progress(10, "Validating inputs...")
+            if not self._validate_for_run():
+                self._set_progress(0, "Input validation failed")
+                return False
+
+            stage = "descriptor analysis"
+            self.peptide_source_pdb = ""
+            self.peptide_structure_paths = {}
+            self._set_progress(18, "Analyzing chemistry and input modes...")
+            resolved = self._resolved_target()
+            active_target_seq = self._active_target_sequence()
+            active_peptide_seq = self._peptide_metadata_sequence()
+            self.props = estimate_properties(active_peptide_seq)
+            self.terminal_status = terminal_status_df(active_peptide_seq)
+            self.compatibility = peptide_token_compatibility_df(active_peptide_seq)
+            self.risk = structure_risk_df(self.props)
+            self.readiness = docking_readiness_df(active_peptide_seq)
+            self.residue_map = residue_map_df(active_peptide_seq)
+            self.pipeline = structure_pipeline_df(
+                self.target_mode.get(), self.peptide_mode.get(), active_target_seq,
+                active_peptide_seq, self._target_path(), self._peptide_pdb_path()
+            )
+
+            # Sequence-only target: descriptors only. No invented protein geometry.
+            if resolved.get("mode") != "PDB":
+                stage = "sequence-only descriptor analysis"
+                self._set_progress(45, "Sequence-only mode: no 3D target fabricated")
+                self.target_atoms = pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"])
+                self.peptide_model = pd.DataFrame(columns=["pep_pos","aa","token","token_class","x","y","z"])
+                self.poses = pd.DataFrame(columns=self.pose_tree["columns"])
+                self.contacts = pd.DataFrame(columns=self.contact_tree["columns"])
+                self.all_contacts = self.contacts.copy()
+                self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
+                self.seqpair = sequence_sequence_interaction_df(active_target_seq, active_peptide_seq)
+                self.screening_evidence = screening_evidence_df(self.poses, self.contacts)
+                self.pdb = pd.DataFrame([
+                    {"field":"target_mode","value":"Sequence descriptor only","note":"No 3D target coordinates were generated."},
+                    {"field":"target_sequence_length","value":len(active_target_seq),"note":"Canonical target residues parsed."},
+                    {"field":"3d_screening_requirement","value":"target PDB/mmCIF required","note":"Load experimentally determined or externally predicted target coordinates before pose/contact screening."},
+                ])
+                completion_text = "Sequence descriptor analysis complete; target coordinates required for 3D screening"
+            else:
+                stage = "target coordinate preparation"
+                self._set_progress(28, "Loading target coordinates...")
+                self.target_atoms = self._active_target_atoms_for_docking()
+                if self.target_atoms is None or self.target_atoms.empty:
+                    raise ValueError("Target PDB/mmCIF contained no valid coordinate atoms. Invalid coordinate rows are not replaced with (0,0,0).")
+                self.pdb = pdb_summary_df(resolved.get("path") or self._target_path())
+                self.seqpair = pd.DataFrame([{"metric":"mode","value":"coordinate_target","note":"3D screening uses supplied target coordinates."}])
+
+                stage = "peptide coordinate preparation"
+                self._set_progress(40, "Preparing peptide coordinates...")
+                complex_mode = (
+                    self.peptide_mode.get() == "PDB"
+                    and not (self._peptide_pdb_path() and Path(self._peptide_pdb_path()).exists())
+                    and resolved.get("path")
+                    and structure_has_multiple_chains(resolved.get("path"))
+                )
+                if complex_mode:
+                    self.poses, self.contacts, self.atom_contacts, self.peptide_model = analyze_complex_structure_contacts(resolved.get("path"))
+                else:
+                    if self.peptide_mode.get() == "PDB":
+                        pp = Path(self._peptide_pdb_path())
+                        if not pp.exists():
+                            raise ValueError("Peptide PDB is missing.")
+                        pep_points = pdb_to_peptide_points(pp)
+                        if pep_points.empty:
+                            raise ValueError("No peptide coordinate points could be recovered from the peptide PDB/Structure Builder metadata.")
+                        self.peptide_model = pep_points
+                        self.peptide_source_pdb = str(pp)
+                        self.peptide_structure_paths = {"pdb": str(pp)}
+                    else:
+                        cache_root = self._default_outdir() / "_screening_cache"
+                        cache_root.mkdir(parents=True, exist_ok=True)
+                        cache_dir = Path(tempfile.mkdtemp(prefix="peptide_", dir=str(cache_root)))
+                        self.peptide_model, self.peptide_structure_paths = build_peptide_structure_bundle(
+                            active_peptide_seq, cache_dir, name="screening_peptide"
+                        )
+                        self.peptide_source_pdb = str(self.peptide_structure_paths["pdb"])
+                        pep_points = self.peptide_model
+
+                    stage = "geometry/contact screening"
+                    self._set_progress(55, "Screening rigid-body geometry/contact candidates...")
+                    if self.peptide_mode.get() == "PDB":
+                        direct_poses, direct_contacts = analyze_pdb_pdb_contacts(self._target_path(), self._peptide_pdb_path())
+                        if not direct_poses.empty and int(float(direct_poses.iloc[0].get("contact_count",0) or 0)) > 0:
+                            self.poses, self.contacts = direct_poses, direct_contacts
+                            self.atom_contacts = analyze_atom_level_contacts(self._target_path(), self._peptide_pdb_path())
+                        else:
+                            self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, pep_points, active_peptide_seq)
+                            self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
                     else:
                         self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, pep_points, active_peptide_seq)
                         self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
-                else:
-                    self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, pep_points, active_peptide_seq)
-                    self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
-                self.seqpair = pd.DataFrame([{"metric":"mode","value":"target_%s_peptide_pdb" % self.target_mode.get().lower(),"note":"Peptide PDB accepted; Pose search runs even when target starts as sequence."}])
-            else:
-                self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, None, active_peptide_seq)
-                self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
-                self.seqpair = sequence_sequence_interaction_df(active_target_seq, active_peptide_seq) if self.target_mode.get()=="Sequence" else pd.DataFrame([{"metric":"mode","value":"target_structure_peptide_sequence","note":"Receptor-guided pose search."}])
 
-        # Keep the full contact table for export, but show a readable Top 50 contact
-        # report in the UI.  This avoids hiding multiple interactions while still
-        # preventing the Contacts tab from becoming unreadable.
-        self.all_contacts = getattr(self, "contacts", pd.DataFrame()).copy()
-        self.contacts = top_contact_report(self.all_contacts, self.poses, top_n=50)
+                    # When local pose search was used, apply the exact recorded rigid-body
+                    # transform to the actual peptide atomic coordinates and analyze those.
+                    if (self.atom_contacts is None or self.atom_contacts.empty) and isinstance(self.poses,pd.DataFrame) and not self.poses.empty and getattr(self,"peptide_source_pdb",""):
+                        source_atoms=parse_pdb_atoms(self.peptide_source_pdb)
+                        if not source_atoms.empty:
+                            self.peptide_posed_atoms=apply_pose_transform_to_atoms(source_atoms,self.poses.iloc[0])
+                            self.atom_contacts=analyze_atom_level_contact_frames(self.target_atoms,self.peptide_posed_atoms)
 
-        # Fill the Atom contacts pane with real atom contacts when available; otherwise show a
-        # residue-level proxy so the panel explains why it is not truly atom-level.
-        if not hasattr(self, "atom_contacts") or self.atom_contacts is None or self.atom_contacts.empty:
-            self.atom_contacts = residue_contacts_to_atom_proxy(self.contacts)
+                stage = "contact summary"
+                self._set_progress(75, "Summarizing coordinate contacts...")
+                self.all_contacts = getattr(self, "contacts", pd.DataFrame()).copy()
+                self.contacts = top_contact_report(self.all_contacts, self.poses, top_n=50)
+                self.screening_evidence = screening_evidence_df(self.poses, self.contacts)
+                completion_text = f"3D geometry/contact screening complete: {len(self.poses)} pose rows, {len(self.contacts)} displayed contact rows"
 
-        # Always produce a affinity summary after docking.
-        self.imported_results = normalize_affinity_report_df(affinity_summary_df(self.poses, self.contacts), self.poses, self.contacts)
-        self.pdb = pdb_summary_df(self._target_path()) if self.target_mode.get()=="PDB" and self.pdb_path.get() else pd.DataFrame([
-            {"field":"target_mode","value":"Sequence -> target model","note":"Target sequence recognized and converted to a coarse target model so docking can run."},
-            {"field":"target_sequence_length","value":len(active_target_seq),"note":"cleaned protein residues"},
-            {"field":"target_source","value":target_source,"note":"used by pose search"},
-        ])
-        self._write_tree(self.seqpair_tree,self.seqpair); self._write_tree(self.pipeline_tree,self.pipeline); self._write_tree(self.pdb_tree,self.pdb); self._write_tree(self.terminal_tree,self.terminal_status); self._write_tree(self.pose_tree,self.poses); self._write_tree(self.contact_tree,self.contacts); self._write_tree(self.import_tree,self.imported_results); self._write_tree(self.external_style_tree,self._external_style_validation_df()); self._write_tree(self.sim_tree,simulation_summary_df(self.poses,self.contacts,self.risk)); self._write_tree(self.md_tree,self._md_readable_frames(getattr(self,"md_frames",pd.DataFrame()))); self._write_tree(self.interpret_tree,self._interpretation_df())
-        self._set_progress(70, "Docking complete: affinity units ready")
-        self.log.insert("end",f"Docking and affinity report completed: {len(self.poses)} pose rows, {len(self.contacts)} residue contacts. Target source: {target_source}.\n"); self.log.see("end")
+            stage = "results rendering"
+            self._set_progress(90, "Updating results...")
+            for tree, df in [
+                (self.prop_tree,self.props),(self.terminal_tree,self.terminal_status),(self.pdb_tree,self.pdb),
+                (self.seqpair_tree,self.seqpair),(self.pipeline_tree,self.pipeline),(self.risk_tree,self.risk),
+                (self.readiness_tree,self.readiness),(self.pose_tree,self.poses),(self.contact_tree,self.contacts),
+                (self.import_tree,self._combined_result_report()),(self.external_style_tree,self._external_style_validation_df()),
+                (self.sim_tree,simulation_summary_df(self.poses,self.contacts,self.risk)),
+                (self.md_tree,self._md_readable_frames(getattr(self,"md_frames",pd.DataFrame()))),
+                (self.interpret_tree,self._interpretation_df()),
+            ]:
+                self._write_tree(tree, df)
+            try:
+                for tab_id in self.tabs.tabs():
+                    if self.tabs.tab(tab_id, "text") == "Results":
+                        self.tabs.select(tab_id)
+                        break
+            except Exception:
+                LOGGER.debug("Could not switch to Results tab", exc_info=True)
+            self._set_progress(100, completion_text)
+            self.log.insert("end", completion_text + ".\n")
+            self.log.see("end")
+            self._last_screening_signature = self._screening_input_signature()
+            return True
+        except Exception as exc:
+            try:
+                log_path = self._screening_failure_log(stage, exc)
+            except Exception:
+                log_path = None
+            self._set_progress(0, f"Screening failed: {stage}")
+            LOGGER.exception("Docking screening failed at stage %s", stage)
+            detail = f"Screening failed during: {stage}\n\n{type(exc).__name__}: {exc}"
+            if log_path:
+                detail += f"\n\nDiagnostic log:\n{log_path}"
+            messagebox.showerror("Docking screening failed", detail)
+            return False
+        finally:
+            self._screening_in_progress = False
+            self._set_screening_busy(False)
+
 
     def _md_readable_summary(self, summary: pd.DataFrame) -> pd.DataFrame:
-        if summary is None or summary.empty:
-            return pd.DataFrame(columns=["metric","value","unit","interpretation"])
-        lookup = {str(r.get("metric")): r for _, r in summary.iterrows()}
-        def val(metric, default=""):
-            r = lookup.get(metric, {})
-            return r.get("value", default) if hasattr(r, "get") else default
-        rows = [
-            {"metric":"status", "value":val("md_lite_status", "completed"), "unit":"-", "interpretation":"embedded screening run status"},
-            {"metric":"final_RMSD", "value":val("final_rmsd_A", ""), "unit":"Angstrom", "interpretation":"lower suggests less drift in the internal screening model"},
-            {"metric":"mean_contacts", "value":val("mean_contact_count", ""), "unit":"count", "interpretation":"average maintained target-peptide contacts"},
-            {"metric":"contact_persistence", "value":val("contact_persistence_proxy", ""), "unit":"0-1 proxy", "interpretation":"higher means contacts persisted better during screening"},
-            {"metric":"final_clashes", "value":val("final_clash_count", ""), "unit":"count", "interpretation":"lower is better; high values suggest steric review"},
-            {"metric":"screening_call", "value":val("stability_call", "Review"), "unit":"qualitative", "interpretation":"triage label only; not a full all-atom MD conclusion"},
-        ]
-        return pd.DataFrame(rows, columns=["metric","value","unit","interpretation"])
+        return pd.DataFrame([{"metric":"molecular_dynamics","value":"external only","unit":"-","interpretation":"Pepforge does not generate internal MD trajectories or stability metrics."}])
+
 
     def _md_readable_frames(self, frames: pd.DataFrame) -> pd.DataFrame:
-        cols=["frame","time_ps","rmsd_A","contacts","clashes","min_distance_A","interpretation"]
-        if frames is None or frames.empty:
-            return pd.DataFrame(columns=cols)
-        df=frames.copy()
-        n=len(df)
-        if n > 12:
-            idx=sorted(set([0, max(0,n//4), max(0,n//2), max(0,3*n//4), n-1]))
-            df=df.iloc[idx].copy()
-        rows=[]
-        for _, r in df.iterrows():
-            rmsd=float(r.get("rmsd_A",0) or 0); clashes=int(float(r.get("clash_count",0) or 0)); contacts=int(float(r.get("contact_count",0) or 0))
-            interp = "stable/contact-retained" if rmsd <= 3.5 and clashes <= 1 and contacts >= 1 else ("review clashes" if clashes > 1 else "moderate drift")
-            rows.append({"frame":int(float(r.get("step",0) or 0)), "time_ps":round(float(r.get("time_ps_proxy",0) or 0),3), "rmsd_A":round(rmsd,3), "contacts":contacts, "clashes":clashes, "min_distance_A":round(float(r.get("min_distance_A",0) or 0),3), "interpretation":interp})
-        return pd.DataFrame(rows, columns=cols)
+        return pd.DataFrame(columns=["frame","time_ps","rmsd_A","contacts","clashes","min_distance_A","interpretation"])
+
 
     def run_md_lite(self):
-        """Run embedded molecular dynamics on the current/best peptide pose and show frames."""
+        """Compatibility action directing the user to external molecular dynamics."""
+        self.md_summary = pd.DataFrame([{
+            "metric":"molecular_dynamics", "value":"not run internally",
+            "note":"Pepforge exports starting structures/templates only. Run GROMACS/OpenMM/NAMD externally and import the resulting RMSD/RMSF/energy/contact data."
+        }])
+        self.md_frames = pd.DataFrame(columns=self.md_tree["columns"])
+        self._write_tree(self.sim_tree, self._md_readable_summary(self.md_summary))
+        self._write_tree(self.md_tree, self._md_readable_frames(self.md_frames))
+        self._set_progress(100, "External MD preparation only")
         try:
-            if not hasattr(self, "poses") or self.poses is None or self.poses.empty:
-                self.run_docking()
-            target_atoms = self._active_target_atoms_for_docking() if hasattr(self, "_active_target_atoms_for_docking") else (parse_pdb_atoms(self._target_path()) if self.pdb_path.get() else pd.DataFrame())
-            peptide_points = getattr(self, "peptide_model", pd.DataFrame())
-            if peptide_points is None or peptide_points.empty:
-                if self.peptide_mode.get() == "PDB" and self._peptide_pdb_path() and Path(self._peptide_pdb_path()).exists():
-                    peptide_points = pdb_to_peptide_points(self._peptide_pdb_path())
-                else:
-                    peptide_points = peptide_pseudo_model(self._active_peptide_sequence() or self.seq.get())
-            self._set_progress(74, "Molecular dynamics: sampling frames...")
-            self.md_summary, self.md_frames, self.md_final_model, self.md_trajectory_pdb = run_builtin_md_lite(
-                target_atoms, peptide_points, steps=600, sample_every=10, temperature=0.35, dt=0.025, seed=17
-            )
-            self.md_summary = dynamics_summary_label(self.md_summary)
-            self._write_tree(self.sim_tree, self._md_readable_summary(self.md_summary))
-            self._write_tree(self.md_tree, self._md_readable_frames(self.md_frames))
-            self._write_tree(self.external_style_tree, self._external_style_validation_df())
-            status = "completed" if not self.md_summary.empty else "not run"
-            self._set_progress(95, "Molecular dynamics complete")
-            self.log.insert("end", f"Molecular dynamics screening {status}: {len(self.md_frames)} sampled frames. Export package includes all-atom validation templates and import support.\n")
+            self.log.insert("end", "Pepforge does not run internal molecular dynamics. Use Export for external MD preparation/import.\n")
             self.log.see("end")
-        except Exception as e:
-            messagebox.showerror("molecular dynamics error", str(e))
-            raise
+        except Exception:
+            LOGGER.debug("Could not update MD guidance log", exc_info=True)
+        return self.md_summary
+
 
     def export(self):
+        """Export results for the current inputs without silently reusing stale screening data.
+
+        If the displayed results were generated from the unchanged current inputs, export
+        writes them directly. If the inputs changed, one synchronous guarded screening pass
+        is performed first. This avoids the previous duplicate Structure Builder/screening
+        run on every export while preserving correctness.
+        """
         self._normalize_input_modes()
-        if not self._validate_for_run(): return
-        active_target_seq = self._active_target_sequence()
-        active_peptide_seq = self._peptide_metadata_sequence()
-        self.run_docking()
-        self.run_md_lite()
-        out_base=Path(self.outdir.get()); out_base.mkdir(parents=True,exist_ok=True)
-        stamp=__import__("datetime").datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if not self._screening_results_are_current():
+            self._screening_in_progress = True
+            self._set_screening_busy(True)
+            self._set_progress(2, "Preparing export screening...")
+            if not self._run_docking_guarded():
+                return None
+        else:
+            self._set_progress(96, "Writing current screening results...")
+
+        active_target_seq=self._active_target_sequence()
+        active_peptide_seq=self._peptide_metadata_sequence()
+        out_base=self._effective_outdir(); out_base.mkdir(parents=True,exist_ok=True)
+        stamp=datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         out=out_base/("docking_"+stamp); out.mkdir(parents=True,exist_ok=True)
-        self.imported_results = normalize_affinity_report_df(getattr(self,"imported_results",pd.DataFrame()), getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
-        tables={"peptide_properties":self.props,"target_structure_summary":self.pdb,"sequence_pair_heuristic":self.seqpair,"workflow":getattr(self,"pipeline",pd.DataFrame()),"peptide_residue_map":self.residue_map,"peptide_risk_summary":self.risk,"docking_readiness":self.readiness,"token_compatibility":getattr(self,"compatibility",peptide_token_compatibility_df(active_peptide_seq)),"terminal_modifier_policy":terminal_modifier_policy_df(active_peptide_seq),"all_atom_parameter_requirements":all_atom_parameter_requirements_df(active_peptide_seq),"docking_pose_candidates":self.poses,"docking_residue_contact_report":self.contacts,"docking_residue_contact_report_full":getattr(self,"all_contacts",self.contacts),"docking_atom_contact_report":getattr(self,"atom_contacts",pd.DataFrame()),"imported_results_summary":getattr(self,"imported_results",pd.DataFrame()),"md_result_import_summary":getattr(self,"md_result_import",pd.DataFrame()),"affinity_scoring_summary":getattr(self,"imported_results",pd.DataFrame()),"external_style_validation_summary":self._external_style_validation_df(),"simulation_summary":simulation_summary_df(self.poses,self.contacts,self.risk),"molecular_dynamics_summary":getattr(self,"md_summary",pd.DataFrame()),"molecular_dynamics_frames":getattr(self,"md_frames",pd.DataFrame()),"amphipathic_windows":amphipathic_window_df(self.seq.get()),"rcsb_pdb_search_results":getattr(self,"rcsb_results",pd.DataFrame()),"target_preparation_report":getattr(self,"target_prep_report",pd.DataFrame()),"complex_builder_report":getattr(self,"complex_builder_report",pd.DataFrame())}
-        for name,df in tables.items(): df.to_csv(out/f"{name}.csv",index=False,encoding="utf-8-sig")
-        (out/"affinity_report.md").write_text(affinity_report_markdown(self.imported_results), encoding="utf-8")
-        fasta_name=re.sub(r"[^A-Za-z0-9_\-]","_",active_peptide_seq)[:50] or "peptide"
-        (out/"peptide.fasta").write_text(f">{fasta_name}\n{active_peptide_seq}\n",encoding="utf-8")
-        (out/"peptide_pseudo_model.pdb").write_text(pseudo_peptide_pdb(self.peptide_model),encoding="utf-8")
-        if has_modified_peptide_tokens(active_peptide_seq):
-            (out/"modified_peptide_simulated_structure.pdb").write_text(pseudo_peptide_pdb(self.peptide_model), encoding="utf-8")
-            (out/"modified_peptide_simulated_structure.cif").write_text(pseudo_peptide_cif(self.peptide_model), encoding="utf-8")
-        (out/"embedded_md_final_model.pdb").write_text(pseudo_peptide_pdb(getattr(self,"md_final_model",self.peptide_model)),encoding="utf-8")
-        (out/"embedded_md_trajectory.pdb").write_text(getattr(self,"md_trajectory_pdb","") or pseudo_peptide_pdb(getattr(self,"md_final_model",self.peptide_model)),encoding="utf-8")
-        target_atoms_for_export = self._active_target_atoms_for_docking() if hasattr(self, "_active_target_atoms_for_docking") else pd.DataFrame()
-        current_peptide_for_export = getattr(self, "md_final_model", getattr(self, "peptide_model", pd.DataFrame()))
-        (out/"best_docking_complex.pdb").write_text(combined_complex_pdb(target_atoms_for_export, current_peptide_for_export, getattr(self, "contacts", pd.DataFrame())), encoding="utf-8")
-        (out/"contact_annotated_complex.pdb").write_text(combined_complex_pdb(target_atoms_for_export, getattr(self, "peptide_model", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame())), encoding="utf-8")
-        prep_fasta, target_fasta, prep_json, prep_notes = structure_preparation_files(active_target_seq, active_peptide_seq, self._peptide_pdb_path())
-        (out/"structure_prediction_ready_complex.fasta").write_text(prep_fasta, encoding="utf-8")
-        (out/"target_structure_input.fasta").write_text(target_fasta, encoding="utf-8")
-        (out/"complex_structure_input.json").write_text(prep_json, encoding="utf-8")
-        (out/"STRUCTURE_PREPARATION_NOTES.txt").write_text(prep_notes, encoding="utf-8")
-        # External all-atom validation package. These files do not run MD inside Pepforge;
-        # they make the exported candidate reproducible and ready for external validation.
-        validation_dir = out / "all_atom_validation_package"
+
+        self.screening_evidence=screening_evidence_df(getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
+        external_results=getattr(self,"imported_results",pd.DataFrame())
+        md_import=getattr(self,"md_result_import",pd.DataFrame())
+        md_status=pd.DataFrame([{
+            "metric":"molecular_dynamics","value":"not run internally",
+            "note":"Pepforge exports structures/templates and imports results from validated external MD engines."
+        }])
+        tables={
+            "peptide_properties":getattr(self,"props",pd.DataFrame()),
+            "target_structure_summary":getattr(self,"pdb",pd.DataFrame()),
+            "sequence_pair_descriptors":getattr(self,"seqpair",pd.DataFrame()),
+            "workflow":getattr(self,"pipeline",pd.DataFrame()),
+            "peptide_residue_map":getattr(self,"residue_map",pd.DataFrame()),
+            "peptide_risk_summary":getattr(self,"risk",pd.DataFrame()),
+            "docking_readiness":getattr(self,"readiness",pd.DataFrame()),
+            "token_compatibility":getattr(self,"compatibility",peptide_token_compatibility_df(active_peptide_seq)),
+            "terminal_modifier_policy":terminal_modifier_policy_df(active_peptide_seq),
+            "all_atom_parameter_requirements":all_atom_parameter_requirements_df(active_peptide_seq),
+            "docking_pose_candidates":getattr(self,"poses",pd.DataFrame()),
+            "docking_residue_contact_report":getattr(self,"contacts",pd.DataFrame()),
+            "docking_residue_contact_report_full":getattr(self,"all_contacts",getattr(self,"contacts",pd.DataFrame())),
+            "docking_atom_contact_report":getattr(self,"atom_contacts",pd.DataFrame()),
+            "screening_evidence_summary":self.screening_evidence,
+            "external_result_import_summary":external_results,
+            "external_md_result_import_summary":md_import,
+            "external_validation_status":self._external_style_validation_df(),
+            "screening_summary":simulation_summary_df(getattr(self,"poses",pd.DataFrame()),getattr(self,"contacts",pd.DataFrame()),getattr(self,"risk",pd.DataFrame())),
+            "molecular_dynamics_status":md_status,
+            "amphipathic_windows":amphipathic_window_df(self.seq.get()),
+            "rcsb_pdb_search_results":getattr(self,"rcsb_results",pd.DataFrame()),
+            "target_preparation_report":getattr(self,"target_prep_report",pd.DataFrame()),
+            "complex_builder_report":getattr(self,"complex_builder_report",pd.DataFrame()),
+        }
+        for name,df in tables.items():
+            if not isinstance(df,pd.DataFrame): df=pd.DataFrame(df)
+            df.to_csv(out/f"{name}.csv",index=False,encoding="utf-8-sig")
+        (out/"screening_evidence_report.md").write_text(screening_report_markdown(self.screening_evidence),encoding="utf-8")
+
+        if active_peptide_seq:
+            fasta_name=re.sub(r"[^A-Za-z0-9_\-]","_",active_peptide_seq)[:50] or "peptide"
+            (out/"peptide.fasta").write_text(f">{fasta_name}\n{active_peptide_seq}\n",encoding="utf-8")
+        if active_target_seq:
+            (out/"target_sequence.fasta").write_text(f">target\n{active_target_seq}\n",encoding="utf-8")
+
+        target_path=Path(self._target_path()) if self._target_path() else None
+        if target_path and target_path.exists():
+            shutil.copy2(target_path,out/("target_input"+target_path.suffix.lower()))
+
+        structure_dir=out/"peptide_structure_builder"
+        structure_dir.mkdir(exist_ok=True)
+        source_pdb=Path(getattr(self,"peptide_source_pdb","")) if getattr(self,"peptide_source_pdb","") else None
+        source_paths=getattr(self,"peptide_structure_paths",{}) or {}
+        copied_source_pdb=None
+        if source_paths:
+            for key,value in source_paths.items():
+                src=Path(value)
+                if src.exists() and src.is_file():
+                    dst=structure_dir/src.name
+                    shutil.copy2(src,dst)
+                    if key=="pdb": copied_source_pdb=dst
+        elif source_pdb and source_pdb.exists():
+            copied_source_pdb=structure_dir/("peptide_input"+source_pdb.suffix.lower())
+            shutil.copy2(source_pdb,copied_source_pdb)
+
+        if isinstance(getattr(self,"peptide_model",None),pd.DataFrame) and not self.peptide_model.empty:
+            self.peptide_model.to_csv(out/"peptide_screening_token_centroids.csv",index=False,encoding="utf-8-sig")
+
+        posed_peptide_path=None; atomic_complex_path=None
+        poses=getattr(self,"poses",pd.DataFrame())
+        if isinstance(poses,pd.DataFrame) and not poses.empty and source_pdb and source_pdb.exists():
+            source_atoms=parse_pdb_atoms(source_pdb)
+            if not source_atoms.empty:
+                best=poses.iloc[0]
+                posed_atoms=apply_pose_transform_to_atoms(source_atoms,best)
+                posed_peptide_path=out/"peptide_screened_pose_atomic.pdb"
+                posed_peptide_path.write_text(atomic_structure_pdb(posed_atoms,"Pepforge screened peptide pose; rigid-body transform only",forced_chain="P"),encoding="utf-8")
+                target_atoms=getattr(self,"target_atoms",pd.DataFrame())
+                if isinstance(target_atoms,pd.DataFrame) and not target_atoms.empty:
+                    atomic_complex_path=out/"target_peptide_screened_pose_atomic.pdb"
+                    atomic_complex_path.write_text(atomic_complex_pdb(target_atoms,posed_atoms,getattr(self,"contacts",pd.DataFrame())),encoding="utf-8")
+                transform={k:(best.get(k).item() if hasattr(best.get(k),"item") else best.get(k)) for k in [
+                    "pose_rank","pose_id","orientation","rotation_z_deg","translation_x_A","translation_y_A","translation_z_A",
+                    "center_x_A","center_y_A","center_z_A","contact_count","centroid_overlap_warnings"
+                ] if k in best.index}
+                transform["scope"]="Rigid-body transform applied to the actual peptide atomic coordinates used to derive screening centroids. No docking energy is implied."
+                (out/"best_pose_rigid_transform.json").write_text(json.dumps(transform,indent=2,ensure_ascii=False),encoding="utf-8")
+
+        prep_fasta,target_fasta,prep_json,prep_notes=structure_preparation_files(active_target_seq,active_peptide_seq,self._peptide_pdb_path())
+        (out/"external_structure_preparation_complex.fasta").write_text(prep_fasta,encoding="utf-8")
+        (out/"external_target_structure_input.fasta").write_text(target_fasta,encoding="utf-8")
+        (out/"external_complex_structure_input.json").write_text(prep_json,encoding="utf-8")
+        (out/"EXTERNAL_STRUCTURE_PREPARATION_NOTES.txt").write_text(prep_notes,encoding="utf-8")
+
+        validation_dir=out/"external_validation_package"
         validation_dir.mkdir(exist_ok=True)
-        try:
-            all_atom_parameter_requirements_df(active_peptide_seq).to_csv(validation_dir/"token_parameter_requirements.csv", index=False, encoding="utf-8-sig")
-        except Exception:
-            pass
-        for rel_name, content in all_atom_validation_template_files().items():
-            fp = validation_dir / rel_name
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
-        if self._target_path() and Path(self._target_path()).exists():
-            try: shutil.copy2(self._target_path(), validation_dir/"target_input.pdb")
-            except Exception: pass
-        if self._peptide_pdb_path() and Path(self._peptide_pdb_path()).exists():
-            try: shutil.copy2(self._peptide_pdb_path(), validation_dir/"peptide_input.pdb")
-            except Exception: pass
-        (validation_dir/"complex_candidate.pdb").write_text(combined_complex_pdb(target_atoms_for_export, current_peptide_for_export, getattr(self, "contacts", pd.DataFrame())), encoding="utf-8")
-        # Legacy folder name retained for users who already rely on it.
-        legacy_dir=out/"external_md_templates"; legacy_dir.mkdir(exist_ok=True)
-        for fname, content in external_md_template_files().items():
-            (legacy_dir/fname).write_text(content,encoding="utf-8")
-        notes=("Pepforge Docking Workbench export\n\n"
-               "Supported modes: sequence/sequence, target sequence/peptide PDB, target PDB/peptide sequence, target PDB/peptide PDB, affinity scoring, full receptor-anchor pose search, forward/reverse N/C peptide orientation screening, Top 50 readable contact reporting, modified peptide notation such as FITC-Cha-AEEA-dK-NH2, N-terminal-only chemical position warnings for Pal/FITC/Myr/etc., molecular dynamics, and external all-atom MD validation export/import, token parameter requirement reporting.\n"
-               "The embedded engines are screening modules for local ranking and workflow continuity. For publication-grade validation, export the complex and run full external all-atom MD, then import RMSD/RMSF/energy results.\n")
+        all_atom_parameter_requirements_df(active_peptide_seq).to_csv(validation_dir/"token_parameter_requirements.csv",index=False,encoding="utf-8-sig")
+        for rel_name,content in all_atom_validation_template_files().items():
+            fp=validation_dir/rel_name; fp.parent.mkdir(parents=True,exist_ok=True); fp.write_text(content,encoding="utf-8")
+        if target_path and target_path.exists():
+            shutil.copy2(target_path,validation_dir/("target_input"+target_path.suffix.lower()))
+        if posed_peptide_path and posed_peptide_path.exists():
+            shutil.copy2(posed_peptide_path,validation_dir/posed_peptide_path.name)
+        elif copied_source_pdb and copied_source_pdb.exists():
+            shutil.copy2(copied_source_pdb,validation_dir/"peptide_starting_structure.pdb")
+        if atomic_complex_path and atomic_complex_path.exists():
+            shutil.copy2(atomic_complex_path,validation_dir/atomic_complex_path.name)
+
+        notes=(
+            "Pepforge Docking Workbench export\n\n"
+            "Pepforge performs local rigid-body geometry/contact screening only when target coordinates are supplied.\n"
+            "Peptide sequence inputs are converted to a chemistry-aware Structure Builder starting conformer; unsupported chemistry is not replaced by canonical residues.\n"
+            "Pose ordering uses explicit geometry descriptors and does not calculate docking energy, ΔG, Kd, or molecular-dynamics stability.\n"
+            "For quantitative docking/affinity/MD claims, use an appropriate validated external method and import/report those results separately.\n"
+        )
         (out/"docking_notes.txt").write_text(notes,encoding="utf-8")
         with pd.ExcelWriter(out/"docking_workbench_report.xlsx",engine="openpyxl") as writer:
-            for name,df in tables.items(): df.to_excel(writer,index=False,sheet_name=name[:31].upper())
-        (out/"OUTPUT_MANIFEST.txt").write_text("Pepforge Docking Workbench output folder\nCreated: "+__import__("datetime").datetime.now().isoformat(timespec="seconds")+"\nUse Load Output Folder to reload CSV/XLSX results.\nCitation notice: see CITATION_NOTICE.txt.\n", encoding="utf-8")
-        (out/"CITATION_NOTICE.txt").write_text("Pepforge Citation Notice\n\nAcademic use of Pepforge or Pepforge-generated outputs requires citation of the software repository and release DOI when available.\n\nRecommended citation:\nWoo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version 2.0.0. https://github.com/poowsh1407/Pepforge\n\nIf a DOI is available for the GitHub/Zenodo release, cite the DOI-linked release as the preferred reference.\n\nPepforge-generated docking, affinity, contact, SPPS, and molecular dynamics outputs are intended for screening and prioritization. Quantitative binding claims should be externally validated.\n", encoding="utf-8")
-        self.last_outdir=out; messagebox.showinfo("Export complete",f"Exported to:\n{out}")
+            for name,df in tables.items():
+                if not isinstance(df,pd.DataFrame): df=pd.DataFrame(df)
+                df.to_excel(writer,index=False,sheet_name=name[:31].upper())
+        (out/"OUTPUT_MANIFEST.txt").write_text(
+            "Pepforge Docking Workbench output folder\nCreated: "+datetime.now().isoformat(timespec="seconds")+
+            "\nInternal scope: geometry/contact screening only.\nExternal quantitative results remain separately imported evidence.\n",
+            encoding="utf-8"
+        )
+        (out/"CITATION_NOTICE.txt").write_text(
+            "Pepforge Citation Notice\n\nRecommended citation:\nWoo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version 3.0.0.\n\n"
+            "Pepforge internal Docking Workbench output is geometry/contact screening evidence, not an experimental or thermodynamic affinity result.\n",
+            encoding="utf-8"
+        )
+        self.last_outdir=out
+        messagebox.showinfo("Export complete",f"Exported to:\n{out}")
+        return out
 
 
     def load_output_folder(self):
         folder=filedialog.askdirectory(title="Select a Pepforge Docking output folder")
-        if not folder: return
+        if not folder:
+            return
         try:
             base=Path(folder)
             mapping=[
-                ("peptide_properties.csv", self.prop_tree), ("target_structure_summary.csv", self.pdb_tree),
-                ("sequence_pair_heuristic.csv", self.seqpair_tree), ("workflow.csv", self.pipeline_tree),
-                ("docking_pose_candidates.csv", self.pose_tree), ("docking_residue_contact_report.csv", self.contact_tree),
-                ("peptide_risk_summary.csv", self.risk_tree), ("docking_readiness.csv", self.readiness_tree),
-                ("token_compatibility.csv", self.compat_tree), ("affinity_scoring_summary.csv", self.import_tree),
-                ("molecular_dynamics_summary.csv", self.sim_tree), ("molecular_dynamics_frames.csv", self.md_tree),
-                ("md_result_import_summary.csv", self.md_result_tree),
+                ("peptide_properties.csv", self.prop_tree, "props"),
+                ("target_structure_summary.csv", self.pdb_tree, "pdb"),
+                ("sequence_pair_descriptors.csv", self.seqpair_tree, "seqpair"),
+                ("workflow.csv", self.pipeline_tree, "pipeline"),
+                ("docking_pose_candidates.csv", self.pose_tree, "poses"),
+                ("docking_residue_contact_report.csv", self.contact_tree, "contacts"),
+                ("peptide_risk_summary.csv", self.risk_tree, "risk"),
+                ("docking_readiness.csv", self.readiness_tree, "readiness"),
+                ("token_compatibility.csv", self.compat_tree, "compatibility"),
+                ("screening_evidence_summary.csv", self.import_tree, "screening_evidence"),
+                ("external_md_result_import_summary.csv", self.md_result_tree, "md_result_import"),
             ]
-            loaded=0
-            for fname, tree in mapping:
+            # Backward-compatible read-only support for older output folder names.
+            legacy=[
+                ("sequence_pair_heuristic.csv", self.seqpair_tree, "seqpair"),
+                ("affinity_scoring_summary.csv", self.import_tree, "screening_evidence"),
+                ("md_result_import_summary.csv", self.md_result_tree, "md_result_import"),
+            ]
+            loaded=0; seen=set()
+            for fname,tree,attr in mapping+legacy:
+                if attr in seen:
+                    continue
                 f=base/fname
                 if f.exists():
                     df=pd.read_csv(f)
-                    setattr(self, {
-                        "docking_pose_candidates.csv":"poses", "docking_residue_contact_report.csv":"contacts",
-                        "molecular_dynamics_summary.csv":"md_summary", "molecular_dynamics_frames.csv":"md_frames",
-                        "affinity_scoring_summary.csv":"imported_results"
-                    }.get(fname, "_last_loaded_df"), df)
-                    self._write_tree(tree, df)
-                    loaded+=1
-            aff_csv = base/"affinity_scoring_summary.csv"
-            if not aff_csv.exists():
-                try:
-                    self.imported_results = normalize_affinity_report_df(pd.DataFrame(), getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
-                    self._write_tree(self.import_tree, self.imported_results)
-                except Exception:
-                    pass
+                    setattr(self,attr,df)
+                    self._write_tree(tree,df)
+                    loaded+=1; seen.add(attr)
+            ext=base/"external_result_import_summary.csv"
+            self.imported_results=pd.read_csv(ext) if ext.exists() else pd.DataFrame(columns=["source","metric","value","unit","interpretation","method_note"])
+            if not hasattr(self,"screening_evidence"):
+                self.screening_evidence=screening_evidence_df(getattr(self,"poses",pd.DataFrame()),getattr(self,"contacts",pd.DataFrame()))
+                self._write_tree(self.import_tree,self._combined_result_report())
             self.last_outdir=base
             self.outdir.set(str(base.parent))
-            self.log.insert("end", f"Loaded output folder: {base} ({loaded} tables).\n")
+            self.log.insert("end",f"Loaded output folder: {base} ({loaded} tables).\n")
             self.log.see("end")
-        except Exception as e:
-            messagebox.showerror("Load output error", str(e))
+        except Exception as exc:
+            messagebox.showerror("Load output error",str(exc))
 
     def open_output(self):
-        p=self.last_outdir or Path(self.outdir.get())
+        p=self.last_outdir or self._effective_outdir()
         if p.exists():
             if os.name=="nt": os.startfile(str(p))
             elif sys.platform=="darwin": os.system(f'open "{p}"')

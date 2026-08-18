@@ -9,7 +9,7 @@ from peptiforg_core.release_verify_matrix import verify_release_matrix, RELEASE_
 def test_verify_matrix_runs(tmp_path):
     root = Path(__file__).resolve().parents[1]
     paths = verify_release_matrix(root, tmp_path)
-    assert RELEASE_VERIFY_VERSION == "4.0.6"
+    assert RELEASE_VERIFY_VERSION == "2.0.0"
     assert Path(paths["release_verify_matrix_summary"]).exists()
     summary = json.loads(Path(paths["release_verify_matrix_summary"]).read_text(encoding="utf-8"))
     assert summary["failed"] == 0

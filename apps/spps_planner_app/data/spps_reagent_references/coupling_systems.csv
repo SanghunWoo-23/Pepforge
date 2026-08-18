@@ -1,4 +1,4 @@
-﻿system,coupling_reagent,catalyst_or_additive,base,solvent,note
+system,coupling_reagent,catalyst_or_additive,base,solvent,note
 DIC/HOBt,DIC,HOBt,,DMF,Default AA-like acid coupling; user-editable.
 DIC/Oxyma,DIC,Oxyma,,DMF/NMP,Alternative carbodiimide/additive system; user-editable.
 HBTU/DIEA,HBTU,,DIEA,DMF,Uronium activation; often used for difficult couplings/modifiers; verify SOP.
@@ -6,3 +6,8 @@ HATU/DIEA,HATU,,DIEA,DMF,Stronger uronium activation; verify racemization/SOP.
 PyBOP/DIEA,PyBOP,,DIEA,DMF,Phosphonium activation; user-editable.
 NHS ester/DIEA,Activated NHS ester,,DIEA,DMF,For activated labels such as some biotin/dye reagents; no DIC/HOBt unless reagent form requires it.
 FITC/DIEA,FITC,protect from light,DIEA,DMF,Amine-labeling/isothiocyanate-type default; verify reagent and SOP.
+HBTU/NMP 10eq,HBTU,,,NMP,"Bench preset: HBTU 10 eq, 0.4 M in NMP; user supplied synthesizer chemistry"
+HBTU/HOBt/DIPEA,HBTU,HOBt,DIPEA,DMF,Uronium + additive + base; verify SOP
+DIC/HOAt,DIC,HOAt,,DMF,Carbodiimide + HOAt coupling
+HATU/DIPEA,HATU,,DIPEA,DMF,Strong uronium activation; verify SOP
+PyBOP/DIPEA,PyBOP,,DIPEA,DMF,Phosphonium activation; verify SOP

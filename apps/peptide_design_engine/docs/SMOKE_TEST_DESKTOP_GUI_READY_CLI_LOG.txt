@@ -1,8 +1,0 @@
-[Gen 000] best=9.853 mean=9.284 valid=1.00
-
-✅ DONE
-Output ZIP: ../_smoke_cli.zip
-
-🏆 Top candidates
-  1 | score=9.757 | length=10 | valid=True | dock=DIRECT_LFORM_DOCKING_READY | D-H-I-T-Y-A-V-H-V-Q-NH2
-  2 | score=9.670 | length=12 | valid=True | dock=DIRECT_LFORM_DOCKING_READY | E-A-K-I-I-F-E-V-D-W-Q-C-NH2

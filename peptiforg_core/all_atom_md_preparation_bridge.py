@@ -89,8 +89,8 @@ INPUT_COMPLEX = PROJECT / "complex_candidate.pdb"
 
 print("Pepforge v2.3.0 OpenMM template")
 print("Input complex:", INPUT_COMPLEX)
-print("This script is a reviewed-template placeholder, not a completed MD protocol.")
-print("Install and configure OpenMM externally, then replace placeholders with force-field-ready topology files.")
+print("This script is an external-tool setup guide, not an MD execution engine.")
+print("Install and configure the external MD tool, then supply reviewed force-field topology files.")
 
 # Suggested external workflow outline:
 # 1. Prepare protein with a standard force field such as AMBER/CHARMM-compatible files.

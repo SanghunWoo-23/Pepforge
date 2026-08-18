@@ -6,7 +6,7 @@ from typing import Any
 import json
 import csv
 
-STABILITY_REPORT_VERSION = "4.2.0"
+STABILITY_REPORT_VERSION = "3.0.0"
 
 PUBLIC_OUTPUT_CONTRACT = {
     "workflow_automation": [

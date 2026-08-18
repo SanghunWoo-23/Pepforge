@@ -1,0 +1,86 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# Runtime outputs
+outputs/
+results/
+logs/
+projects/*
+!projects/.gitkeep
+
+# Models / local binaries
+models/*.joblib
+*.exe
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# PeptiForg local/private files
+projects/*
+!projects/.gitkeep
+private_data/
+user_data/
+experimental_data/
+lab_data/
+local_data/
+sessions/
+runtime_data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.joblib
+*.pkl
+*.pickle
+*.key
+*.lic
+*.pack
+admin_hash.json
+
+# Credentials and local configuration
+.env.*
+!.env.example
+credentials*.json
+secrets*.json
+token*.json
+
+# Experimental/instrument exports
+*.raw
+*.wiff
+*.d/
+*.mzML
+*.mzXML
+*.cdf
+*.ab1
+
+# Release binaries and local build artifacts
+*.exe
+dist/
+build/
+__pycache__/
+*.pyc
+.pytest_cache/
+outputs/*
+!outputs/.gitkeep
+projects/*
+!projects/.gitkeep
+installer/output/
+.build_venv/

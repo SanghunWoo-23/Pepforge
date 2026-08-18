@@ -1,10 +1,12 @@
 
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 import csv, json, hashlib, subprocess, sys
 
-RELEASE_INTEGRITY_VERSION = "4.2.0"
+RELEASE_INTEGRITY_VERSION = "3.0.0"
 
 def _sha256(path: Path) -> str:
     h=hashlib.sha256()
@@ -40,7 +42,7 @@ def audit_release_integrity(root_dir: str|Path, output_dir: str|Path, run_nested
     checks=[]
     def add(n,ok,d=''): checks.append({'check':n,'status':'passed' if ok else 'failed','detail':str(d)})
     rows=build_file_manifest(root); add('file_manifest_created',len(rows)>0,f'{len(rows)} files')
-    for rel in ['VERSION.txt','CITATION.cff','README.md','README_KO.md','MANUAL_EN.txt','MANUAL_KO.txt','pepforge_cli.py','peptiforg_core/public_api.py','peptiforg_core/runtime_validation.py','peptiforg_core/full_package_audit.py','peptiforg_core/regression_audit.py','peptiforg_core/release_integrity.py']:
+    for rel in ['VERSION.txt','CITATION.cff','README.md','README_KO.md','MANUAL_EN.md','MANUAL_KO.md','pepforge_cli.py','peptiforg_core/public_api.py','peptiforg_core/runtime_validation.py','peptiforg_core/full_package_audit.py','peptiforg_core/regression_audit.py','peptiforg_core/release_integrity.py']:
         add('required_'+rel,(root/rel).exists(),rel)
     try:
         import peptiforg_core.public_api as api
@@ -69,8 +71,7 @@ def audit_release_integrity(root_dir: str|Path, output_dir: str|Path, run_nested
         try:
             generated.unlink()
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     artifacts=[]
     for p in root.rglob('*'):
         rel=p.relative_to(root).as_posix()

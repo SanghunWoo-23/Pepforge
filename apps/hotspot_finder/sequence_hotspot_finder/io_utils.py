@@ -46,7 +46,12 @@ def read_fasta_or_sequence(text: str) -> Dict[str, str]:
         if name is not None:
             records[name] = "".join(lines).strip()
     else:
-        records["direct_input"] = text
+        # Direct sequences are commonly pasted with visual line wrapping.
+        # Whitespace is presentation, not a residue token.
+        sequence = "".join(text.split())
+        if not sequence:
+            raise ValueError("Input sequence is empty.")
+        records["direct_input"] = sequence
     return records
 
 

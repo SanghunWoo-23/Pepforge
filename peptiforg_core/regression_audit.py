@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import csv, json, subprocess, sys
 
-REGRESSION_AUDIT_VERSION = "4.2.0"
+REGRESSION_AUDIT_VERSION = "3.0.0"
 
 def _write_json(path: Path, payload: dict[str, Any]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)

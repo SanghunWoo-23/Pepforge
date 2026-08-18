@@ -1,11 +1,18 @@
-name,class,MW,density_g_mL,state,default_role,notes
-DIC,coupling reagent,126.20,0.815,liquid,activation,Common carbodiimide coupling reagent
+﻿name,class,MW,density_g_mL,state,default_role,notes
+DIC,coupling reagent,126.2,0.815,liquid,activation,Common carbodiimide coupling reagent
 DCC,coupling reagent,206.33,,solid,activation,Carbodiimide reagent
-EDC,coupling reagent,191.70,,solid,activation,Water-compatible carbodiimide; reagent form may vary
+EDC,coupling reagent,191.7,,solid,activation,Water-compatible carbodiimide; reagent form may vary
 HBTU,coupling reagent,379.25,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
 HATU,coupling reagent,380.23,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
 HCTU,coupling reagent,413.69,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
 TBTU,coupling reagent,321.08,,solid,uronium coupling reagent,Often used with DIEA/DIPEA
 PyBOP,coupling reagent,520.39,,solid,phosphonium coupling reagent,Often used with DIEA/DIPEA
-COMU,coupling reagent,427.35,,solid,coupling reagent,Often used with base
+COMU,coupling reagent,428.27,,solid,coupling reagent,COMU coupling reagent; MW corrected v2.0.92; often used with base.
 CDI,coupling reagent,162.15,,solid,activation reagent,Context-dependent
+EDC-HCl,coupling reagent,191.7,,solid,activation,"EDC hydrochloride, verify supplier form"
+TSTU,coupling reagent,301.05,,solid,uronium coupling reagent,TSTU uronium coupling reagent; MW corrected v2.0.92.
+TNTU,coupling reagent,365.13,,solid,uronium coupling reagent,TNTU uronium coupling reagent; MW corrected v2.0.92.
+DEPBT,coupling reagent,299.22,,solid,activation,DEPBT coupling reagent; MW corrected v2.0.92; low-racemization reagent.
+PyBrOP,coupling reagent,466.18,,solid,phosphonium coupling reagent,PyBroP/PyBrOP phosphonium coupling reagent; MW corrected v2.0.92.
+PyClocK,coupling reagent,554.83,,solid,phosphonium coupling reagent,PyClocK phosphonium coupling reagent; MW corrected v2.0.92; verify supplier salt form.
+Ghosez reagent,coupling reagent,133.62,1.01,liquid,acid chloride formation,"1-Chloro-N,N,2-trimethyl-1-propenylamine; moisture-sensitive liquid; verify supplier CoA."

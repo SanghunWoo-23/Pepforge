@@ -10,6 +10,7 @@ import os, json, math, random, datetime, zipfile, csv, re
 from pathlib import Path
 from collections import Counter, defaultdict
 import numpy as np
+import sys
 
 # -------------------------
 # Core data
@@ -68,6 +69,7 @@ CONFIG = {
     "POP": 200,
     "GEN": 20,
     "SEED": 42,
+    "AUTO_SEED_EACH_RUN": True,
     "ENGINE_MODE": "NSGA2",
     "DESIGN_MODE": "MULTI_TARGET_BINDER",  # MULTI_TARGET_BINDER / BRIDGE_LINKER
     "BRIDGE_USE_TARGET_ANCHORS": True,
@@ -86,7 +88,7 @@ CONFIG = {
     "TRIM_TO_LENGTH": True,
     "LENGTH_PENALTY_WEIGHT": 2.0,
 
-    "TARGETS": [list("DELIKFVRWA"), list("YYERWFCAA")],
+    "TARGETS": [],
 
     "USE_D": True,
     "USE_NON_NAT": True,
@@ -128,9 +130,9 @@ CONFIG = {
         "AA_AP": {"sequence": "APAP", "length_A": 13.2, "flex": 0.35},
     },
 
-    "MOTIF_LOCK": True,
-    "LOCKED_MOTIFS": [list("RGD"), list("KLVFF")],
-    "LOCKED_MOTIF_POS": [{"motif": list("RGD"), "pos": 2}, {"motif": list("KLVFF"), "pos": -6}],
+    "MOTIF_LOCK": False,
+    "LOCKED_MOTIFS": [],
+    "LOCKED_MOTIF_POS": [],
 
     # Motif placement control.
     # OFF    : do not enforce motif placement.
@@ -142,12 +144,13 @@ CONFIG = {
     "MOTIF_PLACEMENT_MODE": "OFF",
     "MOTIF_PLACEMENT_SPECS": "",
     "LOCK_RESIDUES": ["C","W"],
-    "DUAL_MOTIFS": [{"motif": list("RGD"), "target":0}, {"motif": list("KLVFF"), "target":1}],
+    "DUAL_MOTIFS": [],
     "DUAL_MIN_DISTANCE": 6,
 
     "CLUSTERS": 5,
     "ELITE_KEEP": 20,
     "FINAL_TOPK": 10,
+    "FINAL_MIN_SEQUENCE_DISTANCE": 0.20,
     "BINDER_MODE": "BALANCED",
     "DOCKING_STAGE": "FINAL_TOP_ONLY",  # OFF / FINAL_TOP_ONLY / EVERY_N_GENERATIONS
     "DOCKING_ENGINE": "NONE",
@@ -198,20 +201,16 @@ CONFIG = {
     "SPPS_MAX_LINKER_TOKENS": 4,
     "SPPS_DEFAULT_RESIN_FAMILY": "Rink Amide AM",
 
-    # Optional PDB/interface-derived statistical prior.
-    # This is a hypothesis-generating ranking prior, not a validated binding predictor.
+    # Optional, explicitly selected user-reviewed CSV statistical prior.
+    # Pepforge does not bundle or silently load a pretrained ranking model.
     "USE_ML_PRIOR": False,
     "ML_PRIOR_WEIGHT": 0.45,
-    "ML_PRIOR_TABLE_PATH": "data/ml_prior/pdb_interface_prior_sample.csv",
-    "ML_PRIOR_SOURCE_LABEL": "sample_pdb_interface_prior",
-    "USE_PRETRAINED_ML_PRIOR": True,
-    "ML_PRIOR_MODEL_PATH": "data/ml_prior/pepforge_ml_prior_baseline.joblib",
+    "ML_PRIOR_TABLE_PATH": "",
+    "ML_PRIOR_SOURCE_LABEL": "user_reviewed_csv_prior",
 }
 
 
-# Known terminal tag expansions used for surrogate FASTA export.
-# Surrogates are for fast pre-screening only; modified candidates still need
-# explicit parameterization for final docking/MD validation.
+# Known terminal tag expansions retained for sequence annotation/export only.
 TERMINAL_TAG_SEQUENCE = {
     "His6":"HHHHHH", "His8":"HHHHHHHH", "His10":"HHHHHHHHHH",
     "FLAG":"DYKDDDDK", "HA":"YPYDVPDYA", "Myc":"EQKLISEEDL", "StrepII":"WSHPQFEK",
@@ -264,20 +263,23 @@ def to_esm_seq(seq):
     return "".join(clean_bases(seq))
 
 # -------------------------
-# PDB/interface-derived ML/statistical prior scaffold
+# Packaged resource paths
+# -------------------------
+def _pde_resource_root():
+    frozen_base = getattr(sys, "_MEIPASS", None)
+    if frozen_base:
+        return Path(frozen_base) / "apps" / "peptide_design_engine"
+    return Path(__file__).resolve().parents[1]
+
+
+# -------------------------
+# User-supplied statistical prior
 # -------------------------
 _ML_PRIOR_CACHE = {"path": None, "rows": []}
 
 
-def _default_ml_prior_path():
-    return Path(__file__).resolve().parents[1] / "data" / "ml_prior" / "pdb_interface_prior_sample.csv"
-
-
 def load_ml_prior_rows(path=None):
-    """Load a small CSV-based statistical prior table.
-
-    This is intentionally lightweight. It supports future replacement by a
-    true pretrained model while remaining EXE-friendly and auditable.
+    """Load an explicitly selected, user-reviewed CSV statistical prior.
 
     Expected columns:
       type,key,score,source,note
@@ -290,10 +292,12 @@ def load_ml_prior_rows(path=None):
     """
     if not CONFIG.get("USE_ML_PRIOR", False):
         return []
-    p = path or CONFIG.get("ML_PRIOR_TABLE_PATH", "") or str(_default_ml_prior_path())
+    p = path or CONFIG.get("ML_PRIOR_TABLE_PATH", "")
+    if not str(p).strip():
+        raise ValueError("USE_ML_PRIOR requires an explicit user-reviewed CSV prior path.")
     p = Path(str(p))
     if not p.is_absolute():
-        candidate = Path(__file__).resolve().parents[1] / p
+        candidate = _pde_resource_root() / p
         p = candidate if candidate.exists() else p
     key = str(p.resolve()) if p.exists() else str(p)
     if _ML_PRIOR_CACHE.get("path") == key:
@@ -319,88 +323,6 @@ def load_ml_prior_rows(path=None):
     _ML_PRIOR_CACHE["path"] = key
     _ML_PRIOR_CACHE["rows"] = rows
     return rows
-
-
-
-_ML_MODEL_CACHE = {"path": None, "payload": None}
-
-_ML_FEATURE_NAMES = [
-    "length", "hydrophobic_ratio", "aromatic_ratio", "positive_ratio", "negative_ratio", "charge_norm",
-    "anchor_ratio", "gly_ratio", "pro_ratio", "cys_ratio", "acidic_basic_balance",
-    "motif_RGD", "motif_KLV", "motif_EEMQR", "motif_PXXP_like", "motif_LXXLL_like",
-    "dipeptide_DE", "dipeptide_KK_RR", "aromatic_cluster"
-]
-
-
-def _ml_prior_model_path():
-    p = Path(str(CONFIG.get("ML_PRIOR_MODEL_PATH", "data/ml_prior/pepforge_ml_prior_baseline.joblib")))
-    if not p.is_absolute():
-        p = Path(__file__).resolve().parents[1] / p
-    return p
-
-
-def _load_pretrained_ml_prior_model():
-    if not CONFIG.get("USE_PRETRAINED_ML_PRIOR", True):
-        return None
-    p = _ml_prior_model_path()
-    if not p.exists():
-        return None
-    key = str(p.resolve())
-    if _ML_MODEL_CACHE.get("path") == key:
-        return _ML_MODEL_CACHE.get("payload")
-    try:
-        import joblib
-        payload = joblib.load(p)
-    except Exception:
-        payload = None
-    _ML_MODEL_CACHE["path"] = key
-    _ML_MODEL_CACHE["payload"] = payload
-    return payload
-
-
-def _ml_prior_feature_dict_from_clean(clean):
-    c = [x for x in clean.upper() if x in AA]
-    n = max(1, len(c))
-    s = "".join(c)
-    pos = sum(1 for x in c if x in POSITIVE)
-    neg = sum(1 for x in c if x in NEGATIVE)
-    return {
-        "length": len(c) / 30.0,
-        "hydrophobic_ratio": sum(1 for x in c if x in HYDRO_AA) / n,
-        "aromatic_ratio": sum(1 for x in c if x in AROMATIC) / n,
-        "positive_ratio": pos / n,
-        "negative_ratio": neg / n,
-        "charge_norm": (pos - neg) / n,
-        "anchor_ratio": sum(1 for x in c if x in ANCHOR) / n,
-        "gly_ratio": c.count("G") / n,
-        "pro_ratio": c.count("P") / n,
-        "cys_ratio": c.count("C") / n,
-        "acidic_basic_balance": 1.0 - min(1.0, abs(pos - neg) / max(1, pos + neg)),
-        "motif_RGD": float("RGD" in s),
-        "motif_KLV": float("KLV" in s),
-        "motif_EEMQR": float("EEMQR" in s),
-        "motif_PXXP_like": float(re.search(r"P..P", s) is not None),
-        "motif_LXXLL_like": float(re.search(r"L..LL", s) is not None),
-        "dipeptide_DE": float("DE" in s or "ED" in s),
-        "dipeptide_KK_RR": float("KK" in s or "RR" in s),
-        "aromatic_cluster": float(re.search(r"[FWYH].{0,2}[FWYH]", s) is not None),
-    }
-
-
-def _pretrained_ml_prior_score(clean):
-    payload = _load_pretrained_ml_prior_model()
-    if not payload:
-        return None
-    try:
-        model = payload.get("model", payload)
-        names = payload.get("feature_names", _ML_FEATURE_NAMES) if isinstance(payload, dict) else _ML_FEATURE_NAMES
-        f = _ml_prior_feature_dict_from_clean(clean)
-        X = np.array([[float(f.get(name, 0.0)) for name in names]], dtype=float)
-        return float(np.tanh(model.predict(X)[0]))
-    except Exception:
-        return None
-
-
 def _statistical_ml_prior_score(clean):
     rows = load_ml_prior_rows()
     if not rows:
@@ -448,25 +370,18 @@ def _statistical_ml_prior_score(clean):
 
 
 def ml_prior_score(seq):
-    """Optional pretrained-lite + statistical ML prior score.
+    """Return only the transparent, user-reviewable CSV ranking prior.
 
-    This is a hypothesis-generating ranking prior, not a validated binding
-    affinity predictor. If the bundled pretrained-lite model exists, it is used
-    first and blended with the transparent CSV statistical prior. If the model
-    cannot be loaded, the engine falls back to the CSV prior only.
+    This is not an ML prediction, binding score, affinity, ΔG, or Kd.  Bundled
+    pretrained-lite artifacts are never used for candidate ranking; real ML is
+    allowed only through the separately trained, user-provided data workflow.
     """
     if not CONFIG.get("USE_ML_PRIOR", False):
         return 0.0
     clean = "".join(clean_bases(seq)).upper()
     if not clean:
         return 0.0
-    stat = _statistical_ml_prior_score(clean)
-    pred = _pretrained_ml_prior_score(clean)
-    if pred is None:
-        return stat
-    # Blend model with auditable CSV prior. The model dominates but the prior
-    # keeps behavior interpretable and stable for early beta usage.
-    return float(np.tanh(0.75 * pred + 0.25 * stat))
+    return _statistical_ml_prior_score(clean)
 
 
 def seq_to_string(seq):
@@ -2104,7 +2019,10 @@ def surrogate_piece(x):
     return ""
 
 def docking_surrogate_sequence(seq):
-    return "".join(surrogate_piece(x) for x in seq if surrogate_piece(x))
+    # A modified construct must never be silently converted to an L-form
+    # surrogate for docking/export.  Canonical unmodified sequences are kept
+    # verbatim; all other chemistry requires explicit structure parameters.
+    return "".join(str(x) for x in seq if str(x) in AA) if is_lform_clean_candidate(seq) else ""
 
 def docking_readiness_report(seq):
     classes = Counter(token_class(x) for x in seq)
@@ -2117,7 +2035,7 @@ def docking_readiness_report(seq):
             "index": i,
             "token": str(x),
             "class": cls,
-            "base_surrogate": surrogate_piece(x),
+            "canonical_export_fragment": str(x) if str(x) in AA else "",
             "base_residue": base(x) if is_residue(x) else "",
         }
         if cls in {"D_AA", "NON_NAT_AA", "CHEM_LINKER", "LABEL", "CHEM_CAP", "CTERM_AMIDE"}:
@@ -2144,7 +2062,7 @@ def docking_readiness_report(seq):
         warning = "Unsupported tokens: " + ";".join(unsupported)
     elif param_n <= max_param:
         level = "PARAMETERIZED_DOCKING_READY"
-        route = "Rosetta FlexPepDock or HADDOCK/MD with explicit residue/linker/label parameters; use surrogate FASTA only for pre-screening."
+        route = "Rosetta FlexPepDock or HADDOCK/MD with explicit residue/linker/label parameters."
         warning = "Modified candidate: do not claim direct CABS/AF validity without parameterization."
     else:
         level = "PARAMETERIZATION_HEAVY"
@@ -2162,7 +2080,7 @@ def docking_readiness_report(seq):
 
     return {
         "docking_ready_level": level,
-        "docking_ready_score": float(score),
+        "docking_ready_score": float(score),  # preparation class only; not affinity/ranking evidence
         "docking_param_token_count": param_n,
         "docking_param_tokens": ";".join(param_tokens),
         "docking_token_classes": ";".join(f"{k}:{v}" for k, v in sorted(classes.items())),
@@ -2400,7 +2318,55 @@ def candidate_row(seq, rank=1, pop_sample=None):
 
 def population_rows(pop):
     ranked = sorted(pop, key=lambda s: total_score(s, pop), reverse=True)
-    return [candidate_row(s, i+1, pop) for i, s in enumerate(ranked)]
+    rows = [candidate_row(s, i+1, pop) for i, s in enumerate(ranked)]
+    return diversify_final_ranking(
+        rows,
+        top_n=int(CONFIG.get("FINAL_TOPK", 10)),
+        minimum_distance=float(CONFIG.get("FINAL_MIN_SEQUENCE_DISTANCE", 0.20)),
+    )
+
+
+def _normalized_sequence_distance(left, right):
+    """Levenshtein distance normalized by the longer clean sequence."""
+    a, b = str(left or ""), str(right or "")
+    if a == b:
+        return 0.0
+    if not a or not b:
+        return 1.0
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        current = [i]
+        for j, cb in enumerate(b, 1):
+            current.append(min(current[-1] + 1, previous[j] + 1, previous[j - 1] + (ca != cb)))
+        previous = current
+    return float(previous[-1]) / max(len(a), len(b), 1)
+
+
+def diversify_final_ranking(rows, top_n=None, minimum_distance=0.20):
+    """Keep score order while enforcing explicit diversity in the visible Top K."""
+    ordered = [dict(row) for row in rows]
+    target = max(1, min(int(top_n or CONFIG.get("FINAL_TOPK", 10)), len(ordered))) if ordered else 0
+    selected, deferred = [], []
+    for row in ordered:
+        clean = str(row.get("clean_sequence") or "")
+        distances = [_normalized_sequence_distance(clean, old.get("clean_sequence")) for old in selected]
+        if len(selected) < target and (not distances or min(distances) >= float(minimum_distance)):
+            row["final_diversity_distance"] = round(min(distances), 4) if distances else 1.0
+            row["final_diversity_status"] = "distance_pass"
+            selected.append(row)
+        else:
+            deferred.append(row)
+    while len(selected) < target and deferred:
+        row = deferred.pop(0)
+        distances = [_normalized_sequence_distance(row.get("clean_sequence"), old.get("clean_sequence")) for old in selected]
+        row["final_diversity_distance"] = round(min(distances), 4) if distances else 1.0
+        row["final_diversity_status"] = "threshold_relaxed_to_fill_top_k"
+        selected.append(row)
+    result = selected + deferred
+    for rank, row in enumerate(result, 1):
+        row["rank"] = rank
+        row["final_diversity_threshold"] = float(minimum_distance)
+    return result
 
 
 def hotspot_peptide_pair_rows(rows):
@@ -2558,18 +2524,18 @@ def save_outputs(pop, progress, outdir=None, top_n=None):
         docking_rows.append(rr)
         manifests.append({"rank": r["rank"], "sequence": r["sequence"], "manifest": rep["docking_manifest"]})
         if rep["docking_surrogate_sequence"]:
-            fasta_lines.append(f">rank_{r['rank']}|{rep['docking_ready_level']}|surrogate_not_final_structure")
+            fasta_lines.append(f">rank_{r['rank']}|{rep['docking_ready_level']}|canonical_sequence_input")
             fasta_lines.append(rep["docking_surrogate_sequence"])
     write_csv(out / "docking_ready_candidates.csv", docking_rows)
     (out / "docking_modeling_manifest.json").write_text(json.dumps(manifests, indent=2, ensure_ascii=False), encoding="utf-8")
-    (out / "docking_surrogate_sequences.fasta").write_text("\n".join(fasta_lines) + ("\n" if fasta_lines else ""), encoding="utf-8")
+    (out / "canonical_sequence_inputs.fasta").write_text("\n".join(fasta_lines) + ("\n" if fasta_lines else ""), encoding="utf-8")
     (out / "DOCKING_README.md").write_text("""# Docking-ready export notes
 
 This bundle preserves D-form, non-natural residues, linkers, tags, labels, and chemical caps.
 
 - `docking_ready_candidates.csv`: ranked candidates plus docking-readiness classification.
 - `docking_modeling_manifest.json`: token-by-token modification manifest for parameterized docking.
-- `docking_surrogate_sequences.fasta`: L-form surrogate sequences for quick pre-screening only. Do not report surrogate docking as final validation for modified candidates.
+- `canonical_sequence_inputs.fasta`: unchanged canonical L-peptide sequences only. Modified candidates are excluded and require explicit chemistry-aware structures.
 
 Recommended interpretation:
 
@@ -2601,12 +2567,12 @@ Recommended interpretation:
         "clustering_csv": str(out / "top_structural_clustering.csv"),
         "docking_ready_csv": str(out / "docking_ready_candidates.csv"),
         "docking_manifest": str(out / "docking_modeling_manifest.json"),
-        "docking_surrogate_fasta": str(out / "docking_surrogate_sequences.fasta"),
+        "canonical_sequence_fasta": str(out / "canonical_sequence_inputs.fasta"),
         "docking_readme": str(out / "DOCKING_README.md"),
         "zip": str(zip_path),
     }
 
-def run(config=None, verbose=True, outdir=None):
+def _run_core(config=None, verbose=True, outdir=None):
     update_config(config or {})
     pop, progress = evolve(CONFIG, verbose=verbose)
     paths = save_outputs(pop, progress, outdir=outdir, top_n=CONFIG.get("FINAL_TOPK", 10))
@@ -2616,9 +2582,8 @@ def run(config=None, verbose=True, outdir=None):
 sync_custom_aa_linkers()
 
 
-# =========================================================
-# ULTIMATE_OPTIONAL_ML_AND_PSEUDODOCK_PATCH
-# =========================================================
+# Optional post-run exports. These are part of the normal static execution
+# path; runtime function replacement is not used.
 
 def _aa_features_from_clean_sequence(clean_seq):
     aa = "ACDEFGHIKLMNPQRSTVWY"
@@ -2636,45 +2601,25 @@ def _aa_features_from_clean_sequence(clean_seq):
     }
 
 def optional_ml_surrogate_score(row):
-    feat = _aa_features_from_clean_sequence(row.get("clean_sequence", ""))
-    hydro_term = max(0.0, 1.0 - abs(feat["ml_hydro_frac"] - 0.38) / 0.38)
-    charge_term = min(1.0, abs(feat["ml_charge_norm"]) + 0.25)
-    polar_term = min(1.0, feat["ml_polar_frac"] / 0.35)
-    arom_penalty = max(0.0, feat["ml_arom_frac"] - 0.22)
-    return float(max(0.0, min(1.0, 0.42 * hydro_term + 0.26 * charge_term + 0.26 * polar_term - 0.12 * arom_penalty)))
+    raise RuntimeError(
+        "Built-in heuristic reranking is disabled because it is not a trained ML model. "
+        "Train/select a model from user-provided labeled data instead."
+    )
 
 def apply_optional_ml_rerank(rows):
-    if not CONFIG.get("USE_OPTIONAL_ML", False):
-        for r in rows:
-            r["ml_optional_enabled"] = False
-            r["ml_optional_score"] = ""
-            r["ml_blended_score"] = r.get("total_score", 0)
-        return rows
-    weight = float(CONFIG.get("ML_RERANK_WEIGHT", 0.20))
-    max_score = max([float(r.get("total_score", 0)) for r in rows] + [1.0])
-    new_rows = []
     for r in rows:
-        rr = dict(r)
-        ml = optional_ml_surrogate_score(rr)
-        base_norm = float(rr.get("total_score", 0)) / max_score
-        rr["ml_optional_enabled"] = True
-        rr["ml_optional_score"] = ml
-        rr["ml_blended_score"] = (1.0 - weight) * base_norm + weight * ml
-        new_rows.append(rr)
-    new_rows.sort(key=lambda x: x.get("ml_blended_score", 0), reverse=True)
-    for i, r in enumerate(new_rows, 1):
-        r["ml_rerank_rank"] = i
-    return new_rows
+        r["ml_optional_enabled"] = False
+        r["ml_optional_score"] = ""
+        r["ml_blended_score"] = r.get("total_score", 0)
+    return rows
 
 def export_optional_ml_outputs(output_dir, rows):
-    if not CONFIG.get("USE_OPTIONAL_ML", False):
-        return None
-    out = Path(output_dir)
-    reranked = apply_optional_ml_rerank(rows)
-    path = out / "ml_optional_reranked_candidates.csv"
-    write_csv(path, reranked[:int(CONFIG.get("FINAL_TOPK", 10))])
-    (out / "ML_OPTIONAL_README.md").write_text("""# Optional ML reranking\n\nGenerated only when `USE_OPTIONAL_ML=True`. The core engine does not depend on ML. Use real docking or experimental labels for formal ML claims.\n""", encoding="utf-8")
-    return str(path)
+    if CONFIG.get("USE_OPTIONAL_ML", False):
+        raise ValueError(
+            "USE_OPTIONAL_ML requested the retired untrained heuristic. "
+            "Use a trained model created from user-provided labeled data."
+        )
+    return None
 
 def rebuild_output_zip(output_dir):
     """Rebuild output ZIP after late optional exports are added."""
@@ -2700,19 +2645,21 @@ def export_pseudodocking_colab_inputs(output_dir, rows):
     index_rows = []
     top_n = int(CONFIG.get("PSEUDODOCKING_TOPK", min(10, len(rows))))
     for i, r in enumerate(rows[:top_n]):
-        pep = r.get("docking_surrogate_sequence") or r.get("clean_sequence") or ""
+        pep = r.get("docking_surrogate_sequence") or ""
+        if not pep:
+            # Modified candidates need explicit chemistry-aware structures and
+            # are intentionally excluded from sequence-only complex inputs.
+            continue
         fasta_name = f"complex_pep_{i+1:04d}.fasta"
         (out / fasta_name).write_text(f">complex_pep_{i+1:04d}|receptor:peptide|rank={r.get('rank','')}|level={r.get('docking_ready_level','')}\n{receptor}:{pep}\n", encoding="utf-8")
-        index_rows.append({"id": f"complex_pep_{i+1:04d}", "rank": r.get("rank", ""), "sequence": r.get("sequence", ""), "surrogate_sequence": pep, "docking_ready_level": r.get("docking_ready_level", ""), "total_score": r.get("total_score", ""), "fasta_file": fasta_name, "interpretation": "Optional structure-plausibility screen; not final docking validation."})
+        index_rows.append({"id": f"complex_pep_{i+1:04d}", "rank": r.get("rank", ""), "sequence": r.get("sequence", ""), "canonical_sequence": pep, "docking_ready_level": r.get("docking_ready_level", ""), "total_score": r.get("total_score", ""), "fasta_file": fasta_name, "interpretation": "Sequence-only complex-structure input for canonical candidates; not docking or affinity validation."})
     write_csv(out / "pseudodocking_index.csv", index_rows)
-    (out / "PSEUDODOCKING_README.md").write_text("""# Optional Colab pseudo-docking inputs\n\nFASTA files use `receptor:peptide` formatting for AlphaFold/ColabFold-style structure plausibility screening. This is not a substitute for docking, MD, or experimental validation.\n""", encoding="utf-8")
+    (out / "PSEUDODOCKING_README.md").write_text("""# Sequence-only complex-structure inputs (legacy folder name)\n\nFASTA files use `receptor:peptide` formatting and include canonical L-peptide candidates only. Modified candidates are excluded rather than converted to surrogate sequences. These files are structure-prediction inputs, not docking, affinity, MD, or experimental validation.\n""", encoding="utf-8")
     return str(out)
-
-_ORIGINAL_RUN_FOR_OPTIONAL_PATCH = run
 
 def run(config=None, verbose=True, outdir=None):
     update_config(config or {})
-    rows, progress, paths = _ORIGINAL_RUN_FOR_OPTIONAL_PATCH(CONFIG, verbose=verbose, outdir=outdir)
+    rows, progress, paths = _run_core(CONFIG, verbose=verbose, outdir=outdir)
     try:
         ml_path = export_optional_ml_outputs(paths["output_dir"], rows)
         if ml_path: paths["ml_optional_reranked_csv"] = ml_path

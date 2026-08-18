@@ -9,7 +9,7 @@ from peptiforg_core.release_gate import release_gate_check, RELEASE_GATE_VERSION
 def test_release_gate_runs(tmp_path):
     root = Path(__file__).resolve().parents[1]
     paths = release_gate_check(root, tmp_path)
-    assert RELEASE_GATE_VERSION == "4.0.7"
+    assert RELEASE_GATE_VERSION == "2.0.0"
     assert Path(paths["release_gate_summary"]).exists()
     summary = json.loads(Path(paths["release_gate_summary"]).read_text(encoding="utf-8"))
     assert summary["failed"] == 0

@@ -12,7 +12,7 @@ Permission is granted to use, copy, modify, and distribute this software and its
    If Pepforge, Pepforge-generated results, Pepforge-derived workflows, or modified versions of Pepforge are used in academic work, including journal articles, preprints, theses, dissertations, posters, presentations, reports, grant documents, or research-derived software, the user must cite Pepforge and the corresponding release DOI when available.
 
    Recommended citation:
-   Woo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version 8.8. https://github.com/poowsh1407/Pepforge
+   Woo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version 3.0.0. https://github.com/poowsh1407/Pepforge
 
 3. Result Attribution
    Output folders, generated analysis packages, docking/contact reports, SPPS planning outputs, and derived figures or tables should retain or reproduce the Pepforge citation notice.

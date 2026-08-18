@@ -1,4 +1,4 @@
-﻿token,default_logic,default_base,verify
+token,default_logic,default_base,verify
 Ac,N-terminal acetylation; displayed as Ac; actual default reagent is Acetic anhydride (Ac2O),DIEA,Ac2O MW 102.09 g/mol; density 1.08 g/mL; no post-Ac Fmoc deprotection.
 FITC,isothiocyanate/amine-labeling default,DIEA,Protect from light; verify exact FITC form.
 BIOTIN,reagent-form dependent,DIEA,Biotin acid vs biotin-NHS/sulfo-NHS requires different logic.

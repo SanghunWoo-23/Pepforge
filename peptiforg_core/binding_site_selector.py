@@ -86,8 +86,10 @@ def parse_pdb_atoms(path: str | Path) -> list[dict[str, Any]]:
         resi = line[22:26].strip()
         try:
             x=float(line[30:38]); y=float(line[38:46]); z=float(line[46:54])
-        except Exception:
-            x=y=z=0.0
+        except (TypeError, ValueError):
+            # Invalid coordinates are not real atoms. Skipping them avoids
+            # fabricating contacts/pockets at the origin.
+            continue
         rows.append({
             "record": rec, "atom": atom, "altloc": altloc, "resn": resn, "chain": chain, "resi": resi,
             "aa": AA3_TO_1.get(resn, "X"), "x": x, "y": y, "z": z, "line": line,
@@ -173,7 +175,7 @@ def residues_near_ligands(residues: list[dict[str, Any]], ligands: list[dict[str
 
 def parse_seed_residues(seed_text: str) -> list[tuple[str, str]]:
     out = []
-    for part in re.split(r"[,;\\s]+", str(seed_text or "").strip()):
+    for part in re.split(r"[,;\s]+", str(seed_text or "").strip()):
         if not part:
             continue
         # accepted: A:123, A123, 123

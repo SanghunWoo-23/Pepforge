@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 import os
 import sys
 import threading
@@ -8,6 +10,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from peptiforg_core.ui_helpers import set_pepforge_icon
+from peptiforg_core.ui_theme import apply_pepforge_theme
+from peptiforg_core.sandbox_runtime import configured_output
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "apps" / "hotspot_finder"
@@ -30,10 +34,11 @@ def open_path(path: Path):
 class HotspotGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Pepforge Hotspot Finder")
+        self.title("Pepforge Hot Spot Finder")
         set_pepforge_icon(self)
         self.geometry("1280x800")
         self.minsize(980, 600)
+        apply_pepforge_theme(self)
         self.q = queue.Queue()
         self.last_outdir = None
         self._build()
@@ -42,28 +47,31 @@ class HotspotGUI(tk.Tk):
     def _build(self):
         main = ttk.Frame(self, padding=16)
         main.pack(fill="both", expand=True)
-        ttk.Label(main, text="Hot Spot Finder", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(main, text="Excel-like hotspot table, cluster view, token-aware motif export, and CSV/XLSX output.").pack(anchor="w", pady=(4, 8))
+        ttk.Label(main, text="Hot Spot Finder", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(main, text="Paste a protein or peptide sequence, then identify and export candidate regions.", style="Sub.TLabel").pack(anchor="w", pady=(4, 8))
 
         top = ttk.Frame(main)
         top.pack(fill="x")
-        self.input_path = tk.StringVar(value=str(APP / "examples" / "example_input.fasta"))
-        self.outdir = tk.StringVar(value=str(ROOT / "outputs" / "hotspot_run"))
+        top.columnconfigure(1, weight=1)
+        self.input_path = tk.StringVar(value="")
+        self.outdir = tk.StringVar(value="")
         self.use_esm = tk.BooleanVar(value=False)
         self.window = tk.IntVar(value=15)
         self.overlap = tk.IntVar(value=5)
         self.top_n = tk.IntVar(value=30)
         self.min_score = tk.DoubleVar(value=0.0)
 
-        def row(label, widget, button=None):
-            f = ttk.Frame(top); f.pack(fill="x", pady=3)
-            ttk.Label(f, text=label, width=16).pack(side="left")
-            widget.pack(side="left", fill="x", expand=True)
-            if button: button.pack(side="left", padx=(6, 0))
+        def row(ridx, label, textvariable, button=None):
+            ttk.Label(top, text=label, width=16).grid(row=ridx, column=0, sticky="w", pady=3)
+            entry = ttk.Entry(top, textvariable=textvariable)
+            entry.grid(row=ridx, column=1, sticky="ew", pady=3)
+            if button:
+                button.grid(row=ridx, column=2, sticky="e", padx=(6, 0), pady=3)
+            return entry
 
-        row("Input file", ttk.Entry(top, textvariable=self.input_path), ttk.Button(top, text="Browse", command=self.browse_input))
-        row("Output folder", ttk.Entry(top, textvariable=self.outdir), ttk.Button(top, text="Browse", command=self.browse_outdir))
-        opt = ttk.Frame(top); opt.pack(fill="x", pady=6)
+        row(0, "Sequence file (optional)", self.input_path, ttk.Button(top, text="Browse", command=self.browse_input))
+        row(1, "Output folder", self.outdir, ttk.Button(top, text="Browse", command=self.browse_outdir))
+        opt = ttk.Frame(top); opt.grid(row=2, column=0, columnspan=3, sticky="ew", pady=6)
         ttk.Checkbutton(opt, text="Use ESM (optional, slower)", variable=self.use_esm).pack(side="left")
         ttk.Label(opt, text="Window").pack(side="left", padx=(20, 4)); ttk.Spinbox(opt, from_=3, to=80, textvariable=self.window, width=6).pack(side="left")
         ttk.Label(opt, text="Overlap").pack(side="left", padx=(12, 4)); ttk.Spinbox(opt, from_=0, to=40, textvariable=self.overlap, width=6).pack(side="left")
@@ -71,20 +79,25 @@ class HotspotGUI(tk.Tk):
         ttk.Label(opt, text="Min score").pack(side="left", padx=(12, 4)); ttk.Entry(opt, textvariable=self.min_score, width=7).pack(side="left")
 
         btns = ttk.Frame(main); btns.pack(fill="x", pady=(10, 8))
-        ttk.Button(btns, text="Run analysis", command=self.run).pack(side="left")
+        self.run_button = ttk.Button(btns, text="Analyze Sequence", command=self.run, style="Accent.TButton")
+        self.run_button.pack(side="left")
         ttk.Button(btns, text="Open output folder", command=self.open_output).pack(side="left", padx=8)
         ttk.Button(btns, text="Export Display XLSX", command=self.export_display).pack(side="left", padx=8)
         ttk.Button(btns, text="Export PyMOL PDB", command=self.export_pymol_hotspots).pack(side="left", padx=8)
         ttk.Button(btns, text="Export Motif Hints", command=self.export_motif_hints).pack(side="left", padx=8)
-        ttk.Button(btns, text="Load example input", command=lambda: self.input_path.set(str(APP / "examples" / "example_input.fasta"))).pack(side="left")
+        ttk.Button(btns, text="Load Example", command=self.load_example_input).pack(side="left")
+        self.progress_var = tk.StringVar(value="Ready")
+        self.progress = ttk.Progressbar(main, mode="indeterminate", style="PepforgeGreen.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(0, 2))
+        ttk.Label(main, textvariable=self.progress_var).pack(anchor="w", pady=(0, 6))
 
         paned = ttk.PanedWindow(main, orient="vertical")
         paned.pack(fill="both", expand=True)
-        input_frame = ttk.Labelframe(paned, text="Input preview / direct edit")
+        input_frame = ttk.Labelframe(paned, text="Protein or Peptide Sequence")
         self.text = tk.Text(input_frame, height=14, wrap="word")
         self.text.pack(fill="both", expand=True, padx=6, pady=6)
         paned.add(input_frame, weight=2)
-        result_frame = ttk.Labelframe(paned, text="Hot spots only")
+        result_frame = ttk.Labelframe(paned, text="Candidate Regions")
         result_frame.rowconfigure(0, weight=1); result_frame.columnconfigure(0, weight=1)
         self.result_tabs = ttk.Notebook(result_frame)
         self.result_tabs.grid(row=0, column=0, sticky="nsew")
@@ -99,7 +112,7 @@ class HotspotGUI(tk.Tk):
         hx = ttk.Scrollbar(table_tab, orient="horizontal", command=self.hotspot_tree.xview)
         self.hotspot_tree.configure(yscrollcommand=hy.set, xscrollcommand=hx.set)
         self.hotspot_tree.grid(row=0, column=0, sticky="nsew"); hy.grid(row=0, column=1, sticky="ns"); hx.grid(row=1, column=0, sticky="ew")
-        self.result_tabs.add(table_tab, text="Hotspot Table")
+        self.result_tabs.add(table_tab, text="Candidate Table")
         # Hotspot output is a fixed-width text table. Scrollbars are required
         # because hotspot-region strings can be wider than the visible window.
         hot_tab = ttk.Frame(self.result_tabs)
@@ -119,40 +132,66 @@ class HotspotGUI(tk.Tk):
         paned.add(result_frame, weight=2)
         self.load_input_preview()
 
+    def _default_outdir(self) -> Path:
+        return configured_output(ROOT / "outputs" / "hotspot_run", "hotspot")
+
+    def _effective_outdir(self) -> Path:
+        raw = str(self.outdir.get() or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+        outdir = self._default_outdir()
+        self.outdir.set(str(outdir))
+        return outdir
+
+    def load_example_input(self):
+        self.input_path.set(str(APP / "examples" / "example_input.fasta"))
+        self.load_input_preview()
+
     def browse_input(self):
         p = filedialog.askopenfilename(filetypes=[("Sequence files", "*.fasta *.fa *.txt"), ("All files", "*.*")])
         if p:
             self.input_path.set(p); self.load_input_preview()
 
     def browse_outdir(self):
-        p = filedialog.askdirectory()
-        if p: self.outdir.set(p)
+        p = filedialog.askdirectory(initialdir=str(self._effective_outdir().parent if str(self.outdir.get()).strip() else self._default_outdir().parent))
+        if p:
+            self.outdir.set(p)
 
     def load_input_preview(self):
+        path = str(self.input_path.get() or "").strip()
+        if not path:
+            self.text.delete("1.0", "end")
+            return
         try:
-            txt = Path(self.input_path.get()).read_text(encoding="utf-8")
-            self.text.delete("1.0", "end"); self.text.insert("1.0", txt)
+            txt = Path(path).read_text(encoding="utf-8")
+            self.text.delete("1.0", "end")
+            self.text.insert("1.0", txt)
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def run(self):
         text = self.text.get("1.0", "end").strip()
         if not text:
-            messagebox.showwarning("No input", "Enter a sequence or choose an input file."); return
-        outdir = Path(self.outdir.get())
+            messagebox.showwarning("Sequence required", "Paste a protein or peptide sequence, or choose a sequence file."); return
+        outdir = self._effective_outdir()
         outdir.mkdir(parents=True, exist_ok=True)
         tmp_input = outdir / "_hotspot_input.txt"
         tmp_input.write_text(text, encoding="utf-8")
-        self.log.insert("end", "Running hotspot analysis...\n"); self.log.see("end")
-        threading.Thread(target=self._worker, args=(tmp_input, outdir), daemon=True).start()
+        settings = {
+            "use_esm": bool(self.use_esm.get()),
+            "window_size": int(self.window.get()),
+            "overlap": int(self.overlap.get()),
+            "top_n": int(self.top_n.get()),
+        }
+        self.run_button.configure(state="disabled")
+        self.progress_var.set("Analyzing sequence...")
+        self.progress.start(12)
+        self.log.insert("end", "Analyzing sequence...\n"); self.log.see("end")
+        threading.Thread(target=self._worker, args=(tmp_input, outdir, settings), daemon=True).start()
 
-    def _worker(self, input_file: Path, outdir: Path):
+    def _worker(self, input_file: Path, outdir: Path, settings: dict):
         try:
             cfg = load_config(str(APP / "data" / "default_config.json"))
-            cfg["use_esm"] = bool(self.use_esm.get())
-            cfg["window_size"] = int(self.window.get())
-            cfg["overlap"] = int(self.overlap.get())
-            cfg["top_n"] = int(self.top_n.get())
+            cfg.update(settings)
             result = analyze_input(
                 user_input=input_file.read_text(encoding="utf-8"),
                 config=cfg,
@@ -169,18 +208,26 @@ class HotspotGUI(tk.Tk):
             while True:
                 item = self.q.get_nowait()
                 if item[0] == "done":
+                    self.progress.stop()
+                    self.progress.configure(mode="determinate", value=100)
+                    self.progress_var.set("Complete")
+                    self.run_button.configure(state="normal")
                     self.last_outdir = Path(self.outdir.get())
                     r = item[1]
                     self.log.insert("end", f"Done.\nFull CSV: {r.get('full_csv')}\nTop CSV: {r.get('top_csv')}\nZIP: {r.get('zip_path')}\n")
                     self._load_output_preview(r)
                     self.log.see("end")
-                    messagebox.showinfo("Complete", "Hotspot analysis complete.")
+                    messagebox.showinfo("Complete", "Hot spot analysis complete.")
                 else:
+                    self.progress.stop()
+                    self.progress.configure(mode="determinate", value=0)
+                    self.progress_var.set("Failed")
+                    self.run_button.configure(state="normal")
                     self.log.insert("end", "ERROR: " + item[1] + "\n")
                     self.log.see("end")
                     messagebox.showerror("Error", item[1])
         except queue.Empty:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         self.after(120, self._poll)
 
 
@@ -365,9 +412,9 @@ class HotspotGUI(tk.Tk):
             try:
                 self._write_hotspot_pymol_files(out)
             except Exception:
-                pass
+                LOGGER.debug("Optional operation skipped", exc_info=True)
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
         return "\n".join(lines)
 
     def _load_output_preview(self, result: dict):
@@ -398,9 +445,7 @@ class HotspotGUI(tk.Tk):
             for r in getattr(self, "_last_hotspot_rows", []):
                 self.hotspot_tree.insert("", "end", values=[r.get(c, "") for c in self.hotspot_columns])
         except Exception:
-            pass
-
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     def _extract_sequence_for_pdb(self) -> tuple[str, str]:
         """Return a simple record name and canonical AA sequence for hotspot PDB export."""
         raw = self.text.get("1.0", "end").strip()
@@ -429,12 +474,12 @@ class HotspotGUI(tk.Tk):
                 try:
                     pos.add(int(m.group(1)))
                 except Exception:
-                    pass
+                    LOGGER.debug("Optional operation skipped", exc_info=True)
             for m in re.finditer(r"\((\d+)([A-Za-z])\)", str(r.get("center", ""))):
                 try:
                     pos.add(int(m.group(1)))
                 except Exception:
-                    pass
+                    LOGGER.debug("Optional operation skipped", exc_info=True)
         return pos
 
     def _write_hotspot_pymol_files(self, out: Path) -> dict[str, Path]:
@@ -554,9 +599,11 @@ class HotspotGUI(tk.Tk):
             messagebox.showerror("Export error", str(e))
 
     def open_output(self):
-        p = self.last_outdir or Path(self.outdir.get())
-        if p.exists(): open_path(p)
-        else: messagebox.showinfo("Not found", str(p))
+        p = self.last_outdir or self._effective_outdir()
+        if p.exists():
+            open_path(p)
+        else:
+            messagebox.showinfo("Not found", str(p))
 
 
 def main():

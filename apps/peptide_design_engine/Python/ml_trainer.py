@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Lightweight continual-learning surrogate for Peptide Design Engine.
+"""Transparent user-data ranking model for Peptide Design Engine.
 
 No scikit-learn or xgboost dependency is required. The model is a transparent
-ridge-regression surrogate saved as JSON, suitable for EXE packaging and small
+ridge-regression model saved as JSON, suitable for EXE packaging and modest
 datasets. It is not a final biological validation model; use it to prioritize
 new candidates from accumulated AF3/PRODIGY/experimental labels.
 """
@@ -27,6 +27,8 @@ FEATURE_NAMES = [
     "bias", "length", "hydro_frac", "pos_frac", "neg_frac", "polar_frac", "arom_frac",
     "charge", "gly_frac", "pro_frac", "cys_frac", "acidic_frac", "basic_frac",
 ]
+
+LOWER_IS_BETTER_LABELS = {"prodigy_delta_g", "prodigy_kd", "docking_score"}
 
 
 def read_csv(path: str | Path) -> List[Dict[str, Any]]:
@@ -85,8 +87,8 @@ def train_from_csv(training_db: str, models_dir: str = "models", label_col: str 
         X.append(sequence_features(seq))
         y.append(label)
         used.append(r.get("candidate_id", ""))
-    if len(X) < 3:
-        raise ValueError(f"Need at least 3 labeled rows for '{label_col}', found {len(X)}.")
+    if len(X) < 10:
+        raise ValueError(f"Need at least 10 labeled rows for '{label_col}', found {len(X)}.")
     Xn = np.asarray(X, dtype=float)
     yn = np.asarray(y, dtype=float)
     y_mean = float(np.mean(yn))
@@ -106,11 +108,12 @@ def train_from_csv(training_db: str, models_dir: str = "models", label_col: str 
         "y_std": y_std,
         "train_rows": len(X),
         "train_rmse": rmse,
-        "notes": "Lightweight surrogate for ranking; not experimental proof.",
+        "higher_is_better": label_col not in LOWER_IS_BETTER_LABELS,
+        "notes": "User-data ridge ranking model; training-set RMSE is not held-out validation or experimental proof.",
     }
     out = Path(models_dir)
     out.mkdir(parents=True, exist_ok=True)
-    model_path = out / "surrogate_model.json"
+    model_path = out / "user_data_ridge_model.json"
     model_path.write_text(json.dumps(model, indent=2, ensure_ascii=False), encoding="utf-8")
     return str(model_path)
 
@@ -136,10 +139,13 @@ def rerank_rows(rows: List[Dict[str, Any]], model_path: str | Path, blend_weight
     for r, p in zip(rows, preds):
         rr = dict(r)
         pred_norm = 0.5 if math.isclose(p_max, p_min) else (p - p_min) / (p_max - p_min)
+        if not bool(model.get("higher_is_better", True)):
+            pred_norm = 1.0 - pred_norm
         base_norm = float(rr.get("total_score") or 0) / s_max
         rr["trained_ml_label"] = model.get("label_col", "")
         rr["trained_ml_prediction"] = p
         rr["trained_ml_prediction_norm"] = pred_norm
+        rr["trained_ml_higher_is_better"] = bool(model.get("higher_is_better", True))
         rr["trained_ml_blended_score"] = (1.0 - blend_weight) * base_norm + blend_weight * pred_norm
         out.append(rr)
     out.sort(key=lambda x: float(x.get("trained_ml_blended_score") or 0), reverse=True)

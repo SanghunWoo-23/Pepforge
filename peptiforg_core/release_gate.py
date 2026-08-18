@@ -1,5 +1,7 @@
 
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
 from pathlib import Path
 from typing import Any
@@ -8,7 +10,7 @@ import json
 import py_compile
 import re
 
-RELEASE_GATE_VERSION = "4.2.0"
+RELEASE_GATE_VERSION = "3.0.0"
 TEXT_EXTS = {".md", ".txt", ".py", ".json", ".cff", ".yaml", ".yml", ".ini", ".bat", ".spec", ".iss"}
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames=None) -> str:
@@ -43,21 +45,22 @@ def release_gate_check(root_dir: str | Path, output_dir: str | Path) -> dict[str
 
     version_file = root / "VERSION.txt"
     vf = version_file.read_text(encoding="utf-8", errors="ignore").strip() if version_file.exists() else ""
-    add("version_file_4_0_7", vf == RELEASE_GATE_VERSION, vf or "missing")
+    add("version_file_3_0_0", vf == RELEASE_GATE_VERSION, vf or "missing")
 
     citation = root / "CITATION.cff"
     if citation.exists():
         c = citation.read_text(encoding="utf-8", errors="ignore")
         add("citation_schema_1_2_0", 'cff-version: "1.2.0"' in c or "cff-version: 1.2.0" in c, "CITATION.cff")
-        add("citation_version_4_0_7", f'version: "{RELEASE_GATE_VERSION}"' in c or f"version: {RELEASE_GATE_VERSION}" in c, "CITATION.cff")
+        add("citation_version_3_0_0", f'version: "{RELEASE_GATE_VERSION}"' in c or f"version: {RELEASE_GATE_VERSION}" in c, "CITATION.cff")
     else:
         add("citation_exists", False, "missing")
 
     required = [
-        "README.md", "README_KO.md", "MANUAL_EN.txt", "MANUAL_KO.txt",
+        "README.md", "README_KO.md", "MANUAL_EN.md", "MANUAL_KO.md",
         "docs/PUBLIC_API_CONTRACT.md", "docs/PUBLIC_OUTPUT_CONTRACT.md",
         "pepforge_cli.py", "peptiforg_core/public_api.py", "peptiforg_core/release_verify_matrix.py",
         "peptiforg_core/release_integrity.py", "peptiforg_core/regression_audit.py", "peptiforg_core/runtime_validation.py",
+        "peptiforg_core/source_integrity_audit.py",
     ]
     for rel in required:
         add("required_" + rel, (root / rel).exists(), rel)
@@ -73,6 +76,13 @@ def release_gate_check(root_dir: str | Path, output_dir: str | Path) -> dict[str
         except Exception as exc:
             compile_errors.append({"file": str(p.relative_to(root)), "error": repr(exc)})
     add("compile_all_python", not compile_errors, f"{py_count} files; {len(compile_errors)} errors")
+
+    try:
+        from peptiforg_core.source_integrity_audit import audit_source_tree
+        source_audit = audit_source_tree(root)
+        add("no_runtime_patch_placeholder_or_duplicate_definitions", source_audit["status"] == "passed", f"{source_audit['finding_count']} findings")
+    except Exception as exc:
+        add("no_runtime_patch_placeholder_or_duplicate_definitions", False, repr(exc))
 
     # Direct API smoke checks without recursive CLI subprocess calls.
     try:
@@ -106,8 +116,7 @@ def release_gate_check(root_dir: str | Path, output_dir: str | Path) -> dict[str
         try:
             generated.unlink()
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     stale = []
     bad_artifacts = []
     for p in root.rglob("*"):

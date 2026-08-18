@@ -1,12 +1,13 @@
 import pandas as pd
-from suite_gui.docking_workbench_gui import structure_pipeline_df, af3_ready_files, parse_gromacs_xvg
+from suite_gui.docking_workbench_gui import structure_pipeline_df, af3_ready_files, parse_md_xvg
 
 
-def test_target_sequence_peptide_pdb_branch_is_accepted():
+def test_target_sequence_without_coordinates_blocks_local_3d_screening():
     df = structure_pipeline_df("Sequence", "PDB", "MKTFFVLLL", "", None, None)
     assert not df.empty
-    assert "READY_TO_PREPARE" in set(df["status"])
-    assert any("TARGET:SEQUENCE + PEPTIDE:PDB" in str(x) or "Target is sequence-only" in str(x) for x in df["note"])
+    screening = df[df["stage"] == "3_3d_screening"].iloc[0]
+    assert screening["status"] == "BLOCKED"
+    assert "target coordinates" in str(screening["note"]).lower()
 
 
 def test_af3_ready_files_extract_sequence_text():
@@ -17,9 +18,9 @@ def test_af3_ready_files_extract_sequence_text():
     assert "ESMFold" in notes
 
 
-def test_parse_gromacs_xvg_numeric_series(tmp_path):
+def test_parse_external_md_xvg_numeric_series(tmp_path):
     p = tmp_path / "rmsd.xvg"
     p.write_text('@ title "RMSD"\n0 0.1\n1 0.2\n2 0.4\n')
-    df = parse_gromacs_xvg(p)
+    df = parse_md_xvg(p)
     assert int(df.loc[0, "points"]) == 3
     assert float(df.loc[0, "last_value"]) == 0.4

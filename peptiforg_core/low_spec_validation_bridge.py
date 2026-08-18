@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
 """Low-spec peptide simulation and validation bridge utilities for Pepforge v2.1.0.
 
@@ -86,7 +88,7 @@ def _nonbonded_clash_count(mol, conf_id: int = 0, cutoff: float = 1.15) -> int:
                 if len(Chem.GetShortestPath(mol, i, j)) <= 3:
                     continue
             except Exception:
-                pass
+                LOGGER.debug("Optional operation skipped", exc_info=True)
             if _distance(coords[i], coords[j]) < cutoff:
                 count += 1
     return count
@@ -180,7 +182,7 @@ def conformer_metric_rows(sdf_path: str | Path, meta: Dict[str, Any]) -> List[Di
         try:
             energy_map[int(row.get("conf_id"))] = row.get("energy")
         except Exception:
-            pass
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     rows: List[Dict[str, Any]] = []
     for idx, mol in enumerate(mols, start=1):
         conf_id = 0

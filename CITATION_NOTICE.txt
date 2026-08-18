@@ -1,0 +1,9 @@
+Pepforge Academic Citation Notice
+
+If Pepforge, Pepforge-generated outputs, or Pepforge-derived workflows materially contribute to academic work, please cite the repository and the exact release used.
+
+Recommended citation:
+Woo, S. Pepforge: An Integrated Peptide Research Workbench. Version 3.0.0. GitHub repository, 2026.
+https://github.com/poowsh1407/Pepforge
+
+When a release DOI becomes available, cite the DOI in addition to the repository.

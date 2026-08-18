@@ -562,4 +562,4 @@ dist\PeptideDesignEngine_GUI.exe
 
 ## Final Branded Installer
 
-See `START_HERE_FINAL_BRANDED_INSTALLER_KR.md` for Windows installer build instructions.
+For the integrated Pepforge installation, settings workflow, and troubleshooting, use the repository-level `MANUAL_EN.md` or `MANUAL_KO.md`. The standalone legacy installer notes are not part of the public STD package.

@@ -9,7 +9,7 @@ from peptiforg_core.full_package_audit import audit_package, FULL_PACKAGE_AUDIT_
 def test_full_package_audit_runs(tmp_path):
     root = Path(__file__).resolve().parents[1]
     paths = audit_package(root, tmp_path)
-    assert FULL_PACKAGE_AUDIT_VERSION == "4.0.3"
+    assert FULL_PACKAGE_AUDIT_VERSION == "2.0.0"
     assert Path(paths["full_package_audit_summary"]).exists()
     summary = json.loads(Path(paths["full_package_audit_summary"]).read_text(encoding="utf-8"))
     assert summary["failed"] == 0

@@ -1,7 +1,9 @@
 
 from __future__ import annotations
+import logging
+LOGGER = logging.getLogger(__name__)
 
-"""Pepforge full package audit v4.0.3.
+"""Pepforge full package audit for the V3.0.0 public package.
 
 This module performs a packaging/runtime/documentation audit for the public
 research package. It does not perform scientific validation.
@@ -16,7 +18,7 @@ import re
 import subprocess
 import sys
 
-FULL_PACKAGE_AUDIT_VERSION = "4.2.0"
+FULL_PACKAGE_AUDIT_VERSION = "3.0.0"
 
 TEXT_EXTS = {".md",".txt",".py",".iss",".spec",".yml",".yaml",".json",".bat",".cff",".ini"}
 
@@ -58,18 +60,18 @@ def audit_package(root_dir: str | Path, output_dir: str | Path) -> dict[str, str
     version_file = root / "VERSION.txt"
     add("version_file_exists", version_file.exists(), version_file)
     if version_file.exists():
-        add("version_file_is_4_0_3", version_file.read_text(encoding="utf-8", errors="ignore").strip() == FULL_PACKAGE_AUDIT_VERSION, version_file.read_text(encoding="utf-8", errors="ignore").strip())
+        add("version_file_matches_release", version_file.read_text(encoding="utf-8", errors="ignore").strip() == FULL_PACKAGE_AUDIT_VERSION, version_file.read_text(encoding="utf-8", errors="ignore").strip())
 
     citation = root / "CITATION.cff"
     add("citation_exists", citation.exists(), citation)
     if citation.exists():
         s = citation.read_text(encoding="utf-8", errors="ignore")
         add("citation_cff_schema_1_2_0", 'cff-version: "1.2.0"' in s or "cff-version: 1.2.0" in s, "cff-version")
-        add("citation_software_version_4_0_3", f'version: "{FULL_PACKAGE_AUDIT_VERSION}"' in s or f"version: {FULL_PACKAGE_AUDIT_VERSION}" in s, "software version")
+        add("citation_software_version_matches_release", f'version: "{FULL_PACKAGE_AUDIT_VERSION}"' in s or f"version: {FULL_PACKAGE_AUDIT_VERSION}" in s, "software version")
 
     # required public files
     required = [
-        "README.md", "README_KO.md", "MANUAL_EN.txt", "MANUAL_KO.txt",
+        "README.md", "README_KO.md", "MANUAL_EN.md", "MANUAL_KO.md",
         "pepforge_cli.py", "peptiforg_core/public_api.py", "peptiforg_core/runtime_validation.py",
         "peptiforg_core/public_release_stability.py", "docs/PUBLIC_API_CONTRACT.md",
         "docs/PUBLIC_OUTPUT_CONTRACT.md",
@@ -114,8 +116,7 @@ def audit_package(root_dir: str | Path, output_dir: str | Path) -> dict[str, str
         try:
             generated.unlink()
         except Exception:
-            pass
-
+            LOGGER.debug("Optional operation skipped", exc_info=True)
     # stale/bad artifact scan
     stale_hits = []
     bad_artifacts = []

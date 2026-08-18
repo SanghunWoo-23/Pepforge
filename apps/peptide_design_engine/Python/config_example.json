@@ -2,6 +2,7 @@
   "POP": 200,
   "GEN": 20,
   "SEED": 42,
+  "AUTO_SEED_EACH_RUN": true,
   "ENGINE_MODE": "NSGA2",
   "TARGETS": [
     [
