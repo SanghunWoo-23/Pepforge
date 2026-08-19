@@ -22,7 +22,6 @@ organizing downstream validation.
 [![Release](https://img.shields.io/badge/release-V3.0.0-2563EB?style=for-the-badge)](VERSION.txt)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](requirements.txt)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](#quick-start)
-[![SPPS](https://img.shields.io/badge/SPPS_Planner-V4.0.0-7C3AED?style=for-the-badge)](docs/SPPS_V4_EVIDENCE_WORKFLOW.md)
 [![Release Gate](https://img.shields.io/badge/release_gate-23%2F23-16A34A?style=for-the-badge)](#verification)
 
 **[한국어](README_KO.md) · [Quick start](#quick-start) · [Features](#what-it-does) · [Notation](#modified-peptide-notation) · [Manual](MANUAL_EN.md)**
