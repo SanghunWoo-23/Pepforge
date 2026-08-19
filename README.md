@@ -1,45 +1,131 @@
+<div align="center">
+
+
+## V3.0.0 Integrated Peptide Research Workflow
+
+V3.0.0 connects sequence analysis, peptide candidate design, sequence-aware
+structure generation, SPPS planning, docking-oriented screening, and external
+validation export in one peptide-focused desktop workflow. The public build
+integrates the sanitized SPPS Planner V4 evidence workflow and contains no
+private experimental history.
+
+<img src="assets/Pepforge_Icon.png" alt="Pepforge icon" width="150">
+
 # Pepforge
 
-Peptide-focused desktop workbench for sequence analysis, modified-peptide design, conformational ensemble generation, SPPS planning, and docking-oriented screening.
+### From peptide sequence to structure, synthesis planning, and validation hand-off
 
-**Public baseline:** 3.0.0 · **Platform focus:** Windows · **Author:** Sanghun Woo
+Desktop research software for designing **canonical and modified peptides**,
+generating representative conformers, preparing editable SPPS plans, and
+organizing downstream validation.
 
-**Current STD:** Pepforge V3.0.0 with the integrated SPPS Planner V4 evidence workflow (2026-08-13).
+[![Release](https://img.shields.io/badge/release-V3.0.0-2563EB?style=for-the-badge)](VERSION.txt)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](requirements.txt)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](#quick-start)
+[![SPPS](https://img.shields.io/badge/SPPS_Planner-V4.0.0-7C3AED?style=for-the-badge)](docs/SPPS_V4_EVIDENCE_WORKFLOW.md)
+[![Release Gate](https://img.shields.io/badge/release_gate-23%2F23-16A34A?style=for-the-badge)](#verification)
 
-[한국어](README_KO.md) · [STD baseline](STD_BASELINE.md) · [Complete user manual](MANUAL_EN.md) · [Scientific scope](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md) · [SPPS V4 method](docs/SPPS_V4_EVIDENCE_WORKFLOW.md) · [Release notes](RELEASE_NOTES_V3.0.0.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+**[한국어](README_KO.md) · [Quick start](#quick-start) · [Features](#what-it-does) · [Notation](#modified-peptide-notation) · [Manual](MANUAL_EN.md)**
 
-> Pepforge is research software. Its structures, scores, contacts, and synthesis recommendations are hypotheses or planning aids—not experimental measurements, native-structure proof, or medical guidance.
+</div>
 
-## Workflow
+---
 
-The V3 Modern/Classic hybrid launcher presents the six active modules in one workflow sidebar and shows the selected module's purpose, outputs, workspace, and explicit launch action. Docking Workbench appears once.
+## Why Pepforge?
+
+Peptide research rarely ends with a sequence. Candidate regions, terminal
+chemistry, non-natural residues, structural diversity, synthesis constraints,
+and validation files must remain connected without turning unsupported
+assumptions into scientific facts.
+
+Pepforge keeps those decisions in one workflow:
 
 ```text
-sequence / target
-  → hotspot prioritization
-  → modified-peptide candidate design
-  → peptide conformational ensemble (Top 5 representatives)
-  → SPPS plan and material estimate
-  → docking-oriented screening
-  → export for external validation
+Protein or peptide sequence
+            ↓
+     Hotspot prioritization
+            ↓
+ Modified-peptide candidate design
+            ↓
+ Sequence-aware Top-5 conformer ensemble
+            ↓
+ Editable SPPS plan · Materials · Checklist
+            ↓
+ Docking-oriented screening
+            ↓
+ External PyMOL · Docking · MD hand-off
 ```
 
-| Module | Purpose | Important boundary |
-| --- | --- | --- |
-| Hot Spot Finder | Prioritize candidate sequence regions | Scores are prioritization evidence |
-| Peptide Design Engine | Generate canonical and selected modified-peptide candidates | Candidates require chemistry and synthesis review |
-| Structure Builder | Generate and classify peptide conformers | It does not determine one physiological structure |
-| SPPS Planner V4 | Prepare editable synthesis steps, materials, process times, evidence review, and literature-aware warnings | Recommendations are planning evidence, not a validated laboratory SOP |
-| Docking Workbench | Screen poses and contacts for prioritization | Internal scores are not experimental affinity or Kd |
-| External Tools | Prepare hand-off files and directories | External programs must be installed separately |
+## What it does
 
-## Sequence-to-structure scope
+| Area | Capabilities |
+| --- | --- |
+| **Hot Spot Finder** | Analyze pasted protein or peptide sequences, rank candidate regions, inspect the hotspot table, and export results |
+| **Peptide Design Engine** | Generate canonical or supported modified-peptide candidates with explicit settings, per-run seeds, exact-repeat controls, and final sequence-diversity filtering |
+| **Peptide Structure Builder** | Interpret supported peptide chemistry and generate a ranked, family-diverse Top-5 coordinate ensemble |
+| **Sequence-aware structure search** | Explore α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, and coil/mixed families |
+| **Modified-peptide handling** | Preserve supported terminal groups, D-residues, non-natural residues, tags, labels, linkers, chirality, and modifications |
+| **α/β/γ peptidomimetics** | Recognize supported mixed-backbone patterns while keeping canonical α-residue assumptions separate from β/γ units |
+| **SPPS Planner V4** | Generate an editable Plan, Materials, Total Materials, Checklist, cleavage review, literature guidance, and project exports |
+| **Docking Workbench** | Screen peptide–target pose and contact hypotheses for prioritization without presenting internal scores as experimental affinity |
+| **External Validation** | Prepare organized files and folders for separately installed PyMOL, docking, and molecular-dynamics tools |
+| **Public release controls** | Exclude private experimental history, obsolete backups, hidden example targets, inactive synthetic priors, runtime monkey patches, and completed-looking placeholders |
 
-Pepforge searches multiple peptide backbone families, including α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, and coil/mixed states. A successful public Top-5 build ranks and exports exactly five real coordinate candidates; an incomplete set is reported as a failure, not silently accepted.
+## Operator-focused behavior
 
-Canonical L-peptides can receive torsion-basin seeds so a short stochastic search does not miss a major family. Sequence context, terminal chemistry, D-residues, supported modifications, cyclization/disulfide constraints, and α/β/γ-peptidomimetic patterns are handled only where the parser and evidence rules support them. A seed is a search candidate—not a predicted equilibrium population.
+- **Hot Spot Finder** accepts direct pasted-sequence analysis instead of requiring a prepared input file.
+- **PDE Apply Settings** validates and freezes the visible configuration before candidate generation.
+- PDE starts without hidden target sequences or locked RGD/KLVFF examples.
+- Exploratory PDE runs record a new seed; `Lock seed for exact repeat` and
+  `Repeat Last Run` preserve reproducibility when requested.
+- **PSB Analyze** shows how every supported chemistry token was interpreted
+  before structure generation.
+- A successful **Build Top 5 Structures** operation exports exactly five ranked
+  coordinate candidates. A partial set is reported as incomplete.
+- PSB `Fast`, `Balanced`, and `Thorough` presets change real sampling and retry
+  budgets rather than acting as decorative options.
+- Structure generation runs in an isolated worker so a failed build does not
+  close the full PSB window.
+- SPPS **Generate/Update** creates the connected Plan, Materials, Total
+  Materials, Checklist, and cleavage result together.
+- SPPS **Apply Change** remains the explicit action for committing reviewed Plan
+  or cleavage changes.
+- LOT Number and Batch Manager are intentionally excluded from the Pepforge
+  integration.
 
-PDE starts with no active target or locked example motifs. Its default exploratory mode records a new seed for every run and applies an explicit final sequence-diversity filter; lock the seed or use `Repeat Last Run` for exact reproducibility.
+## Modified-peptide notation
+
+Examples:
+
+```text
+Ac-EEMQRR-NH2
+Pal-AEEA-dab(KKEK)-dG-NH2
+Biotin-AEEA-GH-dab(EEEK)-NH2
+```
+
+Important token rules:
+
+| Input | Interpretation |
+| --- | --- |
+| `Ac-` or `AC-` | Acetyl terminal modifier |
+| `Pal-` or `PAL-` | Palmitoyl terminal modifier |
+| `A-C-` | Ala–Cys residue sequence |
+| `P-A-L-` | Pro–Ala–Leu residue sequence |
+| `FITC-` or `Biotin-` | Registered label/tag token when supported |
+| `-AEEA-` | Registered linker token when supported |
+
+Explicit separators distinguish residue spelling from terminal chemistry.
+Unknown chemistry and recognized tokens without a curated buildable graph are
+reported clearly instead of being replaced with fabricated canonical residues.
+See the [token registry and sequence grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md)
+for the complete input contract.
+
+## Sequence-aware Top-5 structures
+
+Pepforge uses sequence evidence to prioritize relevant structural families and
+then ranks diverse coordinate candidates within the supported chemistry model.
+The Top 5 are plausible starting conformers for inspection and external
+validation—not five experimentally proven physiological states.
 
 Typical outputs:
 
@@ -47,26 +133,59 @@ Typical outputs:
 <name>_conformer_ensemble.sdf
 <name>_conformer_families.csv
 <name>_backbone_torsions.csv
+<name>_rank_01.pdb ... <name>_rank_05.pdb
 ```
 
-See the [complete user manual](MANUAL_EN.md) and [scientific scope](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md).
+Condition presets record interpretation and export context. RDKit structure
+generation is not constant-pH simulation, explicit-solvent molecular dynamics,
+or an AlphaFold prediction.
 
-## Install and run
+## SPPS Planner V4 integration
 
-Requirements: Python 3.10+ with Tk support. A dedicated virtual environment is recommended.
+Pepforge embeds the public, data-sanitized SPPS Planner V4 single-plan workflow.
+Loading, coupling, and cleavage guidance follows conservative evidence rules:
 
-```bash
+- `verified` records may support exact-condition application.
+- `parsed` records remain review evidence until explicitly confirmed.
+- `incomplete` and `excluded` records cannot silently become actionable.
+- Cleavage matching is sequence-first rather than product-name driven.
+- One recommendation transfers one coherent reviewed condition; components from
+  unrelated historical cocktails are not mixed.
+- Loading and cleavage time are recorded independently and do not silently
+  change reagent stoichiometry.
+- No private laboratory record is bundled with the public release.
+
+## Quick start
+
+See the [complete English manual](MANUAL_EN.md) or
+[complete Korean manual](MANUAL_KO.md) for the full workflow, exact button order,
+output interpretation, and troubleshooting.
+
+### Requirements
+
+- Windows 10 or 11 recommended
+- 64-bit Python 3.10 or newer
+- Tk support
+- RDKit for actual 3D structure generation
+
+### Run from source
+
+```bat
+git clone https://github.com/SanghunWoo-23/Pepforge.git
+cd Pepforge
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
+.venv\Scripts\activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python main_launcher.py
 ```
 
-Launch one module directly:
+PyMOL and external docking/MD applications are optional and must be installed
+separately.
 
-```bash
+### Direct module launch
+
+```bat
 python main_launcher.py --tool hotspot
 python main_launcher.py --tool design
 python main_launcher.py --tool pymol
@@ -76,81 +195,103 @@ python main_launcher.py --tool external
 python main_launcher.py --tool workflow
 ```
 
-Use `python main_launcher.py --help` to confirm options. RDKit is required for real 3D generation. PyMOL and external docking/MD programs are optional external applications.
+Run `python main_launcher.py --help` to confirm the current command-line options.
 
-For installation checks, every module, exact button order, notation grammar, output interpretation, and troubleshooting, read the [English complete manual](MANUAL_EN.md) or [Korean complete manual](MANUAL_KO.md).
+## Project structure
 
-## SPPS V4 evidence workflow
+```text
+Pepforge/
+├─ main_launcher.py             # Desktop application entry point
+├─ pepforge_cli.py              # Workflow and release-audit CLI
+├─ suite_gui/                   # Active desktop module interfaces
+├─ peptiforg_core/              # Shared scientific and workflow logic
+├─ spps_v4_gui/                 # Integrated SPPS Planner V4 workflow
+├─ apps/                        # Bundled application engines and data
+├─ tests/                       # Unit, regression, and behavior contracts
+├─ docs/                        # Scientific, API, grammar, and release docs
+├─ installer/                   # Windows build configuration
+├─ MANUAL_EN.md                 # Complete English user manual
+└─ MANUAL_KO.md                 # Complete Korean user manual
+```
 
-Pepforge embeds the sanitized SPPS Planner V4 single-plan workflow. Generate/Update creates the editable Plan, Materials, Total Materials, Checklist, and cleavage output. `Apply Change` commits reviewed table edits explicitly.
+Runtime outputs use separate workspaces for each tool. This is application-level
+workspace isolation, not an operating-system security sandbox.
 
-Loading, coupling, and cleavage advice follows conservative evidence rules:
+## Documentation
 
-- `verified` records may support exact-condition Apply; `parsed` records remain review evidence unless the operator explicitly confirms the exact record.
-- `incomplete` and `excluded` records cannot silently become actionable.
-- Cleavage matching is sequence-first. Product names are descriptive metadata, not the action key.
-- One recommendation transfers one coherent historical condition. Cocktail components are never mixed across records, and a fitted model never supplies an invented optimum for Apply.
-- Loading and cleavage time are recorded independently and do not change reagent stoichiometry.
-
-LOT Number and Batch Manager are intentionally excluded from the Pepforge integration. No real laboratory history is bundled in the public experimental seed directory.
+| Document | Purpose |
+| --- | --- |
+| [English complete manual](MANUAL_EN.md) | Installation, UI workflow, input grammar, outputs, and troubleshooting |
+| [한국어 완전 매뉴얼](MANUAL_KO.md) | 설치, 버튼 순서, 입력 표기, 결과 해석, 문제 해결 |
+| [Scientific scope](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md) | Claims supported and not supported by Pepforge output |
+| [Token and sequence grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md) | Residue, chemistry, tag, linker, and modifier input rules |
+| [SPPS V4 evidence workflow](docs/SPPS_V4_EVIDENCE_WORKFLOW.md) | Evidence states and controlled application rules |
+| [Public API contract](docs/PUBLIC_API_CONTRACT.md) | Stable programmatic interface |
+| [Release notes](RELEASE_NOTES_V3.0.0.md) | V3.0.0 changes and verification summary |
+| [Public-data policy](PUBLIC_DATA_POLICY.md) | Data sanitization requirements for public releases |
 
 ## Verification
 
-```bash
+The final public source baseline passed the integrated release gate:
+
+- **23 passed / 0 failed**
+- **224 Python files compiled / 0 errors**
+- **0 runtime patch, placeholder, or duplicate-definition findings**
+- **0 stale legacy-name findings**
+- **0 packaging-artifact findings**
+
+Run the public checks:
+
+```bat
 python -m compileall -q .
 python -m pytest -q
 python pepforge_cli.py release-gate --root-dir . --output-dir qa_output
 ```
 
-The consolidated source baseline passed automated compile, source-integrity, runtime-validation, regression, verification-matrix, and release-gate checks in the development environment. Native Windows GUI, real RDKit 3D export, PyMOL session opening, and third-party docking/MD execution must still be verified on the target machine.
+Native Windows rendering, actual RDKit Top-5 generation, PyMOL opening, locally
+built executables/installers, and third-party docking/MD execution must still be
+verified on the target machine.
 
-## Public-data policy
+## Scientific scope
 
-This repository contains source code, curated public chemical catalogs, empty schemas/templates, examples, and tests. It does not contain private laboratory history, company records, credentials, unpublished datasets, local models, or runtime project files. Read [PUBLIC_DATA_POLICY.md](PUBLIC_DATA_POLICY.md) before publishing a fork or attaching a release asset.
+Pepforge outputs are research hypotheses and preparation artifacts. Internal
+scores are not measured affinity or Kd; conformers are not proof of an in-vivo
+native structure; synthesis guidance is not an automatically validated SOP.
+Experimental identity, purity, structure, activity, and safety require
+appropriate external and laboratory validation.
 
-## Modified-peptide notation
+Unsupported building blocks, residue propensities, force-field parameters,
+experimental outcomes, or optimum synthesis conditions are not invented.
 
-```text
-Ac-EEMQRR-NH2
-Pal-AEEA-dab(KKEK)-dG-NH2
-Gal-GH-dab(EEEK)-NH2
-```
+## Contributing
 
-PSB resolves `Ac-/AC-` as acetyl and `Pal-/PAL-` as palmitoyl. Enter individual residues with explicit separators, such as `A-C-` or `P-A-L-`.
+Bug reports should include the Pepforge version, OS, Python version, launch
+method, affected module, minimal input, reproduction steps, and relevant logs.
+Remove confidential or unpublished data before posting.
 
-Unsupported building blocks or parameters remain explicitly unsupported or estimated. Pepforge does not invent residue propensities, force-field parameters, or experimental results.
+Contributions must not introduce runtime monkey patches, incomplete placeholders
+presented as finished features, fabricated scientific output, or silent feature
+loss. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Dependency profiles
+## Version
 
-| File | Profile |
-| --- | --- |
-| `requirements.txt` | Core desktop runtime, including RDKit |
-| `requirements-ml.txt` | Optional ML components |
-| `requirements-research.txt` | Optional research stack |
-| `requirements-web.txt` | Optional web components |
+This repository is the public standard release **Pepforge V3.0.0** with the
+integrated **SPPS Planner V4.0.0** evidence workflow.
 
-## Repository map
+## Citation and license
 
-```text
-apps/                    bundled application engines
-peptiforg_core/          shared scientific and workflow logic
-spps_v4_gui/             SPPS Planner V4 workflow and experimental-data layer (LOT/Batch excluded)
-suite_gui/               desktop module interfaces
-tests/                   unit, regression, and contract tests
-docs/                    scientific, API, and release documentation
-installer/               Windows build configuration
-main_launcher.py         desktop entry point
-pepforge_cli.py          workflow and release-audit CLI
-```
+If Pepforge materially contributes to academic work, cite the exact release
+using the metadata in [CITATION.cff](CITATION.cff).
 
-Runtime outputs use per-tool workspaces. This is application-level workspace isolation, not an operating-system security sandbox.
+Pepforge uses the custom **Pepforge Public Academic Citation License** and is not
+presented as an OSI-approved open-source license. Read [LICENSE](LICENSE) before
+redistribution or commercial use.
 
-## Contributing, citation, and license
+---
 
-Bug reports should include version, OS, Python version, launch method, module, minimal input, reproduction steps, and relevant logs. Remove confidential or unpublished data before posting.
+<div align="center">
 
-Changes must not introduce runtime monkey patches, placeholder features presented as complete, fabricated scientific output, or silent feature loss. See [CONTRIBUTING.md](CONTRIBUTING.md).
+**Pepforge V3.0.0**  
+Integrated peptide design, structure, synthesis planning, and validation hand-off.
 
-If Pepforge materially contributes to academic work, cite the exact release. Metadata is in [CITATION.cff](CITATION.cff).
-
-Pepforge uses the custom **Pepforge Public Academic Citation License** and is not represented as OSI-approved. Read [LICENSE](LICENSE) before redistribution or commercial use.
+</div>
