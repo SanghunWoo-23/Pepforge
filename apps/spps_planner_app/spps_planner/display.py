@@ -18,6 +18,14 @@ LIQUID_ALIASES = {
 LIQUID_HINTS = ('solvent','solution','liquid','cleavage acid','cation scavenger','base')
 SOLID_EXCEPTIONS = {'hobt','hbtu','hatu','hctu','tbtu','tstu','tntu','comu','resin','phenol'}
 
+AA_REAGENT_NAMES = {
+    "A": "Fmoc-Ala-OH", "R": "Fmoc-Arg(Pbf)-OH", "N": "Fmoc-Asn(Trt)-OH", "D": "Fmoc-Asp(OtBu)-OH",
+    "C": "Fmoc-Cys(Trt)-OH", "Q": "Fmoc-Gln(Trt)-OH", "E": "Fmoc-Glu(OtBu)-OH", "G": "Fmoc-Gly-OH",
+    "H": "Fmoc-His(Trt)-OH", "I": "Fmoc-Ile-OH", "L": "Fmoc-Leu-OH", "K": "Fmoc-Lys(Boc)-OH",
+    "M": "Fmoc-Met-OH", "F": "Fmoc-Phe-OH", "P": "Fmoc-Pro-OH", "S": "Fmoc-Ser(tBu)-OH",
+    "T": "Fmoc-Thr(tBu)-OH", "W": "Fmoc-Trp(Boc)-OH", "Y": "Fmoc-Tyr(tBu)-OH", "V": "Fmoc-Val-OH",
+}
+
 
 def _num(v: Any, default: float = 0.0) -> float:
     try:
@@ -78,12 +86,18 @@ def is_liquid(name: Any = '', cls: Any = '', state: Any = '', unit: Any = '', re
 
 
 def resin_label(value: Any) -> str:
-    """Return the exact user-facing resin label, while rejecting removed legacy alias."""
+    """Return the canonical operator-facing resin label.
+
+    Internal/legacy aliases are normalized here once instead of being repaired
+    by version-stacked wrappers in the synthesis engine.
+    """
     text = str(value or '').strip()
     if not text:
         return 'Rink Amide AM'
-    if text == 'CTC(합성용)':
-        # Deleted old label: migrate saved projects to the surviving synthesizer profile.
+    low = text.lower()
+    if low in {'ctc/trityl', 'ctc_trityl'}:
+        return '2-CTC'
+    if text in {'CTC(합성용)', 'CTC 합성용', 'CTC-synthesis', 'CTC synthesis'}:
         return 'CTC(합성기)'
     return text
 
@@ -94,15 +108,34 @@ def normalize_operator_amounts(df: pd.DataFrame | None, user_resin: str | None =
     out = df.copy().astype(object).where(pd.notna(df), '')
     if out.empty:
         return out
-    if user_resin and 'step' in out.columns and 'material' in out.columns:
-        mask = out['step'].astype(str).str.strip().str.lower().eq('resin')
+    if user_resin and 'material' in out.columns:
+        step_series = out['step'].astype(str).str.strip().str.lower() if 'step' in out.columns else pd.Series('', index=out.index)
+        material_series = out['material'].astype(str).str.strip().str.lower()
+        class_series = out['class'].astype(str).str.strip().str.lower() if 'class' in out.columns else pd.Series('', index=out.index)
+        mask = step_series.eq('resin') | material_series.eq('resin') | (class_series.str.contains('resin', regex=False) & material_series.isin({'', 'resin'}))
         if mask.any():
             out.loc[mask, 'material'] = resin_label(user_resin)
             if 'reagent' in out.columns:
                 out.loc[mask, 'reagent'] = resin_label(user_resin)
+            if 'class' in out.columns:
+                # Preserve the established Amide total-table class label while
+                # normalizing CTC internal family labels to the generic Resin class.
+                ctc_mask = mask & out['class'].astype(str).str.strip().str.lower().isin({'ctc/trityl', 'resin'})
+                if ctc_mask.any():
+                    out.loc[ctc_mask, 'class'] = 'Resin'
     for idx, r in out.iterrows():
         mat = r.get('material', r.get('component',''))
         cls = r.get('class', r.get('role',''))
+        # Total-material core tables use one-letter canonical AA identifiers.
+        # Normalize those to the actual protected reagent bottle name once.
+        mat_text = str(mat or '').strip()
+        if mat_text in AA_REAGENT_NAMES and str(cls or '').strip().upper() == 'AA' and 'material' in out.columns:
+            mat_text = AA_REAGENT_NAMES[mat_text]
+            out.at[idx, 'material'] = mat_text
+            if 'class' in out.columns:
+                out.at[idx, 'class'] = 'AA/Chemical'
+            mat = mat_text
+            cls = 'AA/Chemical'
         state = r.get('physical_state','')
         unit = r.get('unit','')
         reagent = r.get('reagent','')
@@ -113,9 +146,10 @@ def normalize_operator_amounts(df: pd.DataFrame | None, user_resin: str | None =
         ml = _num(r.get('planned_mL', r.get('total_mL', r.get('volume_mL',''))), 0.0)
         if ml <= 0 and g > 0 and density > 0:
             ml = g / density
+        if ml > 0:
             for c in ('planned_mL','total_mL','volume_mL'):
                 if c in out.columns:
-                    out.at[idx, c] = ml
+                    out.at[idx, c] = round(float(ml), 6)
         for c in ('planned_g','planned_mg','approx_g','total_g'):
             if c in out.columns:
                 out.at[idx, c] = ''
@@ -156,7 +190,9 @@ def ordered_step_materials(df: pd.DataFrame | None, user_resin: str | None = Non
             return 45
         if 'synthesis' in phase or 'reaction' in phase: return 46
         if 'post' in phase: return 50
-        if 'final' in phase: return 60
+        if 'mc/dcm wash' in phase or 'dcm wash' in phase: return 60
+        if 'last / n-term cap' in phase or 'n-term cap' in phase: return 70
+        if 'final' in phase: return 80
         if 'cleavage' in phase: return 1000
         return 100
     out['_sort_key'] = out.apply(lambda r: step_rank(r.get('step','')) + phase_rank(r), axis=1)

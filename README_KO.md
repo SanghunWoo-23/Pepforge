@@ -1,143 +1,306 @@
+<div align="center">
+
+<img src="assets/Pepforge_Icon.png" alt="Pepforge" width="150">
+
 # Pepforge
 
-Sequence 분석, modified-peptide 설계, 구조 ensemble 생성, SPPS 계획, docking-oriented screening을 연결하는 peptide 전용 데스크톱 연구 도구입니다.
+### 펩타이드 설계 · 구조 생성 · SPPS 계획 · 상호작용 검토를 하나로 연결하는 연구용 워크벤치
 
-**공개 기준:** 3.0.0 · **우선 지원 환경:** Windows · **Author:** Sanghun Woo
+**Pepforge V4.0.0 · Public Research Source Release**
 
-**현재 STD:** SPPS Planner V4 근거 기반 workflow가 통합된 Pepforge V3.0.0(2026-08-13)
+[![Release](https://img.shields.io/badge/release-v4.0.0-2563EB?style=for-the-badge)](VERSION.txt)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](requirements.txt)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](#빠른-시작)
+[![Release Gate](https://img.shields.io/badge/release_gate-25%2F25-16A34A?style=for-the-badge)](#검증)
 
-[English](README.md) · [STD 기준](STD_BASELINE.md) · [한국어 완전 매뉴얼](MANUAL_KO.md) · [과학적 범위](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md) · [SPPS V4 방식](docs/SPPS_V4_EVIDENCE_WORKFLOW.md) · [릴리스 안내](RELEASE_NOTES_V3.0.0.md) · [개발 참여](CONTRIBUTING.md) · [변경 내역](CHANGELOG.md)
+**[English](README.md) · [빠른 시작](#빠른-시작) · [주요 기능](#주요-기능) · [Modified peptide](#modified-peptide-지원) · [과학적 범위](#과학적-범위) · [전체 매뉴얼](MANUAL_KO.md)**
 
-> Pepforge의 구조, 점수, contact, 합성 권고는 연구 가설 및 계획 보조 자료입니다. 실험 측정값, 생체 내 native 구조의 증명, 의료 지침이 아닙니다.
+</div>
 
-## Workflow
+---
 
-V3 Modern/Classic hybrid launcher는 6개 active module을 하나의 workflow sidebar에 표시하고, 선택한 모듈의 목적·출력·workspace·명시적 실행 버튼을 보여줍니다. Docking Workbench는 한 번만 표시됩니다.
+## 개요
 
-```text
-sequence / target
-  → hotspot 우선순위 분석
-  → modified-peptide 후보 설계
-  → peptide 구조 ensemble 및 대표 Top 5
-  → SPPS 계획과 material 계산
-  → docking-oriented screening
-  → 외부 검증용 export
-```
+Pepforge는 **서열 수준 후보 탐색 → 펩타이드 설계 → 3D 구조 생성 → SPPS 계획 → protein–peptide interaction 검토 → 외부 검증 hand-off**를 하나의 흐름으로 연결하는 Windows 우선 데스크톱 연구 도구입니다.
 
-| 모듈 | 역할 | 해석 한계 |
-| --- | --- | --- |
-| Hot Spot Finder | 후보 sequence 구간 우선순위 분석 | 점수는 biological proof가 아님 |
-| Peptide Design Engine | canonical 및 일부 modified-peptide 후보 생성 | 화학·합성 가능성 검토 필요 |
-| Structure Builder | peptide conformer 생성·분류 | 생체 내 단일 구조를 확정하지 않음 |
-| SPPS Planner V4 | 편집 가능한 합성 단계, material, 공정 시간, 근거 검토, 문헌 기반 경고 작성 | 검증된 실험 SOP를 자동 보장하지 않음 |
-| Docking Workbench | pose/contact 기반 후보 우선순위 분석 | 내부 점수는 실험 affinity나 Kd가 아님 |
-| External Tools | 외부 검증용 파일·폴더 준비 | 외부 프로그램은 별도 설치 필요 |
-
-## Sequence 기반 구조 생성
-
-입력 peptide sequence를 분석하여 α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, coil/mixed 등 여러 backbone family를 탐색합니다. 공개 Top-5 build가 성공하려면 실제 좌표 후보를 정확히 5개 정렬·출력하며, 일부만 생성된 경우 완성으로 처리하지 않습니다.
-
-Canonical L-peptide에는 짧은 stochastic search가 주요 구조 family를 놓치지 않도록 torsion-basin seed가 추가될 수 있습니다. Sequence context, terminal chemistry, D-residue, 지원되는 modification, cyclization/disulfide constraint, α/β/γ-peptidomimetic pattern은 parser와 evidence rule이 지원하는 범위에서만 반영됩니다. Seed는 탐색 후보이며 실제 평형 population 예측값이 아닙니다.
-
-PDE는 active target과 locked example motif가 빈 상태로 시작합니다. 기본 exploratory mode는 매 실행 새로운 seed를 기록하고 최종 sequence diversity filter를 적용하며, 정확한 재현이 필요하면 seed를 잠그거나 `Repeat Last Run`을 사용합니다.
-
-대표 출력:
+일반적인 canonical peptide뿐 아니라 지원되는 범위에서 terminal chemistry, D-amino acid, non-natural residue, linker, label 및 modified-peptide notation을 보존합니다. 동시에 계산 결과와 실험 근거의 경계를 분명하게 유지합니다.
 
 ```text
-<name>_conformer_ensemble.sdf
-<name>_conformer_families.csv
-<name>_backbone_torsions.csv
+Target / protein sequence
+        ↓
+Hot Spot Finder
+        ↓
+Peptide Design Engine (PDE)
+        ↓
+Peptide Structure Builder (PSB)
+        ↓
+SPPS Planner
+        ↓
+Docking Workbench / interaction review
+        ↓
+Evidence export / external validation hand-off
 ```
 
-자세한 설치·버튼 순서·입력 문법·결과 판독·문제 해결은 [한국어 완전 매뉴얼](MANUAL_KO.md), 구조 주장 범위는 [과학적 범위](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md)를 참고하십시오.
+Pepforge는 내부 점수를 실험적 affinity로 바꾸어 주장하지 않으며, 지원되지 않는 chemistry를 임의로 canonical residue로 치환하거나 가짜 all-atom 구조를 만들지 않습니다.
 
-## 설치 및 실행
+---
 
-Python 3.10 이상과 Tk 지원 환경이 필요합니다. 전용 virtual environment 사용을 권장합니다.
+## 주요 기능
 
-```bash
+| 모듈 | 기능 |
+| --- | --- |
+| **Workflow Mode** | Hot Spot → PDE → PSB → SPPS를 candidate lineage와 project/session 상태로 연결 |
+| **Hot Spot Finder** | protein/peptide sequence를 직접 입력해 후보 구간을 ranking하고 결과 export |
+| **Peptide Design Engine** | Pareto NSGA-II, 5개 scientific design mode, chemistry-aware diversity, stable candidate ID 기반 후보 생성/평가 |
+| **Peptide Structure Builder** | 지원 chemistry를 해석하고 explicit structure intent가 있을 때 이를 반영한 최대 5개 ranked coordinate 후보 생성 |
+| **SPPS Planner** | Plan, Materials, Total Materials, Checklist, cleavage review, evidence guidance, project export |
+| **Docking Workbench** | residue-centered contact와 보수적 interaction evidence를 통한 peptide–target 구조 검토 |
+| **Structure / validation tools** | PDB/SDF 비교, PyMOL review 준비, 외부 docking/MD hand-off |
+
+PDE의 scientific design objective는 다음 5개입니다.
+
+- Interaction Only
+- Interaction First
+- Balanced
+- Structure Guided
+- Structure Exploration
+
+PSB는 지원 범위에서 α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, coil/mixed 계열을 탐색합니다. 생성 구조는 **검토 및 후속 검증을 위한 starting hypothesis**이지 생리적 native state의 증명이 아닙니다.
+
+---
+
+## R14 핵심 변경
+
+R14에서는 PSB가 만든 PDB를 Docking Workbench에 다시 넣을 때 peptide identity가 유실되는 문제를 보완했습니다.
+
+PSB PDB에 다음이 함께 기록됩니다.
+
+- peptide `SEQRES`
+- `REMARK 901 PEPFORGE_EXACT_SEQUENCE`
+- token/modifier metadata
+- 기존 residue-aware `ATOM` / `HETATM` 좌표
+- 긴 exact sequence용 continuation metadata
+
+예를 들어 아래 notation을 PDB 안에 보존할 수 있습니다.
+
+```text
+Ac-EEMQRR-NH2
+Pal-AEEA-dK-NH2
+```
+
+Docking Workbench의 sequence 복원 순서는 다음과 같습니다.
+
+```text
+Pepforge exact-sequence metadata
+        ↓
+SEQRES
+        ↓
+ATOM / HETATM residue extraction
+```
+
+Modifier와 linker는 peptide residue numbering을 소모하지 않습니다. 이미 curated coordinate graph가 있는 chemistry는 좌표를 유지하지만, derivative/attachment가 하나로 결정되지 않는 chemistry에는 가짜 all-atom 좌표를 부여하지 않습니다.
+
+R12/R13의 SPPS 수정도 그대로 유지됩니다. Project Manager의 visible Sequence가 Generate/Apply의 기준이며, 빈 시작/idle refresh 상태에서는 parser를 자동 호출하지 않아 `Core sequence is empty`가 실행 직후 뜨지 않습니다.
+
+자세한 검증은 [R14 validation](docs/validation/VALIDATION_R14_2026-09-21.md)과 [GitHub-ready validation](docs/validation/GITHUB_READY_VALIDATION_R14_2026-09-22.md)을 참고하십시오.
+
+---
+
+## Modified peptide 지원
+
+예시:
+
+```text
+Ac-EEMQRR-NH2
+Pal-AEEA-dab(KKEK)-dG-NH2
+Biotin-AEEA-GH-dab(EEEK)-NH2
+```
+
+| 입력 | 해석 |
+| --- | --- |
+| `Ac-` / `AC-` | N-terminal acetyl modifier |
+| `Pal-` / `PAL-` | N-terminal palmitoyl modifier |
+| `A-C-` | Ala–Cys residue sequence |
+| `P-A-L-` | Pro–Ala–Leu residue sequence |
+| `FITC-` / `Biotin-` | 지원되는 label/tag token |
+| `AEEA`, `Ahx`, PEG 계열 | 지원되는 linker token |
+| D/non-natural residue | 가능한 범위에서 별도 chemistry identity로 보존 |
+
+`ACDE-NH2`는 A-C-D-E sequence이며, terminal modifier를 의미하려면 explicit separator가 있는 `AC-...` notation을 사용합니다.
+
+지원 여부는 workflow stage마다 다릅니다. Parse/metadata 보존은 가능하지만 정확한 3D derivative가 정의되지 않은 경우에는 좌표 생성을 제한할 수 있습니다.
+
+자세한 내용은 [Modified Peptide Support](docs/MODIFIED_PEPTIDE_SUPPORT_V4.md)와 [Token Registry / Sequence Grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md)을 참고하십시오.
+
+---
+
+## SPPS Planner
+
+Pepforge V4.0.0에는 **SPPS Planner V5.0.0 Public/Data-Sanitized** workflow가 통합되어 있습니다.
+
+주요 기능:
+
+- editable Plan
+- step-wise Materials
+- Total Materials
+- Checklist
+- cleavage review
+- project/session persistence
+- literature/evidence guidance
+- 사용자가 로컬에서 기록한 experimental evidence 기반 decision support
+
+Public package에는 private laboratory history, private seed DB, 사용자 로컬 experimental database가 포함되지 않습니다. LOT Number와 Batch Manager는 Pepforge operator-facing integration에서 의도적으로 제외되어 있습니다.
+
+---
+
+## Docking / interaction review
+
+Docking Workbench는 validated docking engine, all-atom MD, binding experiment를 대체하는 도구가 아니라 **구조 및 interaction screening/review layer**입니다.
+
+지원되는 보수적 interaction review 범주에는 hydrogen bond, hydrophobic contact, salt bridge, π–π, cation–π, vdW/clash, disulfide geometry, water bridge, metal coordination, halogen bond, aromatic–sulfur, weak C–H···O/N, NH–π 등이 포함됩니다.
+
+Geometry-aware interaction evidence와 coarse contact triage는 분리되어 있으며, 내부 score나 거리 기준은 실험적으로 측정된 affinity가 아닙니다.
+
+---
+
+## 빠른 시작
+
+### 요구사항
+
+- Windows 10/11 권장
+- 64-bit Python **3.10+**
+- Tk 지원
+- 실제 3D 구조 생성을 위한 RDKit
+
+PyMOL 및 외부 docking/MD 프로그램은 선택 사항이며 별도로 설치합니다.
+
+### Source 실행
+
+```bat
+git clone https://github.com/poowsh1407/Pepforge.git
+cd Pepforge
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
+.venv\Scripts\activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python main_launcher.py
 ```
 
-개별 모듈 실행:
+### 모듈 직접 실행
 
-```bash
+```bat
 python main_launcher.py --tool hotspot
 python main_launcher.py --tool design
-python main_launcher.py --tool pymol
+python main_launcher.py --tool structure
 python main_launcher.py --tool spps
 python main_launcher.py --tool docking
-python main_launcher.py --tool external
 python main_launcher.py --tool workflow
+python main_launcher.py --tool external
 ```
 
-실제 옵션은 `python main_launcher.py --help`로 확인하십시오. 실제 3D 구조 생성에는 RDKit이 필요합니다. PyMOL과 외부 docking/MD 프로그램은 선택적 외부 프로그램입니다.
+`--tool pymol`은 structure-builder route의 호환 alias로 유지됩니다.
 
-상세 workflow와 문제 해결은 [한국어 사용자 매뉴얼](MANUAL_KO.md)을 참고하십시오.
+전체 버튼 순서와 troubleshooting은 [MANUAL_KO.md](MANUAL_KO.md)를 참고하십시오.
 
-## SPPS V4 근거 기반 workflow
+---
 
-Pepforge에는 공개용으로 정리된 SPPS Planner V4의 단일 계획 workflow가 통합되어 있습니다. Generate/Update로 Plan, Materials, Total Materials, Checklist, cleavage 결과를 만들고, 표 수정은 `Apply Change`로 명시적으로 반영합니다.
+## 저장소 구조
 
-- `verified` 기록만 exact-condition Apply의 직접 근거가 됩니다. `parsed` 기록은 검토 근거로 남으며, `incomplete`와 `excluded` 기록은 자동 적용되지 않습니다.
-- Cleavage 추천은 product name이 아니라 sequence를 우선합니다.
-- 한 추천은 한 개의 일관된 실제 기록에서 조건 전체를 가져옵니다. 서로 다른 기록의 cocktail을 섞거나 모델이 만든 가상 optimum을 Apply하지 않습니다.
-- Loading/cleavage time은 별도 공정 조건이며 reagent stoichiometry를 몰래 변경하지 않습니다.
-- Pepforge 통합본에서는 LOT Number와 Batch Manager를 제외했습니다. 공개 seed 폴더에는 실제 실험 이력이 포함되지 않습니다.
+```text
+Pepforge/
+├─ main_launcher.py
+├─ pepforge_cli.py
+├─ suite_gui/
+├─ peptiforg_core/
+├─ pepforge_structure_tool/
+├─ spps_v4_gui/
+├─ apps/
+├─ tests/
+├─ docs/
+├─ installer/
+├─ MANUAL_EN.md
+└─ MANUAL_KO.md
+```
 
-## 자동 검증
+Runtime workspace, generated outputs, local DB, credentials, cache, private experimental history는 public source package에서 제외됩니다.
 
-```bash
+---
+
+## 검증
+
+GitHub-ready R14 public source tree의 최종 공개 패키징 검증 결과입니다.
+
+| 항목 | 결과 |
+| --- | ---: |
+| Release Gate | **25 / 25 passed** |
+| Release Verify Matrix | **16 / 16 passed** |
+| Release Integrity | **18 / 18 passed** |
+| Full Package Audit | **20 / 20 passed** |
+| Source-integrity audit | **0 findings** |
+| Focused GitHub-readiness regression | **32 / 32 passed** |
+| Release Gate compile | **325 Python files / 0 errors** |
+| 대표 modified construct PDB round-trip | **20 / 20 passed** |
+| explicit/buildable chemistry round-trip | **47 / 47 passed** |
+
+로컬에서 다음 검증을 실행할 수 있습니다.
+
+```bat
 python -m compileall -q .
 python -m pytest -q
 python pepforge_cli.py release-gate --root-dir . --output-dir qa_output
 ```
 
-통합 source baseline은 개발 환경에서 compile, source-integrity, runtime-validation, regression, verification-matrix, release-gate 검사를 통과했습니다. 단, native Windows GUI, 실제 RDKit 3D export, PyMOL session open, 외부 docking/MD 실행은 목표 컴퓨터에서 별도 확인해야 합니다.
+---
 
-## 공개 데이터 정책
+## 과학적 범위
 
-이 저장소에는 source code, 공개 근거 기반 chemical catalog, 빈 schema/template, example, test만 포함합니다. 비공개 실험 이력, 회사 기록, credential, 미공개 dataset, 로컬 model, runtime project는 포함하지 않습니다. Fork 공개 또는 Release asset 첨부 전 [PUBLIC_DATA_POLICY.md](PUBLIC_DATA_POLICY.md)를 확인하십시오.
+Pepforge는 **research prioritization, reproducible computational preparation, synthesis planning, validation hand-off**를 위한 연구 지원 도구입니다.
 
-## Modified-peptide 표기
+V4에서는 production MD 실행과 trajectory 분석을 사용자 기능으로 제공하지 않습니다. 외부 simulation workflow 준비는 가능하지만 실제 production simulation 및 trajectory analysis는 향후 V5 범위입니다.
 
-```text
-Ac-EEMQRR-NH2
-Pal-AEEA-dab(KKEK)-dG-NH2
-Gal-GH-dab(EEEK)-NH2
-```
+Pepforge 결과만으로 다음을 증명할 수 없습니다.
 
-PSB에서는 `Ac-/AC-`를 acetyl로, `Pal-/PAL-`을 palmitoyl로 우선 해석합니다. 개별 residue는 `A-C-` 또는 `P-A-L-`처럼 구분해 입력하십시오.
+- experimental binding affinity / Kd
+- binding free energy
+- native in-vivo structure
+- biological efficacy
+- synthesis yield / purity
+- laboratory safety / validated SOP
 
-지원 근거가 없는 building block이나 parameter는 `unsupported` 또는 `estimated`로 남겨야 합니다. Pepforge는 residue propensity, force-field parameter, 실험 결과를 임의로 생성하지 않습니다.
+지원되지 않는 building block, force-field parameter, experimental outcome, 최적 synthesis condition을 임의로 만들어내지 않습니다.
 
-## 저장소 구조
+---
 
-```text
-apps/                    bundled application engine
-peptiforg_core/          공통 scientific/workflow logic
-spps_v4_gui/             SPPS Planner V4 workflow 및 실험 데이터 계층(LOT/Batch 제외)
-suite_gui/               desktop module interface
-tests/                   unit, regression, contract test
-docs/                    scientific, API, release 문서
-installer/               Windows build 설정
-main_launcher.py         desktop entry point
-pepforge_cli.py          workflow 및 release-audit CLI
-```
+## 문서
 
-Runtime output은 tool별 workspace에 저장됩니다. 이는 application-level isolation이며 OS security sandbox는 아닙니다.
+| 문서 | 내용 |
+| --- | --- |
+| [한국어 매뉴얼](MANUAL_KO.md) | 설치, 사용법, 입력, 출력, troubleshooting |
+| [English Manual](MANUAL_EN.md) | Complete English guide |
+| [Modified Peptide Support](docs/MODIFIED_PEPTIDE_SUPPORT_V4.md) | stage별 chemistry 지원 범위 |
+| [Token Registry / Grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md) | sequence/modifier token 규칙 |
+| [PSB Conformer Engine](docs/PSB_CONFORMER_ENGINE.md) | 구조 생성 및 Top-5 경로 |
+| [SPPS V5 Integration](docs/SPPS_V5_INTEGRATION.md) | SPPS evidence workflow |
+| [Public Data Policy](PUBLIC_DATA_POLICY.md) | public/private 데이터 경계 |
+| [Release Notes](RELEASE_NOTES_V4.0.0.md) | V4.0.0 릴리스 요약 |
 
-## 기여, 인용, 라이선스
+---
 
-Issue에는 버전, OS, Python 버전, 실행 방식, 모듈, 최소 재현 입력, 재현 단계, 관련 log를 포함하십시오. 공개 전에 기밀·미공개 데이터를 제거하십시오.
+## Citation / License
 
-Runtime monkey patch, 완성 기능처럼 보이는 placeholder, 조작된 scientific output, 알림 없는 기능 삭제는 허용하지 않습니다. [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하십시오.
+학술 작업에 Pepforge 또는 Pepforge-generated workflow가 실질적으로 기여했다면 사용한 **정확한 release**를 인용하십시오. Citation metadata는 [CITATION.cff](CITATION.cff)에 있습니다.
 
-학술 연구에 실질적으로 사용했다면 정확한 release를 명시해 인용하십시오. [CITATION.cff](CITATION.cff)에 citation metadata가 있습니다.
+권장 표기:
 
-Pepforge는 custom **Pepforge Public Academic Citation License**를 사용하며 OSI-approved license라고 주장하지 않습니다. 재배포나 상업적 사용 전 [LICENSE](LICENSE)를 확인하십시오.
+> Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. Version 4.0.0, 2026. https://github.com/poowsh1407/Pepforge
+
+Pepforge는 custom **Pepforge Public Academic Citation License**를 사용하며 OSI-approved open-source license로 표시하지 않습니다. 재배포/파생 배포/상업적 사용 전 [LICENSE](LICENSE)를 확인하십시오.
+
+---
+
+<div align="center">
+
+**Pepforge V4.0.0**  
+Peptide sequence에서 structure, SPPS planning, interaction review, validation hand-off까지.
+
+</div>

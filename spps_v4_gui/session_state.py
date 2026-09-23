@@ -5,6 +5,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from spps_planner.build_profile import FALLBACK_DOT_DIR, SESSION_FOLDER
 
 from spps_v4_gui.gui_primitives import const_var
 from spps_v4_gui import state_persistence
@@ -39,10 +40,10 @@ class SessionStateMixin:
                     or os.environ.get("APPDATA")
                     or Path.home()
                 )
-                / "SPPS Planner"
+                / SESSION_FOLDER
             )
         else:
-            base = Path.home() / ".spps_planner"
+            base = Path.home() / FALLBACK_DOT_DIR
         base.mkdir(parents=True, exist_ok=True)
         return base / "spps_planner_session_v1.json"
 
@@ -81,7 +82,7 @@ class SessionStateMixin:
             except Exception:
                 pass
         return state_persistence.project_state(
-            app_version="V4.0.0",
+            app_version="V5.0.0",
             saved_at=datetime.now().isoformat(timespec="seconds"),
             selected_pm_index=selected_pm,
             pm_items=getattr(self, "pm_items", []),

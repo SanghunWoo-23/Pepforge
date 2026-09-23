@@ -1,6 +1,8 @@
 """Static desktop UI catalogs used by the accepted SPPS Planner layout."""
 from __future__ import annotations
 
+import re
+
 PLAN_COLUMNS = [
     "No", "Unit name", "Unit eq", "Unit amount(g)", "Unit volume(mL)",
     "Coupling reagent 1", "Coupling reagent 1 eq", "Coupling reagent 1 count",
@@ -210,13 +212,37 @@ LEGACY_UNIT_ALIASES = {
     "PEG24": "Fmoc-N-amido-PEG24-acid",
     "bAla": "Fmoc-β-Ala-OH", "gAla": "Fmoc-GABA-OH",
     "GABA": "Fmoc-GABA-OH",
+    "Acetic anhydride (Ac2O) for N-terminal acetylation": "Acetic anhydride (Ac2O)",
+    "Acetic anhydride (Ac2O) for Ac": "Acetic anhydride (Ac2O)",
+    "Acetic acid route for N-terminal acetylation": "Acetic acid",
+    "Palmitic acid / palmitoyl coupling": "Palmitic acid",
+    "Myristic acid / myristoyl coupling": "Myristic acid",
+    "Stearic acid / stearoyl coupling": "Stearic acid",
+    "Oleic acid / oleoyl coupling": "Oleic acid",
+    "Nicotinic acid / nicotinoyl coupling": "Nicotinic acid",
+    "Caffeic acid / caffeoyl coupling": "Caffeic acid",
+    "Gallic acid / galloyl coupling": "Gallic acid",
+    "Benzoic acid / benzoyl coupling": "Benzoic acid",
+    "Succinic anhydride route / succinyl cap": "Succinic anhydride",
+    "Biotin acid / default biotinylation acid form": "Biotin acid",
+    "Biotin acid / biotinylation acid form": "Biotin acid",
+    "Azidoacetic acid / azidoacetyl coupling": "Azidoacetic acid",
+    "Propiolic acid / propioloyl coupling": "Propiolic acid",
+    "Cholesteryl hemisuccinate / CHEMS": "Cholesteryl hemisuccinate",
 }
 
 
 def canonical_unit_name(value: object) -> str:
-    """Convert legacy display aliases to one unambiguous bottle name."""
+    """Convert legacy display aliases to one unambiguous bottle name.
+
+    Purpose prose such as ``for N-terminal ...`` belongs in chemistry metadata,
+    never in the material identity shown to the operator.
+    """
     text = str(value or "").strip()
-    return LEGACY_UNIT_ALIASES.get(text, text)
+    if text in LEGACY_UNIT_ALIASES:
+        return LEGACY_UNIT_ALIASES[text]
+    cleaned = re.sub(r"\s+(?:route\s+)?for\s+N[- ]terminal\b.*$", "", text, flags=re.IGNORECASE).strip()
+    return cleaned or text
 
 MW_FALLBACK = {
     "A": 311.29, "R": 648.77, "N": 596.67, "D": 411.45, "C": 585.72,

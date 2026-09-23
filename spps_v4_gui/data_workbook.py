@@ -112,7 +112,7 @@ def workbook_tables(items: list[dict[str, Any]], *, project_id: str = "") -> dic
                 risk_acknowledgements.append({**base, **dict(acknowledgement)})
     project_names = sorted({str(item.get("project", "")) for item in items if str(item.get("project", ""))})
     project = [{
-        "app_version": "V4.0.0", "data_schema_version": data_system.SCHEMA_VERSION,
+        "app_version": "V5.0.0", "data_schema_version": data_system.SCHEMA_VERSION,
         "project_id": project_id, "project_names": " | ".join(project_names),
         "work_item_count": len(items), "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }]

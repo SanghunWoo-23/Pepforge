@@ -10,10 +10,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from peptiforg_core.ui_helpers import set_pepforge_icon
-from peptiforg_core.sandbox_runtime import configured_output
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window
+from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
+from peptiforg_core.sandbox_runtime import configured_output_path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = configured_output(ROOT / "workspace" / "external" / "outputs", "external")
+DEFAULT_OUTPUT = configured_output_path(ROOT / "workspace" / "external" / "outputs", "external")
 
 
 def find_program(*names: str) -> str:
@@ -129,23 +131,25 @@ Do not claim validated all-atom MD until topology, parameters and the external r
 class ExternalToolsGuide(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Pepforge External Tools Guide")
-        self.geometry("980x680")
-        self.minsize(860, 580)
+        self.title("Pepforge External Validation")
         set_pepforge_icon(self)
+        apply_pepforge_theme(self)
+        fit_window(self, preferred_width=1080, preferred_height=760, minimum_width=900, minimum_height=620)
+        self._startup_trace = StartupTrace("external_validation", ROOT / "workspace" / "external" / "logs")
         self.output = tk.StringVar(value=str(DEFAULT_OUTPUT))
         self.receptor = tk.StringVar()
         self.ligand = tk.StringVar()
         self.peptide = tk.StringVar()
         self.status = tk.StringVar(value="Ready")
         self._build()
+        mark_window_visible(self, self._startup_trace)
         self.check_tools()
 
     def _build(self) -> None:
         root = ttk.Frame(self, padding=14)
         root.pack(fill="both", expand=True)
-        ttk.Label(root, text="External Validation Tools", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(root, text="Pepforge prepares modified-peptide structures and hand-off files. AutoDock Vina and GROMACS are installed and executed separately.", wraplength=930).pack(anchor="w", pady=(4, 10))
+        ttk.Label(root, text="External Validation", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(root, text="Prepare auditable hand-off packages for external docking or MD tools. External calculations remain external evidence.", style="Sub.TLabel", wraplength=1000).pack(anchor="w", pady=(4, 10))
 
         env = ttk.LabelFrame(root, text="Installation check")
         env.pack(fill="x")

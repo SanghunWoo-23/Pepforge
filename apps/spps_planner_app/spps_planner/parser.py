@@ -70,15 +70,15 @@ def _norm_key(token: str) -> str:
 
 
 def _uppercase_plain_natural_segment(seg: str) -> str:
-    """Allow lowercase FASTA input without changing explicit D-form syntax.
+    """Canonicalize plain natural-AA chunks case-insensitively.
 
-    g-h-k and ghk are treated as G-H-K.  Explicit dG remains dG; bracketed
-    vendor/linker tokens and mixed-case aliases such as gAla are handled by
-    the normal alias table instead of this helper.
+    Sequence identity must not depend on typing case. Explicit D-form tokens are
+    handled before this helper, while known linker/non-natural aliases are
+    resolved afterwards.
     """
     s = str(seg or "").strip()
     letters = [ch for ch in s if ch.isalpha()]
-    if letters and all(ch.islower() for ch in letters) and set(ch.upper() for ch in letters).issubset(NATURAL_AA_LETTERS):
+    if letters and set(ch.upper() for ch in letters).issubset(NATURAL_AA_LETTERS):
         return "".join(ch.upper() if ch.isalpha() else ch for ch in s)
     return s
 CTERM_MARKERS = {"NH2", "CONH2", "AMIDE", "COOH", "CO2H", "OH", "ACID"}
@@ -123,7 +123,7 @@ def _normalise_nterm_modifier(token: str) -> str:
 def _consume_leading_nterm_modifier(parts: list[str]) -> tuple[str, list[str]]:
     """Return (modifier, remaining_parts), supporting hyphenated modifiers.
 
-    Examples: 5-FAM-Ahx-EEMQRR-NH2 -> modifier 5-FAM; Biotin-NHS-PEPTIDE
+    Examples: 5-FAM-Ahx-GHTYKL-NH2 -> modifier 5-FAM; Biotin-NHS-PEPTIDE
     -> modifier Biotin-NHS.  Plain FAM-PEPTIDE still works.
     """
     if not parts:
@@ -158,12 +158,12 @@ def _split_attached_nterm(core_text: str) -> tuple[str, str]:
     planning this is dangerous because it changes the actual core sequence.
 
     Supported compact form:
-    - AcEEMQRR -> Ac + EEMQRR
+    - AcGHTYKL -> Ac + GHTYKL
 
     Other modifiers should be written explicitly with a dash:
-    - FITC-EEMQRR
-    - Biotin-EEMQRR
-    - Pal-EEMQRR
+    - FITC-GHTYKL
+    - Biotin-GHTYKL
+    - Pal-GHTYKL
     """
     s = str(core_text or "").strip()
     if s.startswith("Ac") and not s.startswith("AC") and len(s) > 2:
@@ -221,12 +221,14 @@ def _tokenize_compact_segment(segment: str) -> list[str]:
 
     Multi-letter laboratory tokens are preserved only when written as a full
     segment (Ahx, AEEA, Cha, PEG4, etc.) or in bracket notation.  Plain FASTA
-    chunks such as EEMQRR are still split into amino-acid residues.
+    chunks such as GHTYKL are still split into amino-acid residues.
     """
     raw_segment = str(segment or "").strip()
     if raw_segment.startswith("[") and raw_segment.endswith("]"):
         token = raw_segment[1:-1].strip()
         return [TOKEN_CANONICAL.get(token.upper(), token)] if token else []
+    if re.fullmatch(r"d[ARNDCQEGHILKMFPSTWYV]", raw_segment):
+        return ["d" + raw_segment[1].upper()]
     seg = _uppercase_plain_natural_segment(raw_segment)
     if not seg:
         return []
@@ -295,6 +297,8 @@ def _tokenize_segment_with_branches(segment: str) -> tuple[list[str], list[dict]
         token = raw_segment[1:-1].strip()
         canonical = TOKEN_CANONICAL.get(token.upper(), token)
         return ([canonical] if canonical else []), [], []
+    if re.fullmatch(r"d[ARNDCQEGHILKMFPSTWYV]", raw_segment):
+        return ["d" + raw_segment[1].upper()], [], []
     seg = _uppercase_plain_natural_segment(raw_segment)
     warnings: list[str] = []
     if not seg:
@@ -399,8 +403,14 @@ def parse_sequence(seq: str) -> ParsedSequence:
 
     # Remove C-terminal marker first.
     if parts and _is_cterm_marker(parts[-1]):
-        cterm = parts[-1]
+        cterm = str(parts[-1]).upper()
         parts = parts[:-1]
+
+    if len(parts) > 1:
+        parts = [
+            ("d" + part[1].upper()) if re.fullmatch(r"(?i)d[ARNDCQEGHILKMFPSTWYV]", str(part or "")) else part
+            for part in parts
+        ]
 
     # Then consume a known N-terminal modifier, supporting hyphenated modifiers.
     nterm, remaining = _consume_leading_nterm_modifier(parts)
@@ -408,7 +418,7 @@ def parse_sequence(seq: str) -> ParsedSequence:
         core = "-".join(remaining)
     else:
         core_candidate = "-".join(parts) if parts else s
-        # Safe compact notation: AcEEMQRR -> Ac + EEMQRR.
+        # Safe compact notation: AcGHTYKL -> Ac + GHTYKL.
         detected, remainder = _split_attached_nterm(core_candidate)
         nterm, core = detected, remainder
 

@@ -16,7 +16,8 @@ def test_target_sequence_without_coordinates_blocks_local_3d_screening():
 
 def test_no_music_note_glyph_in_cys_workflow_doc():
     import pathlib
-    p = pathlib.Path(__file__).resolve().parents[1] / 'suite_gui' / 'spps_tk_gui.py'
+    p = pathlib.Path(__file__).resolve().parents[1] / 'spps_v4_gui' / 'classic_base.py'
     txt = p.read_text(encoding='utf-8')
-    assert '♪' not in txt and '♫' not in txt and '♬' not in txt
+    assert "for bad in ('♪', '♫', '♬'" in txt
+    assert "text = text.replace(bad, '')" in txt
     assert 'optional Cys scavenger' in txt

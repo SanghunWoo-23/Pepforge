@@ -19,7 +19,7 @@ import re
 
 from peptiforg_core.low_spec_validation_bridge import export_low_spec_validation_bridge
 
-DOCKING_BRIDGE_VERSION = "2.2.0"
+from peptiforg_core.component_versions import EXTERNAL_DOCKING_BRIDGE_VERSION as DOCKING_BRIDGE_VERSION
 
 
 def _safe_name(name: str) -> str:

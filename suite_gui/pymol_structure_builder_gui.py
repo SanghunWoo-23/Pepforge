@@ -15,23 +15,66 @@ import csv
 import traceback
 from datetime import datetime
 from peptiforg_core.ui_helpers import set_pepforge_icon
-from peptiforg_core.ui_theme import apply_pepforge_theme
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window
+from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
 from peptiforg_core.sandbox_runtime import configured_output
+from peptiforg_core.output_bundle import create_result_bundle, write_bundle_manifest, build_bundle_zip, compact_sequence_label
 
-from peptiforg_core.pymol_structure_builder import (
-    classify_tokens,
-    export_modified_peptide_structure,
-    environment_report,
-    supported_token_table,
-    template_manifest,
-    audit_template_files,
-    STRUCTURE_TOOL_VERSION,
+from pepforge_structure_tool.version import STRUCTURE_TOOL_VERSION
+
+_STRUCTURE_API = None
+
+def _structure_api():
+    """Load RDKit-backed structure code only when a structure action needs it."""
+    global _STRUCTURE_API
+    if _STRUCTURE_API is None:
+        from peptiforg_core import pymol_structure_builder as api
+        _STRUCTURE_API = api
+    return _STRUCTURE_API
+
+def classify_tokens(sequence):
+    return _structure_api().classify_tokens(sequence)
+
+def export_modified_peptide_structure(*args, **kwargs):
+    return _structure_api().export_modified_peptide_structure(*args, **kwargs)
+
+def environment_report():
+    return _structure_api().environment_report()
+
+def supported_token_table():
+    return _structure_api().supported_token_table()
+
+def template_manifest():
+    return _structure_api().template_manifest()
+
+def audit_template_files(*args, **kwargs):
+    return _structure_api().audit_template_files(*args, **kwargs)
+from peptiforg_core.component_versions import (
+    LOW_SPEC_VALIDATION_BRIDGE_VERSION as BRIDGE_VERSION,
+    EXTERNAL_DOCKING_BRIDGE_VERSION as DOCKING_BRIDGE_VERSION,
+    MD_PREP_BRIDGE_VERSION, EXTERNAL_MD_RESULT_IMPORT_BRIDGE_VERSION as MD_RESULT_IMPORT_BRIDGE_VERSION,
+    PUBLICATION_REPORT_BUILDER_VERSION,
 )
-from peptiforg_core.low_spec_validation_bridge import export_low_spec_validation_bridge, BRIDGE_VERSION
-from peptiforg_core.external_docking_runner_bridge import export_external_docking_runner_bridge, DOCKING_BRIDGE_VERSION
-from peptiforg_core.all_atom_md_preparation_bridge import export_all_atom_md_preparation_bridge, MD_PREP_BRIDGE_VERSION
-from peptiforg_core.external_md_result_import_bridge import export_external_md_result_import_bridge, MD_RESULT_IMPORT_BRIDGE_VERSION
-from peptiforg_core.publication_validation_report_builder import export_publication_validation_report, PUBLICATION_REPORT_BUILDER_VERSION
+
+def export_low_spec_validation_bridge(*args, **kwargs):
+    from peptiforg_core.low_spec_validation_bridge import export_low_spec_validation_bridge as func
+    return func(*args, **kwargs)
+
+def export_external_docking_runner_bridge(*args, **kwargs):
+    from peptiforg_core.external_docking_runner_bridge import export_external_docking_runner_bridge as func
+    return func(*args, **kwargs)
+
+def export_all_atom_md_preparation_bridge(*args, **kwargs):
+    from peptiforg_core.all_atom_md_preparation_bridge import export_all_atom_md_preparation_bridge as func
+    return func(*args, **kwargs)
+
+def export_external_md_result_import_bridge(*args, **kwargs):
+    from peptiforg_core.external_md_result_import_bridge import export_external_md_result_import_bridge as func
+    return func(*args, **kwargs)
+
+def export_publication_validation_report(*args, **kwargs):
+    from peptiforg_core.publication_validation_report_builder import export_publication_validation_report as func
+    return func(*args, **kwargs)
 
 
 CONDITION_PRESETS = {
@@ -42,10 +85,15 @@ CONDITION_PRESETS = {
 }
 
 BUILD_PRESETS = {
+    "Fast Top 5": {"num_confs": 5, "max_iters": 80, "num_threads": 2, "search_profile": "evidence_fast", "min_final_conformers": 5, "max_embedding_retries": 2},
+    # Backward-compatible programmatic alias. It is intentionally omitted from
+    # the visible combobox because Balanced is now the safer default.
     "Fast Top 5 (recommended)": {"num_confs": 5, "max_iters": 80, "num_threads": 2, "search_profile": "evidence_fast", "min_final_conformers": 5, "max_embedding_retries": 2},
     "Balanced Top 5": {"num_confs": 12, "max_iters": 200, "num_threads": 2, "search_profile": "evidence_balanced", "min_final_conformers": 5, "max_embedding_retries": 3},
+    "Balanced Top 5 (recommended)": {"num_confs": 12, "max_iters": 200, "num_threads": 2, "search_profile": "evidence_balanced", "min_final_conformers": 5, "max_embedding_retries": 3},
     "Thorough Top 5": {"num_confs": 30, "max_iters": 500, "num_threads": 4, "search_profile": "evidence_thorough", "min_final_conformers": 5, "max_embedding_retries": 4},
 }
+BUILD_PRESET_DISPLAY_ORDER = ("Balanced Top 5 (recommended)", "Fast Top 5", "Thorough Top 5")
 
 
 def _open_path(path: Path) -> None:
@@ -284,9 +332,9 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         super().__init__()
         self.title("Pepforge Peptide Structure Builder")
         set_pepforge_icon(self)
-        self.geometry("1500x900")
-        self.minsize(1180, 720)
         apply_pepforge_theme(self)
+        fit_window(self, preferred_width=1500, preferred_height=900, minimum_width=1180, minimum_height=720)
+        self._startup_trace = StartupTrace("structure_builder", Path.cwd() / "workspace" / "pymol" / "logs")
         self.output_dir = tk.StringVar(value="")
         self.sequence_var = tk.StringVar(value="")
         self.name_var = tk.StringVar(value="")
@@ -295,10 +343,13 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.condition_temperature = tk.StringVar(value="37")
         self.condition_ionic_strength = tk.StringVar(value="150")
         self.condition_environment = tk.StringVar(value="Aqueous buffer")
-        self.build_preset = tk.StringVar(value="Fast Top 5 (recommended)")
+        self.build_preset = tk.StringVar(value="Balanced Top 5 (recommended)")
         self._build_process = None
         self._build_job_dir: Path | None = None
         self._build_started_at = 0.0
+        self.structure_generation_backend_ready = False
+        self._active_result_bundle: Path | None = None
+        self._active_result_key: tuple[str, str] | None = None
         # User-editable bridge settings. Bridge buttons are not magic one-click
         # final MD/docking; they export packages according to these values.
         self.bridge_receptor_path = tk.StringVar(value="")
@@ -314,6 +365,17 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.bridge_size_y = tk.DoubleVar(value=22.0)
         self.bridge_size_z = tk.DoubleVar(value=22.0)
         self._build()
+        mark_window_visible(self, self._startup_trace)
+
+    def _ensure_structure_generation_backend(self):
+        if not self.structure_generation_backend_ready:
+            self._startup_trace.mark("structure_generation_backend_load_start")
+        api = _structure_api()
+        if not self.structure_generation_backend_ready:
+            self.structure_generation_backend_ready = True
+            self._startup_trace.mark("structure_generation_backend_ready", backend="RDKit/PSB")
+            self._startup_trace.write()
+        return api
 
     def _default_output_dir(self) -> Path:
         return configured_output(Path.cwd() / "outputs" / "pymol_structure_builder", "pymol")
@@ -330,9 +392,21 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         name = str(self.name_var.get() or "").strip()
         if name:
             return name
-        if str(self.sequence_var.get() or "").strip():
-            return "modified_peptide"
-        return f"peptide_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        seq = str(self.sequence_var.get() or "").strip()
+        if seq:
+            return compact_sequence_label(seq)
+        return "PSB"
+
+    def _result_bundle(self, sequence: str, name: str, *, force_new: bool = False) -> Path:
+        key = (str(sequence or "").strip(), str(name or "").strip())
+        if not force_new and self._active_result_bundle is not None and self._active_result_key == key and self._active_result_bundle.exists():
+            return self._active_result_bundle
+        bundle = create_result_bundle(
+            self._effective_output_dir(), name=name or None, sequence=sequence or None, tool="PSB"
+        )
+        self._active_result_bundle = bundle
+        self._active_result_key = key
+        return bundle
 
     def _require_sequence(self) -> str | None:
         seq = str(self.sequence_var.get() or "").strip()
@@ -364,8 +438,10 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         ttk.Label(input_box, text="Output name").grid(row=1, column=0, sticky="w", padx=8, pady=8)
         ttk.Entry(input_box, textvariable=self.name_var, width=36).grid(row=1, column=1, sticky="w", padx=8, pady=8)
         ttk.Label(input_box, text="Output folder").grid(row=2, column=0, sticky="w", padx=8, pady=8)
-        ttk.Entry(input_box, textvariable=self.output_dir).grid(row=2, column=1, sticky="ew", padx=8, pady=8)
-        ttk.Button(input_box, text="Browse", command=self._browse).grid(row=2, column=2, padx=8, pady=8)
+        output_row = ttk.Frame(input_box)
+        output_row.grid(row=2, column=1, columnspan=2, sticky="ew", padx=8, pady=8)
+        ttk.Entry(output_row, textvariable=self.output_dir).pack(side="left", fill="x", expand=True)
+        ttk.Button(output_row, text="Browse", command=self._browse).pack(side="left", padx=(8, 0))
         ttk.Label(input_box, text="Condition preset").grid(row=3, column=0, sticky="w", padx=8, pady=(8, 3))
         condition_preset_combo = ttk.Combobox(
             input_box, textvariable=self.condition_preset, state="readonly",
@@ -392,11 +468,11 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         ttk.Label(input_box, text="Build preset").grid(row=5, column=0, sticky="w", padx=8, pady=(3, 8))
         ttk.Combobox(
             input_box, textvariable=self.build_preset, state="readonly",
-            values=tuple(BUILD_PRESETS), width=34,
+            values=BUILD_PRESET_DISPLAY_ORDER, width=34,
         ).grid(row=5, column=1, sticky="w", padx=8, pady=(3, 8))
         ttk.Label(
             input_box,
-            text="Fast guarantees five ranked outputs with adaptive retries; Balanced and Thorough spend progressively more sampling on evidence-prioritized families.",
+            text="Balanced is recommended because it samples evidence-prioritized basins and guided variants; Fast remains available for quick screening, while Thorough spends more sampling time.",
             style="Sub.TLabel",
         ).grid(row=5, column=2, sticky="w", padx=8, pady=(3, 8))
         input_box.columnconfigure(1, weight=1)
@@ -405,7 +481,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         scope_box.pack(fill="x", pady=(8, 0))
         ttk.Label(
             scope_box,
-            text=("Sequence evidence guides a diverse top-five ensemble across helix, beta/hairpin, turn, PPII and coil families. "
+            text=("PDE structure intent, when supplied, guides Top-5 selection inside the requested geometry basin; otherwise PSB ranks clash-free geometry without forcing one-per-family diversity. "
                   "Terminal chemistry, chirality and modifications are preserved. Results are plausible starting conformers—not a claimed in-vivo structure."),
             wraplength=1180,
         ).pack(anchor="w", padx=8, pady=7)
@@ -420,16 +496,20 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.action_buttons = []
         button_specs = [
             ("Analyze", self.analyze),
-            ("Build Top 5 Structures", self.export),
+            ("Build Structure", self.export),
             ("Open Token Map", self.open_token_map),
-            ("Open Output", lambda: _open_path(self._effective_output_dir())),
+            ("Open Output", lambda: _open_path(self._active_result_bundle or self._effective_output_dir())),
         ]
         for idx, (label, cmd) in enumerate(button_specs):
-            btn = ttk.Button(actions, text=label, command=cmd, width=18, style="Accent.TButton" if idx == 1 else "TButton")
+            btn = ttk.Button(actions, text=label, command=cmd, width=18, style="TButton")
             btn.grid(row=1, column=idx, padx=4, pady=4, sticky="ew")
             self.action_buttons.append(btn)
         for col in range(4):
             actions.columnconfigure(col, weight=1)
+        # V4 scope stops at static structure generation/review. Actual MD and
+        # trajectory analysis belong to the V5 simulation workflow.
+        ttk.Button(actions, text="Analyze Structures", command=self.analyze_structure_files, width=18).grid(row=2, column=0, columnspan=2, padx=4, pady=4, sticky="ew")
+        ttk.Button(actions, text="Compare Structures", command=self.compare_structure_files, width=18).grid(row=2, column=2, columnspan=2, padx=4, pady=4, sticky="ew")
 
         pane = ttk.PanedWindow(root, orient="vertical")
         pane.pack(fill="both", expand=True)
@@ -486,7 +566,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
     def _build_settings(self) -> dict:
         return dict(BUILD_PRESETS.get(
             str(self.build_preset.get()),
-            BUILD_PRESETS["Fast Top 5 (recommended)"],
+            BUILD_PRESETS["Balanced Top 5 (recommended)"],
         ))
 
     def _worker_command(self, request_path: Path) -> list[str]:
@@ -504,7 +584,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         request = {
             "sequence": sequence,
             "name": name,
-            "output_dir": str(self._effective_output_dir()),
+            "output_dir": str(self._result_bundle(sequence, name, force_new=True)),
             "environment_conditions": conditions,
             "result_path": str(result_path),
             **settings,
@@ -559,7 +639,12 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             result = json.loads(result_path.read_text(encoding="utf-8"))
             if not result.get("ok"):
                 raise RuntimeError(f"{result.get('error_type', 'BuildError')}: {result.get('error', 'unknown structure-build failure')}")
-            self._render_export_result(dict(result.get("paths") or {}))
+            paths = dict(result.get("paths") or {})
+            self._render_export_result(paths)
+            if self._active_result_bundle and self._active_result_bundle.exists():
+                zip_path = build_bundle_zip(self._active_result_bundle, filename="PSB_Result_Package.zip")
+                write_bundle_manifest(self._active_result_bundle, tool="PSB", name=self._effective_output_name(), sequence=self.sequence_var.get(), artifacts={**paths, "zip": zip_path})
+                self.note.insert("end", f"\nResult bundle ZIP: {zip_path}\n")
             self._set_done("Top-five ensemble complete")
             messagebox.showinfo("Export complete", "The ranked top five structures plus evidence report, ensemble, family CSV, torsion CSV, JSON and PyMOL files were exported.")
         except Exception as exc:
@@ -590,6 +675,10 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.note.insert("end", f"- evidence-guided family priority: {plan.get('family_priority', [])}\n")
         self.note.insert("end", f"- family evidence identifiers: {plan.get('family_evidence', {})}\n")
         self.note.insert("end", f"- adaptive Top-5 retries: {conf.get('adaptive_embedding_attempts', [])}\n")
+        audit = ca.get("top5_diversity_audit") or {}
+        self.note.insert("end", f"- Top-5 RMSD spread diagnostic (not a selection objective): {audit.get('status', 'unavailable')} | unique families={audit.get('unique_family_count')} | min pairwise RMSD={audit.get('minimum_pairwise_rmsd_A')} Å\n")
+        self.note.insert("end", f"- canonical-L seed status: {conf.get('canonical_seed_status', 'unavailable')} | applied={conf.get('applied_backbone_seed_count', 0)} | labels={conf.get('applied_backbone_seed_labels', [])}\n")
+        self.note.insert("end", f"- requested evidence-guided canonical seed families: {conf.get('requested_canonical_seed_labels', [])}; variants/preferred={conf.get('guided_seed_variants_per_preferred', 0)}\n")
         self.note.insert("end", "- ranked top five:\n")
         for row in ca.get("top_conformers", []) or []:
             self.note.insert("end", f"  {row.get('rank')}. {row.get('family')} | role={row.get('candidate_role')} | support={row.get('sequence_support')} | energy={row.get('energy')}\n")
@@ -637,7 +726,9 @@ class PyMOLStructureBuilderGUI(tk.Tk):
     def _write_json_popup(self, title: str, payload):
         win = tk.Toplevel(self)
         win.title(title)
-        win.geometry("980x700")
+        set_pepforge_icon(win)
+        apply_pepforge_theme(win)
+        fit_window(win, preferred_width=980, preferred_height=700, minimum_width=780, minimum_height=560)
         txt = tk.Text(win, wrap="none")
         txt.pack(fill="both", expand=True)
         txt.insert("end", json.dumps(payload, indent=2, ensure_ascii=False))
@@ -675,7 +766,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             LOGGER.debug("Optional operation skipped", exc_info=True)
     def _write_diagnostics(self, stage: str, exc: Exception) -> dict[str, str]:
         """Write bridge diagnostics instead of ending with only a popup."""
-        diag_dir = self._effective_output_dir() / "bridge_diagnostics"
+        diag_dir = (self._active_result_bundle or self._effective_output_dir()) / "bridge_diagnostics"
         diag_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_stage = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in stage)
@@ -714,7 +805,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         if seq is None:
             return
         name = self._safe_name()
-        out = self._effective_output_dir()
+        out = self._result_bundle(seq, name, force_new=False)
         token_map = out / f"{name}_token_map.csv"
         try:
             if not token_map.exists():
@@ -732,15 +823,65 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             self._set_failed("Token map diagnostic written")
             messagebox.showerror("Token map failed", "Token map could not be opened, but diagnostic files were written.\n\n" + str(exc))
 
+    def analyze_structure_files(self):
+        files = filedialog.askopenfilenames(title="Select one or more PDB/SDF structure files", filetypes=[("Structure files", "*.pdb *.sdf"), ("PDB", "*.pdb"), ("SDF", "*.sdf"), ("All files", "*.*")])
+        if not files:
+            return
+        name = self._effective_output_name() + "_Structure_Files"
+        try:
+            self._startup_trace.mark("structure_file_backend_load_start")
+            from peptiforg_core.structure_file_analyzer import analyze_structure_files
+            self._startup_trace.mark("structure_file_backend_ready")
+            self._startup_trace.write()
+            paths = analyze_structure_files(files, self._effective_output_dir(), name=name)
+            self.note.insert("end", "\nStructure-file analysis exported:\n")
+            for key in ("summary_csv", "summary_json", "zip_path", "bundle_dir"):
+                if key in paths:
+                    self.note.insert("end", f"- {key}: {paths[key]}\n")
+            self.note.insert("end", f"- models: {paths.get('model_count')} | files: {paths.get('file_count')} | mean Rg: {paths.get('mean_radius_of_gyration_A')} Å | mean RMSD to first model: {paths.get('mean_rmsd_to_first_model_A')} Å\n")
+            messagebox.showinfo("Structure analysis complete", "Selected PDB/SDF structure files were analyzed. Open the result bundle for geometry summaries without requiring trajectory files.")
+        except Exception as exc:
+            messagebox.showerror("Structure analysis failed", str(exc))
+
+    def compare_structure_files(self):
+        reference = filedialog.askopenfilename(title="Select reference/independent structure PDB", filetypes=[("PDB", "*.pdb"), ("All files", "*.*")])
+        if not reference:
+            return
+        comparison = filedialog.askopenfilename(title="Select comparison structure PDB", filetypes=[("PDB", "*.pdb"), ("All files", "*.*")])
+        if not comparison:
+            return
+        name = self._effective_output_name() + "_Structure_Consensus"
+        try:
+            self._startup_trace.mark("structure_consensus_backend_load_start")
+            from peptiforg_core.structure_consensus import compare_structures
+            self._startup_trace.mark("structure_consensus_backend_ready")
+            self._startup_trace.write()
+            paths = compare_structures(reference, comparison, self._effective_output_dir(), name=name)
+            self.note.insert("end", "\nStructure consensus diagnostic exported:\n")
+            for key in ("summary_json", "per_residue_csv", "zip_path"):
+                if key in paths:
+                    self.note.insert("end", f"- {key}: {paths[key]}\n")
+            mode = paths.get("comparison_mode", "residue_CA_backbone")
+            if mode == "heavy_atom_order":
+                self.note.insert("end", f"- heavy-atom aligned RMSD: {paths.get('heavy_atom_order_rmsd_A')} Å | comparison mode: atom-order geometry\n")
+            else:
+                self.note.insert("end", f"- Cα RMSD: {paths.get('ca_rmsd_A')} Å | backbone RMSD: {paths.get('backbone_rmsd_A')} Å | DSSP agreement: {paths.get('dssp_residue_agreement_fraction')}\n")
+            messagebox.showinfo("Structure comparison complete", "PDB structures were compared as a static V4 structure review. Production MD and trajectory analysis are reserved for V5.")
+        except Exception as exc:
+            messagebox.showerror("Structure comparison failed", str(exc))
+
     def show_environment(self):
+        self._ensure_structure_generation_backend()
         self._write_json_popup("Pepforge Structure Tool Environment", environment_report())
 
     def show_supported_tokens(self):
+        self._ensure_structure_generation_backend()
         table = supported_token_table()
         slim = {k: v for k, v in table.items() if k not in {"template_registry", "template_manifest"}}
         self._write_json_popup("Supported Tokens", slim)
 
     def show_template_audit(self):
+        self._ensure_structure_generation_backend()
         try:
             payload = audit_template_files(Path(__file__).resolve().parents[1])
         except Exception as exc:
@@ -751,6 +892,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self._write_json_popup("Template Audit", payload)
 
     def analyze(self):
+        self._ensure_structure_generation_backend()
         seq = self._require_sequence()
         if seq is None:
             return
@@ -808,7 +950,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             self._set_progress(25, "Preparing base structure and token map...")
             if bool(self.bridge_quick_mode.get()):
                 paths = export_gui_quick_bridge_package(
-                    self.sequence_var.get(), str(self._effective_output_dir()), name, label,
+                    self.sequence_var.get(), str(self._result_bundle(self.sequence_var.get(), name, force_new=False)), name, label,
                     receptor_path=self._bridge_receptor(),
                     external_md_csv=self._bridge_md_csv(),
                     center=self._bridge_center(),
@@ -829,6 +971,9 @@ class PyMOLStructureBuilderGUI(tk.Tk):
                 self.note.insert("end", f"- {k}: {p}" + chr(10))
             self.note.insert("end", chr(10) + "Bridge is a hand-off/template export, not a final external docking or MD run. Open token_map.csv and parameter_requirements.csv first." + chr(10))
             self.note.insert("end", self._bridge_settings_note() + chr(10))
+            if self._active_result_bundle and self._active_result_bundle.exists():
+                zip_path = build_bundle_zip(self._active_result_bundle, filename="PSB_Result_Package.zip")
+                write_bundle_manifest(self._active_result_bundle, tool="PSB", name=name, sequence=self.sequence_var.get(), artifacts={**paths, "zip": zip_path})
             self._set_done(f"{label} complete")
             messagebox.showinfo(f"{label} complete", f"{label} package exported. Open the output folder and check bridge_packages.")
         except Exception as exc:
@@ -842,14 +987,14 @@ class PyMOLStructureBuilderGUI(tk.Tk):
     def export_bridge(self):
         self._export_bridge_kind(
             "Simulation Bridge", "simulation_bridge",
-            lambda name: export_low_spec_validation_bridge(self.sequence_var.get(), str(self._effective_output_dir()), name, num_confs=max(1, int(self.bridge_conformers.get())))
+            lambda name: export_low_spec_validation_bridge(self.sequence_var.get(), str(self._result_bundle(self.sequence_var.get(), name, force_new=False)), name, num_confs=max(1, int(self.bridge_conformers.get())))
         )
 
     def export_docking_bridge(self):
         self._export_bridge_kind(
             "Docking Bridge", "docking_bridge",
             lambda name: export_external_docking_runner_bridge(
-                self.sequence_var.get(), str(self._effective_output_dir()), name,
+                self.sequence_var.get(), str(self._result_bundle(self.sequence_var.get(), name, force_new=False)), name,
                 receptor_path=self._bridge_receptor(), center=self._bridge_center(), size=self._bridge_size(),
                 exhaustiveness=max(1, int(self.bridge_exhaustiveness.get())),
                 num_modes=max(1, int(self.bridge_num_modes.get())),
@@ -861,7 +1006,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self._export_bridge_kind(
             "MD Prep Bridge", "md_prep_bridge",
             lambda name: export_all_atom_md_preparation_bridge(
-                self.sequence_var.get(), str(self._effective_output_dir()), name,
+                self.sequence_var.get(), str(self._result_bundle(self.sequence_var.get(), name, force_new=False)), name,
                 receptor_path=self._bridge_receptor(), center=self._bridge_center(), size=self._bridge_size(),
                 low_spec_num_confs=max(1, int(self.bridge_conformers.get())),
             )
@@ -871,7 +1016,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self._export_bridge_kind(
             "MD Result Import", "md_result_import_bridge",
             lambda name: export_external_md_result_import_bridge(
-                self.sequence_var.get(), str(self._effective_output_dir()), name,
+                self.sequence_var.get(), str(self._result_bundle(self.sequence_var.get(), name, force_new=False)), name,
                 external_md_csv=self._bridge_md_csv(), receptor_path=self._bridge_receptor(),
                 center=self._bridge_center(), size=self._bridge_size(),
                 low_spec_num_confs=max(1, int(self.bridge_conformers.get())),
@@ -881,7 +1026,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
     def export_publication_report(self):
         self._export_bridge_kind(
             "Publication Report", "publication_report",
-            lambda name: export_publication_validation_report(self.sequence_var.get(), str(self._effective_output_dir()), name)
+            lambda name: export_publication_validation_report(self.sequence_var.get(), str(self._result_bundle(self.sequence_var.get(), name, force_new=False)), name)
         )
 
 

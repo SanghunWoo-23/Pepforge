@@ -14,20 +14,34 @@ for _p in [ROOT, ROOT / 'apps' / 'spps_planner_app']:
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from peptiforg_core.ui_helpers import set_pepforge_icon
-import pandas as pd
+from peptiforg_core.output_bundle import create_result_bundle, write_bundle_manifest, build_bundle_zip
+from peptiforg_core.lazy_imports import lazy_module
+from peptiforg_core.startup_runtime import mark_window_visible
+
+pd = lazy_module("pandas")
+_spps_engine = lazy_module("spps_planner.engine")
+_spps_export = lazy_module("spps_planner.export")
+
+def PlanInput(*args, **kwargs):
+    return _spps_engine.PlanInput(*args, **kwargs)
+
+def plan_summary(*args, **kwargs):
+    return _spps_engine.plan_summary(*args, **kwargs)
+
+def generate_excel_like_synthesis_table(*args, **kwargs):
+    return _spps_engine.generate_excel_like_synthesis_table(*args, **kwargs)
+
+def export_csvs(*args, **kwargs):
+    return _spps_export.export_csvs(*args, **kwargs)
 from spps_v4_gui.gui_primitives import EditableTree, StaticValue as _StaticValue, bind_combobox_first_letter_jump, const_var as _v225_const_var, open_path
 from spps_v4_gui import catalogs as _catalogs
 from spps_v4_gui.session_state import SessionStateMixin
-APP_VERSION = 'V4.0.0'
+from spps_v4_gui import ui_system
+APP_VERSION = 'V5.0.0'
 APP = ROOT / 'apps' / 'spps_planner_app'
 if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
-from spps_planner.engine import PlanInput, plan_summary, generate_excel_like_synthesis_table
 from spps_planner.parser import tokenize_core_sequence
-try:
-    from spps_planner.export import export_csvs
-except Exception:
-    export_csvs = None
 
 class ClassicBaseCore(SessionStateMixin, tk.Tk):
     PLAN_COLUMNS = _catalogs.PLAN_COLUMNS
@@ -47,12 +61,28 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         super().__init__()
         self.title('SPPS Planner')
         set_pepforge_icon(self)
-        self.geometry('1920x1080')
-        self.minsize(1550, 900)
+        ui_system.fit_window(self, preferred_width=1600, preferred_height=900, minimum_width=1180, minimum_height=720)
+        trace = getattr(self, "_startup_trace", None)
+        if trace is not None:
+            mark_window_visible(self, trace)
         self.last_outdir: Path | None = None
         self._row_meta_by_no = {}
+        # Logging must be safe before/without the legacy Log tab. The current
+        # Pepforge surface can omit that tab, while startup/session/error paths
+        # may still emit diagnostic messages during construction.
+        self._pending_log_messages: list[str] = []
         self._build()
+        if trace is not None:
+            trace.mark("ui_ready")
+            trace.write()
         self.bind_all_combobox_typeahead()
+        # Closing the planner must commit the active peptide/session before Tk
+        # destroys the widgets.  Otherwise a pending live-sync callback can be
+        # cancelled and the Sequence field appears blank after reopening.
+        try:
+            self.protocol("WM_DELETE_WINDOW", self.on_close)
+        except Exception:
+            pass
         # Startup must not invoke the synthesis core before the operator has
         # entered a sequence.  Empty editor fields are a valid idle state.
         startup_sequence = ""
@@ -76,11 +106,11 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         style.configure('TNotebook.Tab', padding=(24, 10), font=('Segoe UI', 11, 'bold'))
         main = ttk.Frame(self, padding=10)
         main.pack(fill='both', expand=True)
-        ttk.Label(main, text='SPPS Planner V4.0.0 - Modern / Classic Hybrid', font=('Segoe UI', 18, 'bold')).pack(anchor='w')
+        ttk.Label(main, text='SPPS Planner V5.0.0 - Modern / Classic Hybrid', font=('Segoe UI', 18, 'bold')).pack(anchor='w')
         self.project_name = tk.StringVar(value='')
         self.seq = tk.StringVar(value='')
-        # Retained as an empty compatibility field for legacy calculation and
-        # project schemas. Pepforge does not expose or generate LOT identifiers.
+        # Retained as an empty compatibility field for legacy schemas.
+        # Pepforge does not expose or generate LOT identifiers.
         self.lot_no = tk.StringVar(value='')
         project_bar = ttk.Labelframe(main, text='Project', padding=8)
         project_bar.pack(fill='x', pady=(0, 8))
@@ -680,6 +710,8 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
             box.columnconfigure(0, weight=1)
         self.ml_text = self._text_in_frame(ml_box)
         self.log_text = self._text_in_frame(log_box)
+        from spps_v4_gui.diagnostics import flush_pending_log
+        flush_pending_log(self)
         paned.add(ml_box, weight=1)
         paned.add(log_box, weight=1)
 
@@ -698,9 +730,12 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         left.columnconfigure(0, weight=1)
         btns = ttk.Frame(left)
         btns.grid(row=0, column=0, sticky='ew', pady=(0, 4))
-        ttk.Button(btns, text='Add', command=self.pm_add_peptide).pack(side='left', padx=2)
-        ttk.Button(btns, text='Duplicate', command=self.pm_duplicate_peptide).pack(side='left', padx=2)
-        ttk.Button(btns, text='Delete', command=self.pm_delete_peptide).pack(side='left', padx=2)
+        self.pm_add_button = ttk.Button(btns, text='Add', command=self.pm_add_peptide)
+        self.pm_add_button.pack(side='left', padx=2)
+        self.pm_duplicate_button = ttk.Button(btns, text='Duplicate', command=self.pm_duplicate_peptide)
+        self.pm_duplicate_button.pack(side='left', padx=2)
+        self.pm_delete_button = ttk.Button(btns, text='Delete', command=self.pm_delete_peptide)
+        self.pm_delete_button.pack(side='left', padx=2)
         self.pm_list = tk.Listbox(left, height=24, exportselection=False, selectmode=tk.EXTENDED, font=('Segoe UI', 10))
         self.pm_list.grid(row=1, column=0, sticky='nsew')
         sy = ttk.Scrollbar(left, orient='vertical', command=self.pm_list.yview)
@@ -758,8 +793,21 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         pm_chem_combo.grid(row=2, column=7, sticky='ew', padx=(0, 8), pady=2)
         actions = ttk.Frame(edit)
         actions.grid(row=3, column=0, columnspan=10, sticky='ew', pady=(6, 0))
-        ttk.Button(actions, text='Generate', command=self.pm_generate_selected).pack(side='left', padx=3)
-        ttk.Button(actions, text='Save Session Now', command=self.save_autosave_state).pack(side='left', padx=3)
+        self.pm_action_bar = actions
+        self.pm_generate_button = ttk.Button(actions, text='Generate', command=self.pm_generate_selected)
+        self.pm_generate_button.pack(side='left', padx=3)
+        self.pm_apply_button = ttk.Button(actions, text='Apply Change', command=self.apply_change)
+        self.pm_apply_button.pack(side='left', padx=3)
+        self.pm_condition_button = ttk.Button(actions, text='Recommend Conditions', command=self.open_condition_optimizer)
+        self.pm_condition_button.pack(side='left', padx=(9, 3))
+        self.pm_loading_advice_button = ttk.Button(actions, text='Loading Advice', command=self.open_loading_advisor)
+        self.pm_loading_advice_button.pack(side='left', padx=3)
+        self.pm_cleavage_advice_button = ttk.Button(actions, text='Cleavage Advice', command=self.open_cleavage_advisor)
+        self.pm_cleavage_advice_button.pack(side='left', padx=3)
+        self.pm_record_lab_button = ttk.Button(actions, text='Record Lab Data', command=self.open_experimental_data)
+        self.pm_record_lab_button.pack(side='left', padx=3)
+        self.pm_save_session_button = ttk.Button(actions, text='Save Session Now', command=self.save_autosave_state)
+        self.pm_save_session_button.pack(side='left', padx=3)
         moved_actions = ttk.Frame(edit)
         moved_actions.grid(row=4, column=0, columnspan=10, sticky='ew', pady=(5, 0))
         ttk.Label(moved_actions, text='Global actions:').pack(side='left', padx=(0, 4))
@@ -767,7 +815,10 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         ttk.Button(moved_actions, text='Use HBTU/NMP 10eq', command=self.apply_hbtu_nmp_preset).pack(side='left', padx=3)
         ttk.Button(moved_actions, text='Load Project', command=self.load_project).pack(side='left', padx=3)
         ttk.Button(moved_actions, text='Import Output', command=self.load_output_folder).pack(side='left', padx=3)
-        ttk.Button(moved_actions, text='Export', command=self.export_outputs).pack(side='left', padx=3)
+        self.pm_export_button = ttk.Button(moved_actions, text='Export', command=self.export_outputs)
+        self.pm_export_button.pack(side='left', padx=3)
+        self.pm_msds_button = ttk.Button(moved_actions, text='MSDS / SDS', command=self.open_msds_lookup)
+        self.pm_msds_button.pack(side='left', padx=3)
         setup_btn = ttk.Button(moved_actions, text='Show setup', command=self.toggle_setup_panel)
         setup_btn.pack(side='left', padx=(10, 3))
         self.setup_toggle_buttons = getattr(self, 'setup_toggle_buttons', []) + [setup_btn]
@@ -1502,28 +1553,6 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
             out.append({'no': i, 'project': r.get('Project', ''), 'peptide_name': r.get('Peptide name', ''), 'lot_no': r.get('LOT No', ''), 'form': r.get('Form', ''), 'copies': r.get('Copies', ''), 'sequence': ' / '.join(seq_parts), 'scale_mmol': r.get('Scale mmol', ''), 'resin': r.get('Resin', ''), 'loading_mmol_g': r.get('Loading', ''), 'output_folder': ''})
         return pd.DataFrame(out)
 
-    def refresh_batch_workspace_preview(self):
-        try:
-            rows = self._batch_rows_from_tree()
-            aa_df = self._batch_aa_synthesizer_summary(rows)
-            index_df = self._batch_project_index_df(rows)
-            if hasattr(self, 'batch_material_tree'):
-                self._write_tree(self.batch_material_tree, aa_df, ['AA', 'count', 'calc_mL', 'actual_mL', 'MW', 'weight_g'])
-            if hasattr(self, 'batch_project_tree'):
-                self._write_tree(self.batch_project_tree, index_df, ['no', 'project', 'peptide_name', 'lot_no', 'copies', 'sequence', 'scale_mmol', 'resin', 'output_folder'])
-            if hasattr(self, 'batch_hbtu_tree'):
-                self._write_tree(self.batch_hbtu_tree, self._batch_hbtu_nmp_summary(rows), ['material', 'count', 'calc_mL', 'actual_mL', 'MW', 'weight_g', 'note'])
-            if hasattr(self, 'batch_cap_tree'):
-                self._write_tree(self.batch_cap_tree, self._batch_modifier_summary(rows), ['material', 'type', 'count', 'calc_mL', 'actual_mL', 'MW', 'weight_g', 'note'])
-            if hasattr(self, 'batch_layout_text'):
-                self.batch_layout_text.delete('1.0', 'end')
-                self.batch_layout_text.insert('end', self._batch_layout_text(rows))
-        except Exception as e:
-            try:
-                self._log(f'Batch preview warning: {e}\n')
-            except Exception:
-                pass
-
     def _batch_layout_text(self, rows) -> str:
         lines = []
         lines.append('peptide name / synthesizer columns')
@@ -1537,9 +1566,9 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
             cols = [str(i) for i in range(col_no, col_no + copies)]
             lines.append(f"Columns {', '.join(cols)} | {name} | {lot} | {form}")
             if str(r.get('Region 1 seq', '')).strip():
-                lines.append(f"  1구역 ({r.get('Region 1 eq', '1')}eq): " + ' '.join(self._aa_letters_from_sequence(r.get('Region 1 seq'))))
+                lines.append(f"  Region 1 ({r.get('Region 1 eq', '1')}eq): " + ' '.join(self._aa_letters_from_sequence(r.get('Region 1 seq'))))
             if str(r.get('Region 2 seq', '')).strip():
-                lines.append(f"  2구역 ({r.get('Region 2 eq', '')}eq): " + ' '.join(self._aa_letters_from_sequence(r.get('Region 2 seq'))))
+                lines.append(f"  Region 2 ({r.get('Region 2 eq', '')}eq): " + ' '.join(self._aa_letters_from_sequence(r.get('Region 2 seq'))))
             lines.append('')
             col_no += copies
         lines.append('Combined AA table uses: count × scale × AA coupling eq / concentration.')
@@ -1821,10 +1850,10 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         header3 = [''] + [c.get('Form') or 'linear' for c in peptide_cols]
         layout_rows = [header1, header2, header3, ['Loading'] + ['-' for _ in peptide_cols]]
         max_r1 = max([len(self._aa_letters_from_sequence(c.get('Region 1 seq'))) for c in peptide_cols] + [0])
-        layout_rows.append(['1구역 (1eq)'] + ['' for _ in peptide_cols])
+        layout_rows.append(['Region 1 (1eq)'] + ['' for _ in peptide_cols])
         for i in range(max_r1):
             layout_rows.append([''] + [self._aa_letters_from_sequence(c.get('Region 1 seq'))[i] if i < len(self._aa_letters_from_sequence(c.get('Region 1 seq'))) else '' for c in peptide_cols])
-        layout_rows.append(['2구역'] + ['' for _ in peptide_cols])
+        layout_rows.append(['Region 2'] + ['' for _ in peptide_cols])
         max_r2 = max([len(self._aa_letters_from_sequence(c.get('Region 2 seq'))) for c in peptide_cols] + [0])
         for i in range(max_r2):
             layout_rows.append([''] + [self._aa_letters_from_sequence(c.get('Region 2 seq'))[i] if i < len(self._aa_letters_from_sequence(c.get('Region 2 seq'))) else '' for c in peptide_cols])
@@ -2054,7 +2083,28 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
             messagebox.showerror('HBTU/NMP preset', str(e))
 
     def _input(self):
-        return PlanInput(sequence=self.seq.get().strip(), resin=self.resin.get(), scale_mmol=float(self.scale.get()), resin_loading_mmol_g=float(self.loading.get()), coupling_eq=float(self.coupling_eq.get()), ac_eq=float(self.modifier_eq.get()), default_coupling_repeats=int(self.coupling_repeats.get()), default_modifier_repeats=int(self.modifier_repeats.get()), default_coupling_reagent=self.default_reagent.get().strip(), default_catalyst=self.default_catalyst.get().strip(), default_base=self.default_base.get().strip(), default_reaction_solvent=self.default_solvent1.get().strip(), step_overrides_text='')
+        # Project Manager Sequence is the operator-visible source of truth.
+        # ``self.seq`` is retained for legacy compatibility, but it may be
+        # stale/blank if a user types into the Project Manager editor and
+        # immediately presses Generate.  Never discard a visible sequence.
+        pm_var = getattr(self, 'pm_sequence', None)
+        if pm_var is not None and hasattr(pm_var, 'get'):
+            try:
+                sequence = str(pm_var.get() or '').strip()
+            except Exception:
+                sequence = ''
+            if sequence:
+                try:
+                    if str(self.seq.get() or '').strip() != sequence:
+                        self.seq.set(sequence)
+                except Exception:
+                    pass
+        else:
+            try:
+                sequence = str(self.seq.get() or '').strip()
+            except Exception:
+                sequence = ''
+        return PlanInput(sequence=sequence, resin=self.resin.get(), scale_mmol=float(self.scale.get()), resin_loading_mmol_g=float(self.loading.get()), coupling_eq=float(self.coupling_eq.get()), ac_eq=float(self.modifier_eq.get()), default_coupling_repeats=int(self.coupling_repeats.get()), default_modifier_repeats=int(self.modifier_repeats.get()), default_coupling_reagent=self.default_reagent.get().strip(), default_catalyst=self.default_catalyst.get().strip(), default_base=self.default_base.get().strip(), default_reaction_solvent=self.default_solvent1.get().strip(), step_overrides_text='')
 
     def _compound_row_for_unit(self, token: str):
         """Return compound DB row for standard AA / modifier token when available."""
@@ -2570,11 +2620,37 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         self._row_meta_by_no[no_key] = meta
         self.tree.item(row_id, values=[d.get(c, '') for c in cols])
 
+    def _sequence_for_implicit_refresh(self) -> str:
+        """Return the operator-visible sequence for background/idle refreshes.
+
+        Project Manager ``pm_sequence`` is authoritative whenever it exists,
+        including an intentional blank.  This mirrors the R12 Generate/Apply
+        source-of-truth contract and prevents a stale legacy ``seq`` value from
+        silently reviving a cleared editor.
+        """
+        pm_var = getattr(self, 'pm_sequence', None)
+        if pm_var is not None and hasattr(pm_var, 'get'):
+            try:
+                return str(pm_var.get() or '').strip()
+            except Exception:
+                return ''
+        try:
+            return str(self.seq.get() or '').strip()
+        except Exception:
+            return ''
+
     def refresh_outputs_from_tree(self):
         for child in list(self.tree.get_children()):
             self.recalculate_row(child)
         rows = self.tree_rows()
         if not rows:
+            # ``refresh_outputs_from_tree`` is used by idle/tab/startup refresh
+            # paths as well as explicit operator actions.  A fresh planner is
+            # allowed to have an empty Sequence editor, so an implicit refresh
+            # must never call the parser in that state.  Explicit Generate/Apply
+            # still validates an empty sequence through the canonical workflow.
+            if not self._sequence_for_implicit_refresh():
+                return
             self.rebuild_table()
             rows = self.tree_rows()
         plan_df = pd.DataFrame(rows)
@@ -3147,10 +3223,10 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
         length = len(core)
         cys_count = core.upper().count('C')
         base_tfa_eq = 30 if length <= 7 else 80 if length <= 15 else 100
-        tfa_eq = base_tfa_eq + 100 * cys_count
+        tfa_eq = (100 * cys_count) if cys_count else base_tfa_eq
         tfa_mmol_equiv = scale * tfa_eq
         tfa_mL = tfa_mmol_equiv * 114.02 / 1000.0 / self._density_for('TFA') if scale else 0
-        rows = [{'component': 'TFA', 'ratio_percent': 'editable', 'equiv': tfa_eq, 'estimated_mL': round(tfa_mL, 4), 'note': 'base rule: short 30 eq, 15mer 80 eq, 22mer 100 eq, +100 eq per Cys; verify lab protocol'}, {'component': 'TIS', 'ratio_percent': 'editable', 'equiv': '', 'estimated_mL': '', 'note': 'scavenger; fill according to cleavage cocktail'}, {'component': 'Water', 'ratio_percent': 'editable', 'equiv': '', 'estimated_mL': '', 'note': 'scavenger; fill according to cleavage cocktail'}, {'component': 'EDT', 'ratio_percent': 'editable', 'equiv': '', 'estimated_mL': '', 'note': 'optional Cys scavenger; use only when protocol requires'}]
+        rows = [{'component': 'TFA', 'ratio_percent': 'editable', 'equiv': tfa_eq, 'estimated_mL': round(tfa_mL, 4), 'note': 'base rule: if Cys is present, TFA eq = 100 × Cys count regardless of mer count; otherwise short/length rule; verify lab protocol'}, {'component': 'TIS', 'ratio_percent': 'editable', 'equiv': '', 'estimated_mL': '', 'note': 'scavenger; fill only when the selected/recorded cocktail uses it'}, {'component': 'Water', 'ratio_percent': 'editable', 'equiv': '', 'estimated_mL': '', 'note': 'scavenger; fill according to the selected/recorded cocktail'}, {'component': 'EDT', 'ratio_percent': 'editable', 'equiv': '', 'estimated_mL': '', 'note': 'optional Cys scavenger; use only when the selected/recorded protocol requires it'}]
         return pd.DataFrame(rows)
 
     def manufacturing_transfer_df(self, materials: pd.DataFrame, plan: pd.DataFrame) -> pd.DataFrame:
@@ -3219,9 +3295,9 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
 
     def _project_export_dir(self) -> Path:
         base = Path(self.outdir.get())
-        chosen = self.project_name.get().strip() or self.seq.get().strip() or 'Pepforge_Project'
-        folder = self._safe_name(chosen) + '_' + datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        return base / folder
+        chosen = self.project_name.get().strip()
+        sequence = self.seq.get().strip()
+        return create_result_bundle(base, name=chosen or None, sequence=sequence or None, tool="SPPS")
 
     def _column_width_file(self) -> Path:
         p = ROOT / 'outputs'
@@ -3502,6 +3578,8 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
                 self.reagent_usage_summary(materials).to_excel(cw, index=False, sheet_name='REAGENT_BASE')
                 self.solvent_usage_summary(materials).to_excel(cw, index=False, sheet_name='SOLVENT_TOTAL')
             (outdir / 'OUTPUT_MANIFEST.txt').write_text('Pepforge SPPS output folder\n' + 'Created: ' + datetime.now().isoformat(timespec='seconds') + '\n' + 'Open this folder from SPPS Planner with Load Output or Open Output.\n', encoding='utf-8')
+            zip_path = build_bundle_zip(outdir, filename='SPPS_Result_Package.zip')
+            write_bundle_manifest(outdir, tool='SPPS', name=self.project_name.get().strip(), sequence=self.seq.get().strip(), artifacts={'zip': zip_path, 'xlsx': xlsx})
             self.last_outdir = outdir
             self._log(f'Exported: {outdir}\n')
             messagebox.showinfo('Export complete', f'CSV/XLSX exported to:\n{outdir}')
@@ -3522,629 +3600,20 @@ class ClassicBaseCore(SessionStateMixin, tk.Tk):
             messagebox.showinfo('Not found', str(p))
 
     def _log(self, msg):
-        self.log_text.insert('end', msg)
-        self.log_text.see('end')
+        """Record an application diagnostic even before the Log tab exists."""
+        from spps_v4_gui.diagnostics import write_log
+        write_log(self, msg)
 
-def _v23_roundup_ml(self, calc_ml: float) -> float:
-    try:
-        calc_ml = float(calc_ml or 0)
-    except Exception:
-        calc_ml = 0.0
-    if calc_ml <= 0:
-        return 0.0
-    try:
-        step = max(float(self.batch_actual_round_ml.get()), 1.0)
-    except Exception:
-        step = 10.0
-    try:
-        extra = max(float(self.batch_actual_extra_ml.get()), 0.0)
-    except Exception:
-        extra = 10.0
-    import math
-    return math.ceil(calc_ml / step) * step + extra
 
-def _v23_project_rows(self):
-    rows = []
-    for item in list(getattr(self, 'pm_items', [])):
-        seq = str(item.get('sequence', '') or '').strip()
-        if not seq:
-            continue
-        rows.append({'Project': item.get('project', ''), 'Peptide name': item.get('peptide', ''), 'Sequence': seq, 'Copies': item.get('copies', '1') or '1', 'Scale mmol': item.get('scale', '0.2') or '0.2', 'Resin': item.get('resin', ''), 'Loading': item.get('loading', ''), 'LOT No': item.get('lot', ''), 'Chemistry': item.get('chemistry', 'DIC/HOBt') or 'DIC/HOBt'})
-    return rows
+from spps_v4_gui.modules.classic_batch_controller import ClassicBatchControllerMixin
 
-def _v23_aa_calculator_df(self, rows=None):
-    rows = rows if rows is not None else self._v23_project_rows()
-    try:
-        conc = float(self.batch_solution_conc.get())
-    except Exception:
-        conc = 0.25
-    try:
-        aa_eq = float(self.batch_coupling_eq.get())
-    except Exception:
-        aa_eq = 10.0
-    totals = {}
-    for r in rows:
-        try:
-            copies = max(int(float(r.get('Copies', 1) or 1)), 1)
-        except Exception:
-            copies = 1
-        try:
-            scale = float(r.get('Scale mmol', 0.2) or 0.2)
-        except Exception:
-            scale = 0.2
-        for aa in self._aa_letters_from_sequence(r.get('Sequence', '')):
-            totals.setdefault(aa, {'count': 0, 'mmol': 0.0})
-            totals[aa]['count'] += copies
-            totals[aa]['mmol'] += copies * scale * aa_eq
-    out = []
-    for aa in sorted(totals):
-        count = totals[aa]['count']
-        mmol = totals[aa]['mmol']
-        calc_ml = mmol / conc if conc else 0.0
-        actual_ml = self._v23_roundup_ml(calc_ml)
-        mw = self._mw_for_token(aa) or self.MW_FALLBACK.get(aa, 0.0)
-        weight_g = actual_ml / 1000.0 * conc * mw if actual_ml and conc and mw else 0.0
-        out.append({'AA': aa, 'count': count, 'eq': aa_eq, 'solvent': 'DMF', 'conc_M': conc, 'calculated_mL': round(calc_ml, 2), 'actual_mL': round(actual_ml, 2), 'MW': round(mw, 2) if mw else 'manual', 'weight_g': round(weight_g, 2), 'note': 'synthesizer AA stock; actual includes transfer/dead-volume reserve'})
-    return pd.DataFrame(out, columns=['AA', 'count', 'eq', 'solvent', 'conc_M', 'calculated_mL', 'actual_mL', 'MW', 'weight_g', 'note'])
 
-def _v23_add_solution_record(self, d, item, purpose, count, eq, solvent, conc, mmol, note=''):
-    item = str(item or '').strip()
-    if not item:
-        return
-    key = (item, purpose, solvent, str(eq), str(conc))
-    rec = d.setdefault(key, {'item': item, 'purpose': purpose, 'count': 0.0, 'eq': eq, 'solvent': solvent, 'conc_M': conc, 'mmol': 0.0, 'note': note})
-    rec['count'] += float(count or 0)
-    rec['mmol'] += float(mmol or 0)
+class ClassicControllerBase(ClassicBatchControllerMixin, ClassicBaseCore):
+    """Accepted Classic UI composed from the core and focused batch controller.
 
-def _v23_solution_records_to_df(self, d):
-    out = []
-    for rec in d.values():
-        item = rec['item']
-        conc = float(rec.get('conc_M') or 0) if str(rec.get('conc_M', '')).strip() else 0.0
-        mmol = float(rec.get('mmol') or 0)
-        mw = self._mw_for_token(item) or self.MW_FALLBACK.get(item, 0.0)
-        density = self._density_for_token(item)
-        calc_ml = mmol / conc if conc else 0.0
-        actual_ml = self._v23_roundup_ml(calc_ml) if calc_ml else 0.0
-        if not conc:
-            calc_g = mmol * mw / 1000.0 if mw else 0.0
-            actual_g = round(calc_g * 1.1 + 0.004, 2) if calc_g else 0.0
-            volume_ml = actual_g / density if density else ''
-            out.append({'item': item, 'purpose': rec['purpose'], 'count': int(rec['count']) if float(rec['count']).is_integer() else round(rec['count'], 2), 'eq': rec['eq'], 'solvent': rec.get('solvent', ''), 'conc_M': '', 'calculated': '', 'actual': '', 'unit': 'g' if not density else 'g/mL', 'MW': round(mw, 2) if mw else 'manual', 'density': round(density, 3) if density else '', 'weight_g': actual_g if actual_g else '', 'volume_mL': round(volume_ml, 2) if isinstance(volume_ml, float) else volume_ml, 'note': rec.get('note', '')})
-        else:
-            weight_g = actual_ml / 1000.0 * conc * mw if actual_ml and mw else 0.0
-            out.append({'item': item, 'purpose': rec['purpose'], 'count': int(rec['count']) if float(rec['count']).is_integer() else round(rec['count'], 2), 'eq': rec['eq'], 'solvent': rec.get('solvent', ''), 'conc_M': conc, 'calculated': round(calc_ml, 2), 'actual': round(actual_ml, 2), 'unit': 'mL', 'MW': round(mw, 2) if mw else 'manual', 'density': round(density, 3) if density else '', 'weight_g': round(weight_g, 2) if weight_g else '', 'volume_mL': round(actual_ml, 2), 'note': rec.get('note', '')})
-    cols = ['item', 'purpose', 'count', 'eq', 'solvent', 'conc_M', 'calculated', 'actual', 'unit', 'MW', 'density', 'weight_g', 'volume_mL', 'note']
-    return pd.DataFrame(out, columns=cols)
+    Method resolution is ordinary Python inheritance; no runtime rebinding or
+    version-suffixed wrapper chain is used.
+    """
 
-def _v23_batch_totals(self, rows=None):
-    rows = rows if rows is not None else self._v23_project_rows()
-    coupling = {}
-    catalyst = {}
-    solvent = {}
-    modifier = {}
-    try:
-        aa_eq = float(self.batch_coupling_eq.get())
-    except Exception:
-        aa_eq = 10.0
-    try:
-        hbtu_eq = float(self.batch_hbtu_eq.get())
-    except Exception:
-        hbtu_eq = 10.0
-    try:
-        hbtu_conc = float(self.batch_hbtu_conc.get())
-    except Exception:
-        hbtu_conc = 0.4
-    for r in rows:
-        try:
-            copies = max(int(float(r.get('Copies', 1) or 1)), 1)
-        except Exception:
-            copies = 1
-        try:
-            scale = float(r.get('Scale mmol', 0.2) or 0.2)
-        except Exception:
-            scale = 0.2
-        aas = self._aa_letters_from_sequence(r.get('Sequence', ''))
-        steps = len(aas) * copies
-        chem = str(r.get('Chemistry', 'DIC/HOBt') or 'DIC/HOBt')
-        step_mmol = steps * scale
-        if steps:
-            if 'HBTU/NMP' in chem:
-                self._v23_add_solution_record(coupling, 'HBTU', 'coupling reagent stock', steps, hbtu_eq, 'NMP', hbtu_conc, step_mmol * hbtu_eq, 'prepare HBTU/NMP stock for synthesizer bottle')
-                calc_ml = step_mmol * hbtu_eq / hbtu_conc if hbtu_conc else 0.0
-                self._v23_add_solution_record(solvent, 'NMP', 'HBTU stock solvent', steps, '', '', 0, calc_ml, 'mL of NMP needed before reserve shown as volume')
-            else:
-                self._v23_add_solution_record(coupling, 'DIC', 'coupling reagent', steps, 5.0, 'neat/DMF', 0, step_mmol * 5.0, 'DIC amount for synthesizer coupling preparation')
-                add = 'Oxyma' if 'Oxyma' in chem else 'HOBt'
-                self._v23_add_solution_record(catalyst, add, 'catalyst/additive', steps, 5.0, 'DMF', 0, step_mmol * 5.0, 'solid catalyst/additive for coupling bottle')
-                self._v23_add_solution_record(solvent, 'DMF', 'coupling solvent reservoir', steps, '', '', 0, step_mmol * 10.0, 'DMF used for coupling/cocktail transfer; practical reserve applied')
-            self._v23_add_solution_record(solvent, 'DMF', 'AA stock solvent', steps, '', '', 0, 0, 'AA stock solvent volume is listed in AA table')
-            self._v23_add_solution_record(solvent, 'DMF', 'wash/deprotection reservoir', steps, '', '', 0, step_mmol * 8.0 * 10.0, 'DMF wash/deprotection reservoir estimate')
-            self._v23_add_solution_record(solvent, 'DCM', 'final wash reservoir', steps, '', '', 0, copies * scale * 3.0 * 10.0, 'DCM final wash reservoir estimate')
-        seq = str(r.get('Sequence', '') or '')
-        if self._sequence_has_nterm_ac(seq):
-            self._v23_add_solution_record(modifier, 'Acetic anhydride (Ac2O)', 'N-terminal Ac cap', copies, 3.0, 'neat/DMF', 0, copies * scale * 3.0, 'Ac detected from sequence prefix Ac-')
-    return {'coupling': self._v23_solution_records_to_df(coupling), 'catalyst': self._v23_solution_records_to_df(catalyst), 'solvent': self._v23_solution_records_to_df(solvent), 'modifier': self._v23_solution_records_to_df(modifier)}
 
-def _v23_project_summary_df(self, rows=None):
-    rows = rows if rows is not None else self._v23_project_rows()
-    out = []
-    for i, r in enumerate(rows, 1):
-        out.append({'no': i, 'project': r.get('Project', ''), 'peptide_name': r.get('Peptide name', ''), 'lot_no': r.get('LOT No', ''), 'sequence': r.get('Sequence', ''), 'copies': r.get('Copies', ''), 'scale_mmol': r.get('Scale mmol', ''), 'resin': r.get('Resin', ''), 'chemistry': r.get('Chemistry', '')})
-    return pd.DataFrame(out)
-
-def _v23_build_batch_tab(self):
-    fr = ttk.Frame(self.tabs)
-    self.tabs.add(fr, text='Batch Manager')
-    fr.rowconfigure(2, weight=1)
-    fr.columnconfigure(0, weight=1)
-    top = ttk.Frame(fr, padding=(4, 3))
-    top.grid(row=0, column=0, sticky='ew')
-    ttk.Label(top, text='Synthesizer stock/cocktail calculator: automatically uses Project Manager peptide items.').pack(side='left', padx=(2, 12))
-    ttk.Button(top, text='Refresh totals', command=self.refresh_batch_workspace_preview).pack(side='left', padx=3)
-    ttk.Button(top, text='Export batch calculator', command=self._v23_export_batch_calculator).pack(side='left', padx=3)
-    ttk.Button(top, text='Save Session Now', command=self.save_autosave_state).pack(side='left', padx=3)
-    defaults = ttk.Labelframe(fr, text='Solution prep defaults', padding=5)
-    defaults.grid(row=1, column=0, sticky='ew', padx=4, pady=3)
-    self.batch_solution_conc = tk.StringVar(value='0.25')
-    self.batch_coupling_eq = tk.StringVar(value='10')
-    self.batch_actual_round_ml = tk.StringVar(value='10')
-    self.batch_actual_extra_ml = tk.StringVar(value='10')
-    self.batch_hbtu_eq = tk.StringVar(value='10')
-    self.batch_hbtu_conc = tk.StringVar(value='0.4')
-    self.batch_default_scale = tk.StringVar(value='0.2')
-    self.batch_default_resin = tk.StringVar(value='Rink Amide AM')
-    self.batch_default_loading = tk.StringVar(value='0.8')
-    self.batch_hbtu_mw = tk.StringVar(value='379.25')
-    self.batch_nmp_density = tk.StringVar(value='1.03')
-    fields = [('AA conc M', self.batch_solution_conc), ('AA eq', self.batch_coupling_eq), ('Round-up mL', self.batch_actual_round_ml), ('Extra reserve mL', self.batch_actual_extra_ml), ('HBTU eq', self.batch_hbtu_eq), ('HBTU conc M', self.batch_hbtu_conc)]
-    for i, (lab, var) in enumerate(fields):
-        ttk.Label(defaults, text=lab).grid(row=0, column=i * 2, sticky='w', padx=(2, 3))
-        ttk.Entry(defaults, textvariable=var, width=10).grid(row=0, column=i * 2 + 1, sticky='ew', padx=(0, 8))
-        try:
-            var.trace_add('write', lambda *_: self.after_idle(self.refresh_batch_workspace_preview))
-        except Exception:
-            pass
-    nb = ttk.Notebook(fr)
-    nb.grid(row=2, column=0, sticky='nsew', padx=4, pady=4)
-
-    def tab(title, cols):
-        frame = ttk.Frame(nb)
-        frame.rowconfigure(0, weight=1)
-        frame.columnconfigure(0, weight=1)
-        nb.add(frame, text=title)
-        return self._tree_in_frame(frame, cols)
-    self.batch_aa_tree = tab('AA stock solutions', ['AA', 'count', 'eq', 'solvent', 'conc_M', 'calculated_mL', 'actual_mL', 'MW', 'weight_g', 'note'])
-    common = ['item', 'purpose', 'count', 'eq', 'solvent', 'conc_M', 'calculated', 'actual', 'unit', 'MW', 'density', 'weight_g', 'volume_mL', 'note']
-    self.batch_coupling_reagent_tree = tab('Coupling reagents', common)
-    self.batch_catalyst_tree = tab('Catalyst / additive', common)
-    self.batch_solvent_tree = tab('Solvents / reservoirs', common)
-    self.batch_modifier_tree = tab('Chemicals / caps', common)
-    self.batch_project_tree = tab('Project summary', ['no', 'project', 'peptide_name', 'lot_no', 'sequence', 'copies', 'scale_mmol', 'resin', 'chemistry'])
-    self.batch_material_tree = self.batch_aa_tree
-    self.batch_hbtu_tree = self.batch_coupling_reagent_tree
-    self.batch_cap_tree = self.batch_modifier_tree
-    self.refresh_batch_workspace_preview()
-
-def _v23_refresh_batch_workspace_preview(self):
-    try:
-        rows = self._v23_project_rows()
-        aa_df = self._v23_aa_calculator_df(rows)
-        totals = self._v23_batch_totals(rows)
-        self._write_tree(self.batch_aa_tree, aa_df, ['AA', 'count', 'eq', 'solvent', 'conc_M', 'calculated_mL', 'actual_mL', 'MW', 'weight_g', 'note'])
-        cols = ['item', 'purpose', 'count', 'eq', 'solvent', 'conc_M', 'calculated', 'actual', 'unit', 'MW', 'density', 'weight_g', 'volume_mL', 'note']
-        self._write_tree(self.batch_coupling_reagent_tree, totals['coupling'], cols)
-        self._write_tree(self.batch_catalyst_tree, totals['catalyst'], cols)
-        self._write_tree(self.batch_solvent_tree, totals['solvent'], cols)
-        self._write_tree(self.batch_modifier_tree, totals['modifier'], cols)
-        self._write_tree(self.batch_project_tree, self._v23_project_summary_df(rows), ['no', 'project', 'peptide_name', 'lot_no', 'sequence', 'copies', 'scale_mmol', 'resin', 'chemistry'])
-    except Exception as e:
-        print('Batch refresh warning:', e)
-
-def _v23_export_batch_calculator(self):
-    path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[('Excel', '*.xlsx')])
-    if not path:
-        return
-    rows = self._v23_project_rows()
-    totals = self._v23_batch_totals(rows)
-    with pd.ExcelWriter(path, engine='openpyxl') as writer:
-        self._v23_project_summary_df(rows).to_excel(writer, index=False, sheet_name='00_PROJECT_SUMMARY')
-        self._v23_aa_calculator_df(rows).to_excel(writer, index=False, sheet_name='01_AA_STOCK')
-        totals['coupling'].to_excel(writer, index=False, sheet_name='02_COUPLING')
-        totals['catalyst'].to_excel(writer, index=False, sheet_name='03_CATALYST')
-        totals['solvent'].to_excel(writer, index=False, sheet_name='04_SOLVENTS')
-        totals['modifier'].to_excel(writer, index=False, sheet_name='05_CHEMICALS')
-    messagebox.showinfo('Export complete', f'Batch calculator saved:\n{path}')
-
-def _v23_pm_live_sync_selected(self):
-    if getattr(self, '_pm_loading_editor', False):
-        return
-    idx = self.pm_current_index() if hasattr(self, 'pm_list') else None
-    if idx is None or idx < 0 or idx >= len(getattr(self, 'pm_items', [])):
-        return
-    try:
-        self.pm_items[idx].update({'project': self.pm_project.get().strip(), 'peptide': self.pm_peptide.get().strip(), 'sequence': self.pm_sequence.get().strip(), 'scale': self.pm_scale.get().strip(), 'resin': self.pm_resin.get().strip(), 'loading': self.pm_loading.get().strip(), 'lot': self.pm_lot.get().strip(), 'chemistry': self.pm_chemistry.get().strip(), 'copies': self.pm_copies.get().strip(), 'status': self.pm_items[idx].get('status', 'Ready')})
-        self.pm_refresh_list(keep_index=idx, reload_editor=False)
-        self.pm_update_summary()
-        if hasattr(self, 'batch_aa_tree'):
-            self.refresh_batch_workspace_preview()
-        self.schedule_autosave()
-    except Exception:
-        pass
-
-def _v23_log(self, msg):
-    try:
-        if hasattr(self, 'log_text'):
-            self.log_text.insert('end', msg)
-            self.log_text.see('end')
-        else:
-            print(str(msg), end='')
-    except Exception:
-        pass
-
-def _v25_is_blank(value):
-    try:
-        if value is None:
-            return True
-        try:
-            if pd.isna(value):
-                return True
-        except Exception:
-            pass
-        return str(value).strip() == ''
-    except Exception:
-        return False
-
-def _v25_to_float(value):
-    try:
-        if _v25_is_blank(value):
-            return None
-        if isinstance(value, str):
-            cleaned = value.replace(',', '').replace('mL', '').replace('g', '').strip()
-            if cleaned.lower() in {'manual', 'nan', 'none'}:
-                return None
-            return float(cleaned)
-        return float(value)
-    except Exception:
-        return None
-
-def _v25_format_display_value(self, value, column=''):
-    try:
-        if _v25_is_blank(value):
-            return ''
-        col = str(column or '').lower()
-        text_value = str(value).strip()
-        if text_value.lower() in {'manual', 'manual required', 'n/a'}:
-            return text_value
-        number = _v25_to_float(value)
-        if number is None:
-            text = text_value
-            for bad in ('♪', '♫', '♬', '♩', '♭', '♯'):
-                text = text.replace(bad, '')
-            text = re.sub('[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]', ' ', text)
-            return text.strip()
-        if col in {'no', 'line', 'step', 'count', 'copies', 'use_count', 'repeat'}:
-            return str(int(round(number))) if abs(number - round(number)) < 1e-09 else f'{number:.2f}'
-        volume_markers = ['ml', 'volume', 'actual', 'calculated', 'planned_ml', 'calc_ml', 'reservoir']
-        unit_markers = ['unit volume']
-        if any((m in col for m in volume_markers + unit_markers)):
-            if 'g' not in col and 'weight' not in col:
-                return f'{number:.1f}'
-        return f'{number:.2f}'
-    except Exception:
-        return str(value) if value is not None else ''
-
-def _v25_write_tree(self, tree: ttk.Treeview, df: pd.DataFrame, columns):
-    try:
-        for item in tree.get_children():
-            tree.delete(item)
-        existing = list(tree['columns'])
-        if list(existing) != list(columns):
-            tree.configure(columns=list(columns))
-            for col in columns:
-                tree.heading(col, text=col)
-                tree.column(col, width=130, minwidth=60, anchor='w', stretch=True)
-        if df is None or df.empty:
-            if tree in (getattr(self, 'live_usage_tree', None), getattr(self, 'material_tree', None)):
-                blank = {c: '' for c in columns}
-                if 'material' in blank:
-                    blank['material'] = 'No material rows calculated yet'
-                if 'note' in blank:
-                    blank['note'] = 'Click Generate / Update Plan; verify sequence, scale, resin, and coupling settings.'
-                tree.insert('', 'end', values=[blank.get(c, '') for c in columns])
-            return
-        for _, row in df.iterrows():
-            vals = [_v25_format_display_value(self, row.get(c, ''), c) for c in columns]
-            tree.insert('', 'end', values=vals)
-    except Exception as e:
-        try:
-            for item in tree.get_children():
-                tree.delete(item)
-            blank = {c: '' for c in columns}
-            if 'material' in blank:
-                blank['material'] = 'Material table render warning'
-            if 'note' in blank:
-                blank['note'] = str(e)
-            tree.insert('', 'end', values=[blank.get(c, '') for c in columns])
-        except Exception:
-            pass
-
-def _v26_pm_items_to_batch_rows(self):
-    rows = []
-    for item in list(getattr(self, 'pm_items', []) or []):
-        seq = str(item.get('sequence', '') or '').strip()
-        pep = str(item.get('peptide', '') or '').strip()
-        if not seq and (not pep):
-            continue
-        rows.append({'Project': item.get('project', ''), 'Peptide name': item.get('peptide', ''), 'Form': item.get('form', 'linear'), 'Copies': item.get('copies', '1'), 'N-term': 'Ac' if self._sequence_has_nterm_ac(seq) else item.get('n_term', ''), 'Region 1 seq': seq, 'Region 1 eq': '1', 'Linker': item.get('linker', ''), 'Region 2 seq': item.get('region2_seq', ''), 'Region 2 eq': item.get('region2_eq', ''), 'Tag': item.get('tag', ''), 'Label': item.get('label', ''), 'C-term': item.get('c_term', 'NH2'), 'D/non-natural notes': item.get('notes', ''), 'Chemistry': item.get('chemistry', 'DIC/HOBt'), 'Scale mmol': item.get('scale', getattr(self, 'batch_default_scale', _v225_const_var('0.2')).get()), 'AA conc M': getattr(self, 'batch_solution_conc', _v225_const_var('0.25')).get(), 'AA coupling eq': getattr(self, 'batch_coupling_eq', _v225_const_var('10')).get(), 'Resin': item.get('resin', getattr(self, 'batch_default_resin', _v225_const_var('Rink Amide AM')).get()), 'Loading': item.get('loading', getattr(self, 'batch_default_loading', _v225_const_var('0.8')).get()), 'LOT No': item.get('lot', ''), 'Status': item.get('status', 'Ready')})
-    return rows
-
-def _v26_batch_rows_from_tree(self):
-    pm_rows = _v26_pm_items_to_batch_rows(self)
-    if pm_rows:
-        return pm_rows
-    rows = []
-    if not hasattr(self, 'batch_tree'):
-        return rows
-    for item in self.batch_tree.get_children():
-        vals = list(self.batch_tree.item(item, 'values'))
-        vals += [''] * (len(self.batch_columns) - len(vals))
-        d = dict(zip(self.batch_columns, vals))
-        if not str(d.get('Region 1 seq', '')).strip() and (not str(d.get('Peptide name', '')).strip()):
-            continue
-        rows.append(d)
-    return rows
-
-def _v26_pm_generate_selected(self):
-    try:
-        self.pm_save_selected()
-        idx = self.pm_current_index()
-        if idx is None:
-            return
-        item = self.pm_items[idx]
-        self.pm_apply_item_to_single_plan(item)
-        self.generate_update_plan()
-        item['status'] = 'Calculated'
-        self._write_tree(self.pm_selected_plan_tree, self.pm_tree_to_df(self.tree), list(self.pm_selected_plan_tree['columns']))
-        self._write_tree(self.pm_selected_material_tree, self.pm_tree_to_df(self.live_usage_tree), list(self.pm_selected_material_tree['columns']))
-        try:
-            self.pm_selected_check_text.delete('1.0', 'end')
-            self.pm_selected_check_text.insert('end', self.short_step_text.get('1.0', 'end'))
-        except Exception:
-            pass
-        self.pm_refresh_list(keep_index=idx, reload_editor=False)
-        self.pm_update_summary()
-        self.refresh_batch_workspace_preview()
-        self.schedule_autosave()
-    except Exception as e:
-        try:
-            item['status'] = 'Error'
-        except Exception:
-            pass
-        messagebox.showerror('Project Manager', str(e))
-
-def _v26_bind_setup_live_update(self):
-    if getattr(self, '_v26_setup_bound', False):
-        return
-    self._v26_setup_bound = True
-    vars_to_watch = ['coupling_eq', 'coupling_time_h', 'coupling_repeats', 'modifier_eq', 'modifier_repeats', 'solvent_volume_mode', 'amide_ml_per_mmol', 'ctc_ml_per_mmol', 'solvent_molarity_m', 'default_reagent', 'default_reagent_eq', 'default_reagent_count', 'default_catalyst', 'default_catalyst_eq', 'default_catalyst_count', 'default_base', 'default_base_eq', 'default_base_count', 'default_coupling_solution_solvent', 'default_solvent1', 'default_solvent1_count', 'default_solvent2', 'default_solvent2_count', 'default_loading_dissolve_solvent', 'final_meoh_count', 'default_depro', 'default_depro_ratio', 'default_depro_count', 'batch_solution_conc', 'batch_coupling_eq', 'batch_actual_round_ml', 'batch_actual_extra_ml', 'batch_hbtu_eq', 'batch_hbtu_conc', 'batch_hbtu_mw', 'batch_nmp_density']
-
-    def _changed(*_):
-        try:
-            from spps_v4_gui import batch_workflow
-            batch_workflow.invalidate_and_refresh_if_visible(self)
-            self.pm_update_summary()
-            self.schedule_autosave()
-        except Exception:
-            pass
-    for name in vars_to_watch:
-        var = getattr(self, name, None)
-        if hasattr(var, 'trace_add'):
-            try:
-                var.trace_add('write', lambda *_: self.after_idle(_changed))
-            except Exception:
-                pass
-_old_v26_build_pm_setup_panel = ClassicBaseCore._build_pm_setup_panel
-
-def _v26_build_pm_setup_panel(self, parent):
-    _old_v26_build_pm_setup_panel(self, parent)
-    try:
-        _v26_bind_setup_live_update(self)
-    except Exception:
-        pass
-
-def _v26_pm_live_sync_selected(self):
-    if (getattr(self, '_pm_loading_editor', False)
-            or getattr(self, '_v229_switching', False)
-            or getattr(self, '_v2212_switching', False)):
-        return
-    idx = self.pm_current_index() if hasattr(self, 'pm_list') else None
-    if idx is None or idx < 0 or idx >= len(getattr(self, 'pm_items', [])):
-        return
-    try:
-        self.pm_items[idx].update({'project': self.pm_project.get().strip(), 'peptide': self.pm_peptide.get().strip(), 'sequence': self.pm_sequence.get().strip(), 'scale': self.pm_scale.get().strip(), 'resin': self.pm_resin.get().strip(), 'loading': self.pm_loading.get().strip(), 'lot': self.pm_lot.get().strip(), 'chemistry': self.pm_chemistry.get().strip(), 'copies': self.pm_copies.get().strip(), 'status': self.pm_items[idx].get('status', 'Ready')})
-        self.pm_refresh_list(keep_index=idx, reload_editor=False)
-        self.pm_update_summary()
-        from spps_v4_gui import batch_workflow
-        batch_workflow.invalidate_and_refresh_if_visible(self)
-        self.schedule_autosave()
-    except Exception:
-        pass
-
-class ClassicControllerBase(ClassicBaseCore):
-    """Static accepted Classic UI base. Methods are resolved once in source, never rebound at runtime."""
-    __init__ = ClassicBaseCore.__init__
-    _aa_letters_from_sequence = ClassicBaseCore._aa_letters_from_sequence
-    _add_total_record = ClassicBaseCore._add_total_record
-    _amount_basis_for_unit = ClassicBaseCore._amount_basis_for_unit
-    _amount_numeric = ClassicBaseCore._amount_numeric
-    _append_branch_rows_if_enabled = ClassicBaseCore._append_branch_rows_if_enabled
-    _batch_aa_synthesizer_summary = ClassicBaseCore._batch_aa_synthesizer_summary
-    _batch_ac_cap_count_by_rows = ClassicBaseCore._batch_ac_cap_count_by_rows
-    _batch_ac_cap_summary = ClassicBaseCore._batch_ac_cap_summary
-    _batch_coupling_count_by_rows = ClassicBaseCore._batch_coupling_count_by_rows
-    _batch_hbtu_nmp_summary = ClassicBaseCore._batch_hbtu_nmp_summary
-    _batch_layout_text = ClassicBaseCore._batch_layout_text
-    _batch_modifier_summary = ClassicBaseCore._batch_modifier_summary
-    _batch_project_index_df = ClassicBaseCore._batch_project_index_df
-    _batch_rows_from_tree = _v26_batch_rows_from_tree
-    _batch_total_aa = ClassicBaseCore._batch_total_aa
-    _batch_total_materials = ClassicBaseCore._batch_total_materials
-    _batch_total_reagents = ClassicBaseCore._batch_total_reagents
-    _batch_total_solvents = ClassicBaseCore._batch_total_solvents
-    _batch_total_usage_by_category = ClassicBaseCore._batch_total_usage_by_category
-    _bind_row_height_controls = ClassicBaseCore._bind_row_height_controls
-    _build = ClassicBaseCore._build
-    # Keep the accepted V2 Project-driven calculator as the default Batch UI.
-    # V3's canonical calculation engine populates these compact tables, so
-    # chemical/linker/tag support remains available without a duplicate editor.
-    _build_batch_tab = _v23_build_batch_tab
-    _build_checklist_tab = ClassicBaseCore._build_checklist_tab
-    _build_log_tab = ClassicBaseCore._build_log_tab
-    _build_pm_setup_panel = _v26_build_pm_setup_panel
-    _build_project_manager_tab = ClassicBaseCore._build_project_manager_tab
-    _build_project_sheet_tab = ClassicBaseCore._build_project_sheet_tab
-    _build_usage_summary_tab = ClassicBaseCore._build_usage_summary_tab
-    _column_width_file = ClassicBaseCore._column_width_file
-    _compound_row_for_unit = ClassicBaseCore._compound_row_for_unit
-    _default_counts_for_row = ClassicBaseCore._default_counts_for_row
-    _default_dissolve_volume = ClassicBaseCore._default_dissolve_volume
-    _density_for = ClassicBaseCore._density_for
-    _density_for_token = ClassicBaseCore._density_for_token
-    _estimate_reagent_g = ClassicBaseCore._estimate_reagent_g
-    _export_current_outputs_to_dir = ClassicBaseCore._export_current_outputs_to_dir
-    _extract_sequence_special_tokens = ClassicBaseCore._extract_sequence_special_tokens
-    _final_wash_specs = ClassicBaseCore._final_wash_specs
-    _format_unit_amount = ClassicBaseCore._format_unit_amount
-    _input = ClassicBaseCore._input
-    _is_ac_unit = ClassicBaseCore._is_ac_unit
-    _is_amount_ml = ClassicBaseCore._is_amount_ml
-    _is_chemical_label_like_unit = ClassicBaseCore._is_chemical_label_like_unit
-    _is_first_synthesis_row = ClassicBaseCore._is_first_synthesis_row
-    _is_linker_like_unit = ClassicBaseCore._is_linker_like_unit
-    _is_liquid_like = ClassicBaseCore._is_liquid_like
-    _is_non_fmoc_modifier_row = ClassicBaseCore._is_non_fmoc_modifier_row
-    _is_solid_reagent_name = ClassicBaseCore._is_solid_reagent_name
-    _last_fmoc_step_no = ClassicBaseCore._last_fmoc_step_no
-    _last_non_fmoc_final_step_no = ClassicBaseCore._last_non_fmoc_final_step_no
-    _load_column_widths = ClassicBaseCore._load_column_widths
-    _loading_dissolve_solvent_for_resin = ClassicBaseCore._loading_dissolve_solvent_for_resin
-    _log = _v23_log
-    _minimal_materials_from_plan = ClassicBaseCore._minimal_materials_from_plan
-    _mw_for_token = ClassicBaseCore._mw_for_token
-    _needs_deprotection_for_row = ClassicBaseCore._needs_deprotection_for_row
-    _normalize_batch_modifier = ClassicBaseCore._normalize_batch_modifier
-    _normalize_unit_display_name = ClassicBaseCore._normalize_unit_display_name
-    _on_row_height_var_changed = ClassicBaseCore._on_row_height_var_changed
-    _on_tab_changed_refresh = ClassicBaseCore._on_tab_changed_refresh
-    _on_tree_row_height_wheel = ClassicBaseCore._on_tree_row_height_wheel
-    _parse_batch_input = ClassicBaseCore._parse_batch_input
-    _populate_progress_tree = ClassicBaseCore._populate_progress_tree
-    _progress_key = ClassicBaseCore._progress_key
-    _project_export_dir = ClassicBaseCore._project_export_dir
-    _protected_name_for_token = ClassicBaseCore._protected_name_for_token
-    _records_to_usage_df = ClassicBaseCore._records_to_usage_df
-    _renumber_batch_rows = ClassicBaseCore._renumber_batch_rows
-    _resin_family_text = ClassicBaseCore._resin_family_text
-    _resin_needs_initial_deprotection = ClassicBaseCore._resin_needs_initial_deprotection
-    _roundup_actual_amount = ClassicBaseCore._roundup_actual_amount
-    _safe_name = ClassicBaseCore._safe_name
-    _sanitize_display_value = ClassicBaseCore._sanitize_display_value
-    _save_column_widths = ClassicBaseCore._save_column_widths
-    _sequence_has_nterm_ac = ClassicBaseCore._sequence_has_nterm_ac
-    _set_checklist_pane = ClassicBaseCore._set_checklist_pane
-    _set_log_pane = ClassicBaseCore._set_log_pane
-    _set_material_pane = ClassicBaseCore._set_material_pane
-    _set_plan_pane = ClassicBaseCore._set_plan_pane
-    _set_pm_sash_default = ClassicBaseCore._set_pm_sash_default
-    _set_progress_item_done = ClassicBaseCore._set_progress_item_done
-    _split_solution_name = ClassicBaseCore._split_solution_name
-    _swell_solvent_for_resin = ClassicBaseCore._swell_solvent_for_resin
-    _text_in_frame = ClassicBaseCore._text_in_frame
-    _text_tab = ClassicBaseCore._text_tab
-    _to_float = ClassicBaseCore._to_float
-    _to_int = ClassicBaseCore._to_int
-    _tree_in_frame = ClassicBaseCore._tree_in_frame
-    _tree_tab = ClassicBaseCore._tree_tab
-    _update_progress_widgets = ClassicBaseCore._update_progress_widgets
-    _v23_aa_calculator_df = _v23_aa_calculator_df
-    _v23_add_solution_record = _v23_add_solution_record
-    _v23_batch_totals = _v23_batch_totals
-    _v23_export_batch_calculator = _v23_export_batch_calculator
-    _v23_project_rows = _v23_project_rows
-    _v23_project_summary_df = _v23_project_summary_df
-    _v23_roundup_ml = _v23_roundup_ml
-    _v23_solution_records_to_df = _v23_solution_records_to_df
-    _v25_format_display_value = _v25_format_display_value
-    _write_df = ClassicBaseCore._write_df
-    _write_synthesizer_excel = ClassicBaseCore._write_synthesizer_excel
-    _write_tree = _v25_write_tree
-    adjust_table_row_height = ClassicBaseCore.adjust_table_row_height
-    amino_acid_usage_summary = ClassicBaseCore.amino_acid_usage_summary
-    append_blank_row = ClassicBaseCore.append_blank_row
-    apply_chemistry_preset_from_string = ClassicBaseCore.apply_chemistry_preset_from_string
-    apply_dic_hobt_preset = ClassicBaseCore.apply_dic_hobt_preset
-    apply_hbtu_nmp_preset = ClassicBaseCore.apply_hbtu_nmp_preset
-    apply_table_row_height = ClassicBaseCore.apply_table_row_height
-    batch_add_row = ClassicBaseCore.batch_add_row
-    batch_delete_selected = ClassicBaseCore.batch_delete_selected
-    batch_on_edit = ClassicBaseCore.batch_on_edit
-    bench_checklist_layout_df = ClassicBaseCore.bench_checklist_layout_df
-    bind_all_combobox_typeahead = ClassicBaseCore.bind_all_combobox_typeahead
-    browse_outdir = ClassicBaseCore.browse_outdir
-    checklist_from_rows = ClassicBaseCore.checklist_from_rows
-    clear_all_progress_rows = ClassicBaseCore.clear_all_progress_rows
-    cleavage_calculator_df = ClassicBaseCore.cleavage_calculator_df
-    delete_selected = ClassicBaseCore.delete_selected
-    export_outputs = ClassicBaseCore.export_outputs
-    generate_update_plan = ClassicBaseCore.generate_update_plan
-    load_batch_csv = ClassicBaseCore.load_batch_csv
-    load_output_folder = ClassicBaseCore.load_output_folder
-    load_project = ClassicBaseCore.load_project
-    loading_calculator_df = ClassicBaseCore.loading_calculator_df
-    manufacturing_transfer_df = ClassicBaseCore.manufacturing_transfer_df
-    mark_until_selected_progress_row = ClassicBaseCore.mark_until_selected_progress_row
-    materials_from_rows = ClassicBaseCore.materials_from_rows
-    ml_log_from_rows = ClassicBaseCore.ml_log_from_rows
-    next_step_df = ClassicBaseCore.next_step_df
-    on_tree_edit = ClassicBaseCore.on_tree_edit
-    open_batch_output = ClassicBaseCore.open_batch_output
-    open_output = ClassicBaseCore.open_output
-    operation_form_from_rows = ClassicBaseCore.operation_form_from_rows
-    pm_add_peptide = ClassicBaseCore.pm_add_peptide
-    pm_apply_item_to_single_plan = ClassicBaseCore.pm_apply_item_to_single_plan
-    pm_calculate_all = _v26_pm_generate_selected
-    pm_clear_selected_outputs = ClassicBaseCore.pm_clear_selected_outputs
-    pm_current_index = ClassicBaseCore.pm_current_index
-    pm_delete_peptide = ClassicBaseCore.pm_delete_peptide
-    pm_display_name = ClassicBaseCore.pm_display_name
-    pm_duplicate_peptide = ClassicBaseCore.pm_duplicate_peptide
-    pm_generate_selected = _v26_pm_generate_selected
-    pm_live_sync_selected = _v26_pm_live_sync_selected
-    pm_load_to_editor = ClassicBaseCore.pm_load_to_editor
-    pm_on_double_click = ClassicBaseCore.pm_on_double_click
-    pm_on_select = ClassicBaseCore.pm_on_select
-    pm_refresh_list = ClassicBaseCore.pm_refresh_list
-    pm_save_selected = ClassicBaseCore.pm_save_selected
-    pm_send_to_batch_manager = ClassicBaseCore.pm_send_to_batch_manager
-    pm_tree_to_df = ClassicBaseCore.pm_tree_to_df
-    pm_update_summary = ClassicBaseCore.pm_update_summary
-    production_tracking_df = ClassicBaseCore.production_tracking_df
-    progress_df = ClassicBaseCore.progress_df
-    reagent_usage_summary = ClassicBaseCore.reagent_usage_summary
-    rebuild_table = ClassicBaseCore.rebuild_table
-    recalculate_row = ClassicBaseCore.recalculate_row
-    refresh_batch_workspace_preview = _v23_refresh_batch_workspace_preview
-    refresh_outputs_from_tree = ClassicBaseCore.refresh_outputs_from_tree
-    reset_column_widths = ClassicBaseCore.reset_column_widths
-    run_batch_plans = ClassicBaseCore.run_batch_plans
-    save_batch_csv = ClassicBaseCore.save_batch_csv
-    save_project_state = ClassicBaseCore.save_project_state
-    select_all_progress_rows = ClassicBaseCore.select_all_progress_rows
-    selected_progress_rows_yes = ClassicBaseCore.selected_progress_rows_yes
-    short_step_checklist_df = ClassicBaseCore.short_step_checklist_df
-    solvent_usage_summary = ClassicBaseCore.solvent_usage_summary
-    toggle_progress_row = ClassicBaseCore.toggle_progress_row
-    toggle_setup_panel = ClassicBaseCore.toggle_setup_panel
-    tree_rows = ClassicBaseCore.tree_rows
-__all__ = ['ClassicControllerBase']
+__all__ = ["ClassicControllerBase"]

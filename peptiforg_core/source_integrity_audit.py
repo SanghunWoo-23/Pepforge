@@ -45,9 +45,61 @@ def audit_source_tree(root_dir: str | Path) -> dict[str, Any]:
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 definitions.setdefault(node.name, []).append(node.lineno)
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                if isinstance(node, ast.Assign):
+                    targets = list(node.targets)
+                else:
+                    targets = [node.target]
+                stack = list(targets)
+                while stack:
+                    target = stack.pop()
+                    if isinstance(target, (ast.Tuple, ast.List)):
+                        stack.extend(target.elts)
+                    elif isinstance(target, ast.Attribute):
+                        findings.append({
+                            "file": relative,
+                            "line": node.lineno,
+                            "rule": "module_level_attribute_assignment",
+                            "target": ast.unparse(target),
+                        })
         for name, lines in definitions.items():
             if len(lines) > 1:
                 findings.append({"file": relative, "line": lines[1], "rule": "duplicate_top_level_definition", "name": name})
+
+        # A release implementation must not hide unfinished functions behind a
+        # docstring plus ``pass`` or a bare ``NotImplementedError``.  Ordinary
+        # ``pass`` statements inside exception-cleanup paths remain allowed.
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = [
+                statement for statement in node.body
+                if not (
+                    isinstance(statement, ast.Expr)
+                    and isinstance(getattr(statement, "value", None), ast.Constant)
+                    and isinstance(statement.value.value, str)
+                )
+            ]
+            if body and all(isinstance(statement, ast.Pass) for statement in body):
+                findings.append({
+                    "file": relative,
+                    "line": node.lineno,
+                    "rule": "pass_only_function",
+                    "name": node.name,
+                })
+            if body and all(
+                isinstance(statement, ast.Raise)
+                and isinstance(getattr(statement, "exc", None), ast.Call)
+                and getattr(getattr(statement.exc, "func", None), "id", None) == "NotImplementedError"
+                for statement in body
+            ):
+                findings.append({
+                    "file": relative,
+                    "line": node.lineno,
+                    "rule": "notimplemented_only_function",
+                    "name": node.name,
+                })
+
         for rule, pattern in FORBIDDEN_PATTERNS.items():
             for match in pattern.finditer(text):
                 findings.append({"file": relative, "line": text.count("\n", 0, match.start()) + 1, "rule": rule})

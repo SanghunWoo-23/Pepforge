@@ -19,9 +19,12 @@ def main():
     p.add_argument("--no-esm", action="store_true", help="Disable ESM features")
     p.add_argument("--use-esm", action="store_true", help="Enable ESM features")
     p.add_argument("--model", default=None, help="ESM model name")
-    p.add_argument("--window", type=int, default=None, help="Window size")
-    p.add_argument("--overlap", type=int, default=None, help="Window overlap")
+    p.add_argument("--window", type=int, default=None, help="ESM chunk window size")
+    p.add_argument("--overlap", type=int, default=None, help="ESM chunk overlap")
     p.add_argument("--batch-size", type=int, default=None, help="ESM batch size")
+    p.add_argument("--ranking-window", type=int, default=None, help="Hot Spot region ranking window size")
+    p.add_argument("--ranking-overlap", type=int, default=None, help="Maximum overlap between ranked Hot Spot regions")
+    p.add_argument("--ranking-min-score", type=float, default=None, help="Minimum region priority score")
     p.add_argument("--merge-position-mode", choices=["model_position", "display_position", "original_position", "residue_position"], default=None)
     args = p.parse_args()
 
@@ -29,9 +32,12 @@ def main():
     if args.no_esm: cfg["use_esm"] = False
     if args.use_esm: cfg["use_esm"] = True
     if args.model: cfg["esm_model"] = args.model
-    if args.window: cfg["window_size"] = args.window
-    if args.overlap: cfg["overlap"] = args.overlap
-    if args.batch_size: cfg["batch_size"] = args.batch_size
+    if args.window is not None: cfg["window_size"] = args.window
+    if args.overlap is not None: cfg["overlap"] = args.overlap
+    if args.batch_size is not None: cfg["batch_size"] = args.batch_size
+    if args.ranking_window is not None: cfg["ranking_window_size"] = args.ranking_window
+    if args.ranking_overlap is not None: cfg["ranking_overlap"] = args.ranking_overlap
+    if args.ranking_min_score is not None: cfg["ranking_min_score"] = args.ranking_min_score
     if args.merge_position_mode: cfg["merge_position_mode"] = args.merge_position_mode
 
     text = Path(args.input).read_text(encoding="utf-8")
@@ -48,8 +54,9 @@ def main():
     )
     print("Analysis complete")
     print("Full CSV:", result["full_csv"])
-    print("Top CSV :", result["top_csv"])
-    print("ZIP     :", result["zip_path"])
+    print("Top residue CSV:", result["top_csv"])
+    print("Ranked regions :", result["ranked_regions_csv"])
+    print("ZIP            :", result["zip_path"])
 
 if __name__ == "__main__":
     main()

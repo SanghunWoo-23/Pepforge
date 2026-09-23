@@ -76,8 +76,20 @@ def get_tool_sandbox(tool_name: str) -> ToolSandbox:
     ).ensure()
 
 
-def configured_output(default: Path, tool_name: str) -> Path:
+
+def configured_output_path(default: Path, tool_name: str) -> Path:
+    """Resolve an output path without creating directories.
+
+    GUI modules use this during import/initial widget construction so merely
+    importing a tool cannot mutate a clean release tree. Call
+    :func:`configured_output` or create the selected directory at first real
+    output action.
+    """
     value = os.environ.get("PEPFORGE_OUTPUT_DIR", "").strip()
-    output = Path(value) if value else default
+    return Path(value) if value else Path(default)
+
+
+def configured_output(default: Path, tool_name: str) -> Path:
+    output = configured_output_path(default, tool_name)
     output.mkdir(parents=True, exist_ok=True)
     return output

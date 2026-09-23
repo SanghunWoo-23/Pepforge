@@ -1,4 +1,4 @@
-"""Public Tk GUI entry point for SPPS Planner V4.0.0."""
+"""Public Tk GUI entry point for SPPS Planner V5.0.0."""
 from __future__ import annotations
 from spps_v4_gui.release import SPPSGui, main, launch
 

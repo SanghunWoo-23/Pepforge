@@ -39,5 +39,6 @@ def test_external_md_result_import_and_summary(tmp_path):
     rows = import_external_md_results(p)
     summary = summarize_external_md_results(rows)
     assert summary["import_status"] == "imported"
-    assert summary["validation_grade"] in {"A", "B"}
-    assert "experimental binding" in summary["safe_interpretation"] or "external" in summary["safe_interpretation"]
+    assert summary["validation_grade"] == "UNSCORED"
+    assert summary["convergence_status"] == "not_assessed_from_summary_table"
+    assert "duration" in summary["safe_interpretation"].lower() or "trajectory" in summary["safe_interpretation"].lower()

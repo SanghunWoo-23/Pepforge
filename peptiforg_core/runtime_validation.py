@@ -1,7 +1,9 @@
 
 from __future__ import annotations
 
-"""Pepforge runtime validation checks v3.0.0.
+from peptiforg_core.version import PEPFORGE_VERSION
+
+"""Pepforge runtime validation checks v4.0.0.
 
 This module provides lightweight runtime smoke checks for public CLI/API paths.
 It is intended for release QA, not scientific validation.
@@ -13,7 +15,7 @@ import csv
 import json
 import tempfile
 
-RUNTIME_VALIDATION_VERSION = "3.0.0"
+RUNTIME_VALIDATION_VERSION = PEPFORGE_VERSION
 
 
 def run_runtime_validation(output_dir: str | Path) -> dict[str, Any]:

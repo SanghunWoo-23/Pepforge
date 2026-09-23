@@ -1,12 +1,17 @@
 # Pepforge Complete User Manual
 
-**Suite version:** Pepforge V3.0.0  
-**Embedded synthesis component:** SPPS Planner V4.0.0  
-**Document baseline:** 2026-08-13
+**Suite version:** Pepforge V4.0.0  
+**Embedded synthesis component:** SPPS Planner V5.0.0  
+**Document baseline:** 2026-09-02
 
 Pepforge connects peptide sequence analysis, candidate design, peptide-only conformer generation, SPPS planning, docking-oriented screening, and external-validation hand-off in one desktop workflow. This manual explains the controls, input grammar, outputs, limitations, and recovery steps needed by a first-time user.
 
 > Pepforge outputs are research hypotheses and prioritization aids. Structures, scores, contacts, and synthesis conditions are not experimental measurements, medical advice, or proof of efficacy.
+
+
+## Evidence Workflow / FAST_OPEN note
+
+The current V4.0.0 development baseline adds a coordinate-specific interaction-evidence layer, Hot Spot chemistry-profile hand-off to PDE, stage-wise modified-peptide support, Structure Consensus v2, candidate evidence-matrix export and V4 docking-lineage/PyMOL review preparation. The embedded SPPS Planner V5 includes FAST_OPEN database/run-link/UI workflow refinements. Actual docking execution remains a future V5 scope.
 
 ## Contents
 
@@ -18,7 +23,7 @@ Pepforge connects peptide sequence analysis, candidate design, peptide-only conf
 6. Hot Spot Finder
 7. Peptide Design Engine
 8. Peptide Structure Builder
-9. SPPS Planner V4
+9. SPPS Planner V5
 10. Docking Workbench
 11. External Validation
 12. Project and output management
@@ -33,11 +38,11 @@ Pepforge connects peptide sequence analysis, candidate design, peptide-only conf
 
 | Item | Version | Meaning |
 | --- | --- | --- |
-| Integrated suite | Pepforge V3.0.0 | Launcher and public release version |
-| Synthesis component | SPPS Planner V4.0.0 | Component embedded in Pepforge |
+| Integrated suite | Pepforge V4.0.0 | Launcher and public release version |
+| Synthesis component | SPPS Planner V5.0.0 | Component embedded in Pepforge |
 | Historical internal labels | Some v1.x/v2.x names | Component lineage, not the suite version |
 
-Use **Pepforge V3.0.0 with SPPS Planner V4.0.0** in releases and citations. Do not call the suite “Pepforge V4.”
+Pepforge and SPPS Planner use independent component versions. In releases and citations, use **Pepforge V4.0.0 with SPPS Planner V5.0.0** so the suite and embedded synthesis component remain distinct.
 
 ### 1.2 What each module does
 
@@ -46,9 +51,9 @@ Use **Pepforge V3.0.0 with SPPS Planner V4.0.0** in releases and citations. Do n
 | 1 | Hot Spot Finder | Prioritize sequence windows | Does not prove a binding site |
 | 2 | Peptide Design Engine | Generate and filter canonical/modified candidates | Does not guarantee potency, safety, or affinity |
 | 3 | Peptide Structure Builder | Generate up to five representative peptide conformers | Does not determine one in-vivo native structure |
-| 4 | SPPS Planner V4 | Build editable plans, quantities, checklists, and evidence views | Does not create a validated laboratory SOP |
+| 4 | SPPS Planner V5 | Build editable plans, quantities, checklists, and evidence views | Does not create a validated laboratory SOP |
 | 5 | Docking Workbench | Compare pose/contact hypotheses | Does not replace Vina, MD, or binding assays |
-| 6 | External Validation | Prepare hand-off folders | Does not execute external engines |
+| 6 | External Validation / Simulation Analysis | Prepare hand-offs; analyze actual imported trajectories and compare exact-sequence structures | Does not fabricate or silently execute external MD engines |
 
 The public package contains code, curated public catalogs, empty schemas, examples, and tests. It excludes private laboratory history, credentials, unpublished datasets, runtime projects, and bundled local models. `actual_runs.csv` contains only its schema/header.
 
@@ -66,7 +71,7 @@ The core desktop workflow does not require a GPU. External high-cost docking or 
 
 ### 2.2 Extract and install
 
-Extract the ZIP to a short writable path such as `C:\Pepforge_V3.0.0`. For the first test, avoid a read-only directory or heavily synchronized cloud folder.
+Extract the ZIP to a short writable path such as `C:\Pepforge_V4.0.0`. For the first test, avoid a read-only directory or heavily synchronized cloud folder.
 
 Windows:
 
@@ -98,7 +103,7 @@ python -c "import rdkit; print('RDKit OK')"
 python pepforge_cli.py version
 ```
 
-The version command must report `3.0.0`. The SPPS window title should report `SPPS Planner V4.0.0`.
+The version command must report `4.0.0`. The SPPS window title should report `SPPS Planner V5.0.0`.
 
 ### 2.4 Dependency profiles
 
@@ -149,7 +154,7 @@ Start with a short canonical peptide before adding modifications.
 
 1. Open Hot Spot Finder, paste a canonical sequence in `Protein or Peptide Sequence`, and click `Analyze Sequence`.
 2. Open PDE, enter target/settings, click `1. Apply Settings`, then `2. Generate Candidates`.
-3. Open PSB, enter one candidate, choose `Physiological aqueous` and `Fast Top 5 (recommended)`, click `Analyze`, then `Build Top 5 Structures`.
+3. Open PSB, enter one candidate, choose `Physiological aqueous` and `Fast Top 5 (recommended)`, click `Analyze`, then `Build Structure`.
 4. Open SPPS Planner, enter sequence/scale/resin/loading, click `Generate`, edit the tables, and click `Apply Change`.
 5. Open Docking Workbench, validate target and peptide input, then click `Run Screening`.
 6. Use External Validation to create a Vina or GROMACS hand-off folder when quantitative external work is required.
@@ -320,7 +325,7 @@ Review sequence, modifications, charge, solubility, aggregation, chemical stabil
 
 ### 8.1 Purpose and inputs
 
-PSB interprets a peptide sequence and supported chemistry, samples multiple backbone families, and exports exactly five representative conformers for a successful public Top-5 build. If five real coordinate candidates cannot be generated, ranked, and written, the worker reports failure instead of presenting a partial set as complete. It is not a protein native-structure predictor and does not calculate an in-vivo equilibrium population.
+PSB interprets a peptide sequence and supported chemistry, samples candidate conformers and returns up to five severe-clash-free ranked structures. If PDE supplied a supported preferred structure, conformers in that measured family are ranked first; unrelated families are not inserted merely for diversity. If fewer than five valid structures remain, the shortfall is reported explicitly rather than filling the set with severe-clash structures. It is not a protein native-structure predictor and does not calculate an in-vivo equilibrium population.
 
 The main inputs are `Peptide sequence`, `Output name`, `Output folder`, pH, temperature, ionic strength, environment, a condition preset, and a build preset. The current UI uses `Peptide sequence`, not the older `Peptide notation` label.
 
@@ -343,7 +348,7 @@ These values are metadata, not explicit-solvent, membrane, or constant-pH simula
 | `Balanced` | 12 initial conformers, 200 iterations, 3 adaptive retries, evidence-balanced profile | Wider family/RMSD exploration |
 | `Thorough` | 30 initial conformers, 500 iterations, 4 adaptive retries, evidence-thorough profile | Larger final exploration |
 
-All presets enforce the same exact-five output contract. The presets differ in actual sampling budget, retry budget, RMSD threshold, and evidence-guided family priority. Thorough means more search, not a guarantee of a truer structure.
+All presets target up to five severe-clash-free ranked outputs. If fewer valid structures remain, Pepforge reports the shortfall/fallback instead of inserting a severe-clash model. The presets differ in actual sampling budget, retry budget, RMSD audit threshold, and evidence-guided family priority. Thorough means more search, not a guarantee of a truer structure.
 
 ### 8.4 Analyze and build
 
@@ -352,14 +357,14 @@ All presets enforce the same exact-five output contract. The presets differ in a
 3. Use `Open Token Map` to check registry support.
 4. Resolve unknown, ambiguous, or planning-only tokens.
 5. Choose a writable output folder and build preset.
-6. Click `Build Top 5 Structures` once.
+6. Click `Build Structure` once.
 7. The calculation runs in an isolated worker; inspect the result with `Open Output`.
 
 If it is slow, test `Fast Top 5`, a short canonical sequence, and a local output folder. Check RDKit and whether antivirus blocked the worker.
 
 ### 8.5 Backbone families and special cases
 
-The search may include α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, and coil/mixed families. Helix propensity coverage, i/i+3 and i/i+4 charge spacing, amphipathic moment, turn-compatible windows, β alternation, Pro/PPII context, and α/β/γ backbone detection now determine an auditable family-priority plan. The selected build preset controls how broadly that plan is sampled. Torsion seeds make a family available to the search; they are not measured populations.
+The search may include α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, and coil/mixed families. Helix propensity coverage, i/i+3 and i/i+4 charge spacing, amphipathic moment, turn-compatible windows, β alternation, Pro/PPII context, and α/β/γ backbone detection now determine an auditable family-priority plan. The selected build preset controls how broadly that plan is sampled. Torsion seeds make a family available to the search; they are not measured populations. Beta-hairpin/turn-rich requests do not receive invented exact torsion templates; coiled-coil requests are limited to monomeric helical preorganization; Pro-rich PPII uses only settable torsions and is reclassified from measured relaxed geometry.
 
 α/β/γ-peptidomimetics, including BH3-like helical designs, require backbone-pattern-specific interpretation because substitution pattern can change helicity. PSB reports guidance/limitations for supported patterns and does not silently reuse an α-peptide propensity or geometry for an unsupported unit. Compare important results with CD, NMR, crystallography, and an appropriate parameterized simulation.
 
@@ -376,7 +381,15 @@ Typical output types:
 
 Rank and relative energy are run-local values. They do not compare different chemistries or experimental affinity. Generated fraction is not equilibrium population. Inspect atoms, bonds, chirality, and terminal groups.
 
-## 9. SPPS Planner V4
+### 8.7 PDE-to-PSB intent and candidate traceability
+
+Workflow Mode normalizes PDE `pde_objective_mode` into the downstream structure `mode`, retains the supported `preferred_structure`, and reuses a unique PDE candidate ID for the same canonical construct. PSB and SPPS therefore update the same candidate manifest rather than silently creating unrelated IDs. After PSB/SPPS stages, Pepforge refreshes `exports/<candidate_id>/Summary_Report.json` and `Summary_Report.txt`. These reports summarize only artifacts that actually exist; missing Docking, trajectory, or experimental evidence remains `not_available`.
+
+In the R7 Workflow hand-off, selecting a Hot Spot immediately fills `PDE target sequence`. After PDE runs, the same candidate list is mirrored into the `PSB input candidate` dropdown under Peptide Structure Builder. Selecting from either location keeps one active candidate lineage. `Build Structure` then populates a separate `Ranked structure` dropdown for the generated rank outputs.
+
+The SPPS row is ordered `Resin → Loading mmol/g → Scale mmol`. `Open SPPS Planner` launches the full planner window instead of running an invisible quick-plan task. The active candidate and synthesis inputs are prefilled in that child window; standalone SPPS startup without a Workflow hand-off still begins with a blank sequence. The redundant bottom runtime-status text panel is removed; the progress bar, per-stage status text, error dialogs/logging, and real evidence-export actions remain.
+
+## 9. SPPS Planner V5
 
 ### 9.1 Active scope
 
@@ -412,7 +425,7 @@ One recommendation must transfer one coherent historical condition. Components, 
 
 Cleavage matching is sequence-first; product name is descriptive metadata. Unknown or incomplete cocktail components block exact Apply. Loading and cleavage time are independent process values and do not change stoichiometry.
 
-`Ac-EEMQRR-NH2` has a regression contract for 30 equivalents and `TFA 95% / water 5% / no TIS`. That software test does not make it a validated SOP for every laboratory.
+Exact cleavage cocktails are evidence-first rather than hard-coded to a named peptide. A complete reviewed historical record may be reproduced as one coherent condition; when no compatible history exists, generic chemistry guidance remains advisory and exact-condition Apply stays disabled. This does not make any historical record a validated SOP for every laboratory.
 
 For Pal, FITC, Biotin, chelators, lipids, PEG/AEEA, or protected building blocks, verify exact form, MW, attachment, protection state, and position. Review difficult-sequence aggregation, aspartimide, diketopiperazine, oxidation, disulfide/cyclization, and cleavage risks.
 
@@ -458,28 +471,33 @@ For GROMACS:
 4. Confirm that the force field supports every modification, D-residue, linker, lipid, and tag.
 5. Run topology, solvation, ionization, equilibration, production, and analysis in GROMACS.
 
-A hand-off folder is not a completed docking or MD run.
+A hand-off folder is not a completed docking or MD run. V4 does not analyze MD trajectories; it prepares static structures and external-MD hand-off/provenance material only.
+
+### MD / trajectory scope
+
+Pepforge V4 does not expose production MD or trajectory analysis as an active user feature. Those functions are reserved for the V5 simulation workflow, where MD execution and trajectory generation/analysis can be integrated as one complete path. V4 retains static PDB/SDF structure review and external MD hand-off planning only.
+
+`Compare Structures` performs exact-sequence PDB consensus diagnostics (C-alpha/backbone RMSD, Rg, DSSP agreement and steric comparison). External predictions are cross-checks, not experimental truth.
 
 ## 12. Project and output management
 
-Source runs use the repository or the selected output folder. Installed builds may use a user-writable application-data location. Use `Open project folder` and `Open runtime logs` to find the active paths.
-
-Recommended layout:
+A directory selected by the user is treated as a **base output directory**. User-triggered results are written into one coherent result bundle below it.
 
 ```text
-project_name/
-  01_input/
-  02_hotspot/
-  03_design/
-  04_structure/
-  05_spps/
-  06_screening/
-  07_external_validation/
-  08_experimental/
-  config_and_notes/
+2026-08-27_Ac-EEMQRR-NH2/
+  RESULT_BUNDLE.json
+  *.csv
+  *.json
+  *.pdb / *.sdf / *.pml
+  *.xlsx / *.md / *.txt
+  <Module>_Result_Package.zip
 ```
 
-Record sequence, target accession, config snapshot, seed, software version, and date for every run. Before public release, remove laboratory history, unpublished sequences/structures, credentials, local models/training data, personal information, restricted supplier documents, and personal paths from logs.
+If a user-facing name is available, the folder uses `YYYY-MM-DD_<name>/`; otherwise a sequence is used when appropriate. Windows-invalid characters are sanitized, long sequences are shortened with a stable hash suffix, and repeated runs receive `_01`, `_02`, and later suffixes rather than overwriting prior output.
+
+PDE, Hot Spot Finder, PSB, SPPS Planner, and Docking Workbench share this result-bundle convention. Persistent application state such as caches, user training databases, settings, or internal project state may remain in stable workspace paths because those files are program state rather than one exported result.
+
+`RESULT_BUNDLE.json` records the Pepforge version, tool, name/sequence, timestamps, and representative artifact paths. Module-specific files preserve the actual configuration, seed, target metadata, and other information generated by that run.
 
 ## 13. Scientific interpretation
 
@@ -549,7 +567,7 @@ Automated checks do not replace native Windows GUI smoke tests, real RDKit expor
 
 ## 16. Publication and citation
 
-Before publishing, read `PUBLIC_DATA_POLICY.md`, scan for secrets/private data, run the release gate, and align `VERSION.txt`, `CITATION.cff`, README, and release filename to `3.0.0`. Keep the SPPS component at its separate `4.0.0` label. Exclude runtime output, caches, backups, local models, and private data from source archives.
+Before publishing, read `PUBLIC_DATA_POLICY.md`, scan for secrets/private data, run the release gate, and align `VERSION.txt`, `CITATION.cff`, README, and release filename to `4.0.0`. Keep the SPPS component at its separate `4.0.0` label. Exclude runtime output, caches, backups, local models, and private data from source archives.
 
 Citation metadata is in `CITATION.cff`. The repository uses the custom **Pepforge Public Academic Citation License** and is not represented as OSI-approved. Read `LICENSE` before redistribution or commercial use.
 
@@ -565,4 +583,8 @@ Final checklist:
 - [ ] Experimental/structural validation was planned.
 - [ ] Private data was removed before publication.
 
-Related documents: [README](README.md), [Scientific scope](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md), [Sequence grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md), [SPPS parser contract](docs/SPPS_PARSER_CONTRACT.md), [SPPS V4 evidence workflow](docs/SPPS_V4_EVIDENCE_WORKFLOW.md), and [Docking guide](docs/DOCKING_WORKBENCH_USER_GUIDE.md).
+Related documents: [README](README.md), [Scientific scope](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md), [Sequence grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md), [SPPS parser contract](docs/SPPS_PARSER_CONTRACT.md), [SPPS V5 decision-support workflow](docs/SPPS_V5_INTEGRATION.md), and [Docking guide](docs/DOCKING_WORKBENCH_USER_GUIDE.md).
+
+### V4.0.0 design/structure theory controls
+
+PDE exposes `PREORGANIZED`, `ADAPTIVE`, and `FLEXIBLE` Conformational Strategy settings in addition to the five Design Objective modes. These settings control optimizer pressure only; they do not identify a physical binding mechanism. `Hotspot Complementarity` is a coarse chemistry-evidence setting (`OFF`, `REPORT_ONLY`, `EVIDENCE_AND_SELECTION`) and must not be interpreted as a geometric contact or affinity. Explicit dP-G/Aib-G/Aib search seeds are used only in their documented contexts, and all PSB family calls still depend on measured post-relaxation geometry. See `docs/DESIGN_STRUCTURE_THEORY_V4.md`.

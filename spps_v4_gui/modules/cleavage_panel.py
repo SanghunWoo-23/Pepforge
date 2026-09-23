@@ -1,4 +1,4 @@
-"""Cleavage cocktail panel helpers for SPPS Planner V4.0.0."""
+"""Cleavage cocktail panel helpers for SPPS Planner V5.0.0."""
 from __future__ import annotations
 from . import gui_common as state
 
@@ -15,11 +15,89 @@ def ensure_cleavage_vars(gui) -> None:
         ("cleavage_preset", "AUTO"),
         ("cleavage_components_text", ""),
         ("cleavage_time_h", ""),
+        ("post_cleavage_rescue", "None"),
+        ("nh4i_eq", "2"),
+        ("nh4i_concentration_m", "0.2"),
+        ("nh4i_time_h", "1"),
     ):
         if not hasattr(gui, attr):
             try: setattr(gui, attr, tk.StringVar(value=default))
             except Exception: pass
 
+
+
+NH4I_MW_G_MOL = 144.94
+
+def post_cleavage_rescue_summary(gui) -> dict:
+    """Return a separate post-cleavage rescue calculation; never a cocktail row."""
+    ensure_cleavage_vars(gui)
+    rescue=str(getattr(gui,"post_cleavage_rescue").get() or "None").strip()
+    if rescue != "NH4I Reduction":
+        return {"enabled":False,"rescue":"None","valid":True,"note":"Default: no post-cleavage rescue."}
+    def num(attr,default):
+        try: return float(getattr(gui,attr).get())
+        except Exception: return float(default)
+    eq=num("nh4i_eq",2.0); conc=num("nh4i_concentration_m",0.2); time_h=num("nh4i_time_h",1.0)
+    try:
+        scale=float(state.plan_input(gui).scale_mmol)
+    except Exception:
+        try: scale=float(getattr(gui,"pm_scale").get())
+        except Exception: scale=0.0
+    valid=bool(eq>0 and conc>0 and conc<=0.2 and time_h>0 and scale>0)
+    mmol=scale*eq if scale>0 and eq>0 else None
+    mass_mg=(mmol*NH4I_MW_G_MOL) if mmol is not None else None
+    final_ml=(mmol/conc) if mmol is not None and conc>0 else None
+    warning=""
+    if conc>0.2:
+        warning="NH4I concentration >0.2 M is blocked by the operator protocol because precipitation can occur."
+    elif conc<=0:
+        warning="NH4I concentration must be >0 and ≤0.2 M."
+    elif scale<=0:
+        warning="Enter a valid peptide scale to calculate NH4I amount."
+    return {
+        "enabled":True,"rescue":"NH4I Reduction","valid":valid,"nh4i_eq":eq,"concentration_m":conc,"time_h":time_h,
+        "peptide_scale_mmol":scale,"nh4i_mmol":mmol,"nh4i_mass_mg":mass_mg,"final_solution_ml":final_ml,
+        "solvent":"TFA / DW","warning":warning,
+        "note":"Conditional post-cleavage rescue only; use after oxidation/specific impurity is observed. It is not part of the cleavage cocktail.",
+    }
+
+def install_post_cleavage_rescue_controls(gui, frame, *, row: int = 1):
+    """Add one compact rescue row to the existing Cleavage Cocktail panel."""
+    ensure_cleavage_vars(gui)
+    try:
+        import tkinter.ttk as ttk
+        import tkinter as tk
+    except Exception:
+        return None
+    box=ttk.LabelFrame(frame,text="Post-cleavage Rescue",padding=(6,4))
+    box.grid(row=row,column=0,columnspan=2,sticky="ew",padx=4,pady=(0,4))
+    ttk.Label(box,text="Rescue").pack(side="left",padx=(0,3))
+    rescue=ttk.Combobox(box,textvariable=gui.post_cleavage_rescue,values=["None","NH4I Reduction"],state="readonly",width=18)
+    rescue.pack(side="left",padx=(0,10))
+    ttk.Label(box,text="NH4I eq").pack(side="left",padx=(0,3)); eq=ttk.Entry(box,textvariable=gui.nh4i_eq,width=6); eq.pack(side="left",padx=(0,8))
+    ttk.Label(box,text="Conc. (M)").pack(side="left",padx=(0,3)); conc=ttk.Entry(box,textvariable=gui.nh4i_concentration_m,width=6); conc.pack(side="left",padx=(0,8))
+    ttk.Label(box,text="Time (h)").pack(side="left",padx=(0,3)); tm=ttk.Entry(box,textvariable=gui.nh4i_time_h,width=6); tm.pack(side="left",padx=(0,8))
+    ttk.Label(box,text="Solvent: TFA / DW").pack(side="left",padx=(0,10))
+    summary=tk.StringVar(value="None — use only if oxidation/specific impurity is observed.")
+    ttk.Label(box,textvariable=summary).pack(side="left",fill="x",expand=True)
+    gui.post_cleavage_rescue_summary_var=summary
+    gui._post_cleavage_rescue_widgets=(eq,conc,tm)
+    def refresh(*_):
+        info=post_cleavage_rescue_summary(gui)
+        enabled=bool(info.get("enabled")); state_name="normal" if enabled else "disabled"
+        for w in gui._post_cleavage_rescue_widgets:
+            try: w.configure(state=state_name)
+            except Exception: pass
+        if not enabled:
+            summary.set("None — use only if oxidation/specific impurity is observed."); return
+        if not info.get("valid"):
+            summary.set(info.get("warning") or "Invalid rescue settings."); return
+        summary.set(f"NH4I {info['nh4i_mmol']:.3g} mmol / {info['nh4i_mass_mg']:.3g} mg; final solution ≈ {info['final_solution_ml']:.3g} mL at {info['concentration_m']:.3g} M")
+    for var in (gui.post_cleavage_rescue,gui.nh4i_eq,gui.nh4i_concentration_m,gui.nh4i_time_h):
+        try: var.trace_add("write",refresh)
+        except Exception: pass
+    refresh()
+    return box
 
 def _find_results_notebook(gui):
     for w in state.walk_widgets(gui):
@@ -55,7 +133,7 @@ def ensure_cleavage_panel(gui, ns: dict | None = None):
         frame = ttk.Frame(nb)
         nb.add(frame, text="Cleavage Cocktail")
     try:
-        frame.rowconfigure(1, weight=1); frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(2, weight=1); frame.columnconfigure(0, weight=1)
     except Exception:
         pass
     if not getattr(gui, "_v2097_cleavage_controls_added", False):
@@ -80,6 +158,9 @@ def ensure_cleavage_panel(gui, ns: dict | None = None):
             try: var.trace_add("write", lambda *_args, _gui=gui: _gui.after_idle(lambda: refresh_cleavage_panel(_gui)))
             except Exception: pass
         gui._v2097_cleavage_controls_added = True
+    if not getattr(gui, "_v5_post_cleavage_rescue_added", False):
+        install_post_cleavage_rescue_controls(gui, frame, row=1)
+        gui._v5_post_cleavage_rescue_added = True
     tree = getattr(gui, "pm_cleavage_tree", None)
     try:
         exists = bool(tree and str(tree.winfo_exists()))
@@ -93,9 +174,9 @@ def ensure_cleavage_panel(gui, ns: dict | None = None):
         y = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         x = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=y.set, xscrollcommand=x.set)
-        tree.grid(row=1, column=0, sticky="nsew")
-        y.grid(row=1, column=1, sticky="ns")
-        x.grid(row=2, column=0, sticky="ew")
+        tree.grid(row=2, column=0, sticky="nsew")
+        y.grid(row=2, column=1, sticky="ns")
+        x.grid(row=3, column=0, sticky="ew")
         gui.pm_cleavage_tree = tree
     return gui.pm_cleavage_tree
 

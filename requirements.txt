@@ -1,4 +1,4 @@
-# Pepforge V3.0.0 core desktop runtime
+# Pepforge V4.0.0 core desktop runtime
 # Heavy ML/web packages are optional and are not installed by default.
 numpy>=1.26
 pandas>=2.0

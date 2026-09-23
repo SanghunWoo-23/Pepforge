@@ -40,10 +40,16 @@ import json
 import csv
 import os
 
+from peptiforg_core.design_intent import normalize_design_intent
+
 from peptiforg_core.peptide_conformation import (
     analyze_conformer_ensemble, canonical_l_helix_evidence, EVIDENCE_REFERENCES,
-    add_canonical_l_backbone_seed_conformers, sequence_conformation_evidence,
+    add_canonical_l_backbone_seed_conformers, add_literature_turn_seed_conformers, add_explicit_aib_310_seed_conformers, sequence_conformation_evidence,
     select_top_conformers, pairwise_conformer_rmsd, evidence_guided_family_plan,
+    preferred_canonical_seed_labels, assess_top_conformer_diversity,
+    preferred_structure_seed_labels, preferred_structure_families,
+    relax_canonical_seed_conformers, _find_backbone_atoms, requested_structure_audit,
+    backbone_seed_fidelity_audit,
 )
 
 try:
@@ -58,7 +64,7 @@ except Exception as exc:  # pragma: no cover
 else:
     _RDKIT_IMPORT_ERROR = None
 
-VERSION = "1.3.0"
+from pepforge_structure_tool.version import VERSION
 
 # -----------------------------------------------------------------------------
 # Monomer/linker/label libraries
@@ -475,6 +481,86 @@ def environment_report() -> Dict[str, Any]:
         report["supported_counts"][k] = len(table.get(k, {}))
     return report
 
+def _structure_generation_route(tokens: List[Token], atom_ranges: List[AtomRange]) -> Dict[str, Any]:
+    """Choose and document the V4 structure-generation route without hidden substitution."""
+    peptide_tokens = [t for t in tokens if t.kind in {"std_aa", "d_std_aa", "non_natural_aa", "sidechain_label_aa"}]
+    noncanonical = [t.raw for t in peptide_tokens if t.kind != "std_aa"]
+    graph_modifiers = [t.raw for t in tokens if t.kind in {"linker", "label", "chemical", "sidechain_label_aa"}]
+    canonical_linear = bool(peptide_tokens) and not noncanonical and not graph_modifiers
+    if canonical_linear:
+        route = "canonical_L_linear_explicit_phi_psi_seed_plus_RDKit_relaxation"
+        seed_policy = "PeptideBuilder-style explicit phi/psi search seeds are applied on Pepforge's chemistry graph, then relaxed and re-measured."
+    else:
+        route = "explicit_chemistry_graph_RDKit_conformer_route"
+        seed_policy = "Canonical-L phi/psi seeds are not forced onto D/non-natural/linker/side-chain-modified constructs."
+    return {
+        "route": route,
+        "canonical_L_linear": canonical_linear,
+        "noncanonical_or_D_residues": noncanonical,
+        "graph_modifiers": graph_modifiers,
+        "atom_range_count": len(atom_ranges),
+        "seed_policy": seed_policy,
+        "peptidebuilder_concept_provenance": "Tien et al., PeptideBuilder, PeerJ 2013, doi:10.7717/peerj.80",
+        "implementation_note": "Pepforge implements the explicit phi/psi seed concept internally; the external PeptideBuilder Python package is not a required runtime dependency.",
+        "claim_guard": "A generated starting model or retained seed is not a native-state assignment or solution-state population estimate.",
+    }
+
+
+def _covalent_graph_validation(mol, tokens: List[Token], atom_ranges: List[AtomRange]) -> Dict[str, Any]:
+    """Validate the explicit connected graph and every adjacent token attachment.
+
+    Atom ranges are created in SMILES construction order. For each adjacent
+    buildable range, Pepforge requires at least one covalent bond crossing the
+    range boundary. This catches silent disconnected fragments or lost linkages
+    without assuming that the final atom of a residue is always the attach atom.
+    """
+    if mol is None or Chem is None:
+        return {"status": "unavailable", "valid": False, "connections": []}
+    ranges = list(atom_ranges)
+    connections: List[Dict[str, Any]] = []
+    failures: List[str] = []
+    try:
+        components = len(Chem.GetMolFrags(mol))
+    except Exception:
+        components = None
+    for left, right in zip(ranges, ranges[1:]):
+        left_ids = set(range(int(left.heavy_start_1based) - 1, int(left.heavy_end_1based)))
+        right_ids = set(range(int(right.heavy_start_1based) - 1, int(right.heavy_end_1based)))
+        crossing = []
+        for bond in mol.GetBonds():
+            a, b = int(bond.GetBeginAtomIdx()), int(bond.GetEndAtomIdx())
+            if (a in left_ids and b in right_ids) or (b in left_ids and a in right_ids):
+                crossing.append({
+                    "atom_i_1based": a + 1,
+                    "atom_j_1based": b + 1,
+                    "bond_type": str(bond.GetBondType()),
+                    "bond_order": float(bond.GetBondTypeAsDouble()),
+                })
+        ok = bool(crossing)
+        row = {
+            "left_token": left.token,
+            "left_kind": left.kind,
+            "right_token": right.token,
+            "right_kind": right.kind,
+            "connected": ok,
+            "cross_range_bonds": crossing,
+        }
+        connections.append(row)
+        if not ok:
+            failures.append(f"{left.token}->{right.token}")
+    valid = (components == 1) and not failures
+    return {
+        "status": "passed" if valid else "failed",
+        "valid": bool(valid),
+        "connected_components": components,
+        "expected_adjacent_connections": max(0, len(ranges) - 1),
+        "validated_adjacent_connections": sum(1 for row in connections if row["connected"]),
+        "failed_connections": failures,
+        "connections": connections,
+        "claim_guard": "Connectivity validation confirms the encoded covalent graph only; it does not validate force-field parameters, preferred conformation, or experimental chemistry yield.",
+    }
+
+
 def _chemistry_audit(mol, tokens: List[Token], smiles: str) -> Dict[str, Any]:
     """Lightweight sanity report for generated starting models."""
     audit: Dict[str, Any] = {
@@ -675,6 +761,12 @@ def _tokenize_piece(piece: str) -> List[str]:
         return [norm_piece]
     if piece.startswith("d") and len(piece) == 2 and piece[1] in STD_AA:
         return [piece]
+    # An exact registered token/alias was already handled above.  Any remaining
+    # compact all-uppercase string made solely of canonical one-letter residues
+    # is a residue sequence, not a case-insensitive chemistry prefix.  This is
+    # what keeps ACDE-NH2 as A-C-D-E while explicit AC- / Ac- remains acetyl.
+    if len(piece) > 1 and piece.isupper() and all(ch in STD_AA for ch in piece):
+        return list(piece)
     # A compact all-uppercase canonical sequence (e.g. ACG, EEMQRR) must be
     # split residue-by-residue before matching multi-letter chemistry tokens.
     # Otherwise prefixes such as ``Ac`` can incorrectly consume ``AC`` from ACG.
@@ -1087,6 +1179,25 @@ def make_report(meta: Dict[str, Any]) -> str:
     for k, v in audit.items():
         lines.append(f"  - {k}: {v}")
     lines.append("")
+    route = meta.get('structure_generation_route') or {}
+    lines.append("Structure generation route:")
+    lines.append(f"  - route: {route.get('route')}")
+    lines.append(f"  - canonical-L linear: {route.get('canonical_L_linear')}")
+    lines.append(f"  - seed policy: {route.get('seed_policy', '')}")
+    lines.append(f"  - implementation note: {route.get('implementation_note', '')}")
+    graph = meta.get('covalent_graph_validation') or {}
+    lines.append("Covalent graph validation:")
+    lines.append(f"  - status: {graph.get('status')}")
+    lines.append(f"  - components: {graph.get('connected_components')}")
+    lines.append(f"  - adjacent connections: {graph.get('validated_adjacent_connections')}/{graph.get('expected_adjacent_connections')}")
+    lines.append(f"  - failed connections: {graph.get('failed_connections', [])}")
+    fidelity = meta.get('backbone_seed_fidelity_audit') or {}
+    lines.append("Explicit phi/psi seed fidelity:")
+    lines.append(f"  - status: {fidelity.get('status')}")
+    lines.append(f"  - tolerance_deg: {fidelity.get('tolerance_deg')}")
+    lines.append(f"  - seed records: {len(fidelity.get('records') or [])}")
+    lines.append(f"  - claim_guard: {fidelity.get('claim_guard', '')}")
+    lines.append("")
     lines.append("Conformer summary:")
     conf = meta.get('conformer_summary') or {}
     for k, v in conf.items():
@@ -1115,6 +1226,9 @@ def make_report(meta: Dict[str, Any]) -> str:
     lines.append("Sequence evidence summary:")
     lines.append(f"  - canonical-L coverage: {seq_ev.get('canonical_L_coverage_fraction', 0.0)}")
     lines.append(f"  - helix breakers: {seq_ev.get('helix_breaker_positions', [])}")
+    lines.append(f"  - helix breaker context: {seq_ev.get('helix_breaker_context', {})}")
+    lines.append(f"  - local charge patches: {seq_ev.get('local_charge_patches', [])}")
+    lines.append(f"  - beta face context: {seq_ev.get('beta_face_context', {})}")
     lines.append(f"  - opposite-charge i,i+3/i+4 pairs: {seq_ev.get('opposite_charge_i3_i4_pairs', [])}")
     lines.append(f"  - beta-hairpin context windows: {seq_ev.get('beta_hairpin_context_windows', [])}")
     lines.append(f"  - PPII proline positions: {seq_ev.get('proline_positions_for_PPII_context', [])}")
@@ -1310,6 +1424,258 @@ def _optimize_added_conformers(
         })
     return records
 
+AA1_TO_3 = {
+    "A":"ALA","R":"ARG","N":"ASN","D":"ASP","C":"CYS","E":"GLU","Q":"GLN","G":"GLY",
+    "H":"HIS","I":"ILE","L":"LEU","K":"LYS","M":"MET","F":"PHE","P":"PRO","S":"SER",
+    "T":"THR","W":"TRP","Y":"TYR","V":"VAL",
+}
+
+
+def _pdb_safe_resname(raw: str, fallback: str = "MOD") -> str:
+    """Return a compact PDB residue label without pretending unknown chemistry is canonical."""
+    text = re.sub(r"[^A-Za-z0-9]", "", str(raw or "").upper())
+    return (text[:3] or fallback)[:3]
+
+
+def _residue_aware_pdb_view_molecule(mol, atom_ranges):
+    """Annotate a chemistry-faithful heavy-atom molecule for PyMOL/PDB review.
+
+    Standard L-amino acids receive conventional 3-letter residue names and
+    1-based peptide positions. D residues, non-natural residues, linkers and
+    terminal chemistry remain explicitly non-standard/HETATM-labelled rather
+    than being silently canonicalized. Connectivity and coordinates are not
+    changed; SDF/JSON remain the authoritative chemistry representations.
+    """
+    if Chem is None or mol is None:
+        return None
+    ranges = [r.__dict__ if hasattr(r, "__dict__") else dict(r) for r in atom_ranges]
+    view = Chem.RemoveHs(Chem.Mol(mol))
+    backbone_rows = _find_backbone_atoms(view, atom_ranges)
+    backbone_iter = iter(backbone_rows)
+    peptide_pos = 0
+    modifier_pos = 0
+    last_peptide = None
+
+    for rng in ranges:
+        kind = str(rng.get("kind", ""))
+        raw = str(rng.get("token", "") or "")
+        try:
+            start = int(rng.get("heavy_start_1based", 0)) - 1
+            end = int(rng.get("heavy_end_1based", 0)) - 1
+        except Exception:
+            continue
+        if start < 0 or end < start or end >= view.GetNumAtoms():
+            continue
+
+        is_peptide = kind in {"std_aa", "d_std_aa", "non_natural_aa", "sidechain_label_aa"}
+        backbone = next(backbone_iter, {}) if is_peptide else {}
+        if is_peptide:
+            peptide_pos += 1
+            if kind == "std_aa":
+                aa = raw[:1].upper()
+                resname = AA1_TO_3.get(aa, _pdb_safe_resname(raw, "UNK"))
+                hetero = False
+            elif kind == "d_std_aa":
+                aa = raw[-1:].upper()
+                # Custom D-X label is intentionally non-canonical: it preserves
+                # chirality provenance instead of making PyMOL think this is L-X.
+                resname = _pdb_safe_resname(f"D{aa}", "DXX")
+                hetero = True
+            elif kind == "sidechain_label_aa":
+                parent = raw.split("(", 1)[0][:1].upper()
+                resname = AA1_TO_3.get(parent, _pdb_safe_resname(raw, "MOD"))
+                hetero = True
+            else:
+                resname = _pdb_safe_resname(raw, "NNA")
+                hetero = True
+            chain, resnum = "P", peptide_pos
+            last_peptide = (resname, resnum)
+        elif kind == "c_terminal_atom" and last_peptide is not None:
+            resname, resnum = last_peptide
+            chain, hetero = "P", False
+        else:
+            modifier_pos += 1
+            special = {"AC": "ACE", "NH2": "AMD", "OH": "OH"}
+            resname = special.get(raw.upper(), _pdb_safe_resname(raw, "MOD"))
+            chain, resnum, hetero = "X", modifier_pos, True
+
+        generic_counter = 0
+        for idx in range(start, end + 1):
+            atom = view.GetAtomWithIdx(idx)
+            atom_name = None
+            if is_peptide:
+                for key in ("N", "CA", "C", "O"):
+                    if backbone.get(key) == idx:
+                        atom_name = key
+                        break
+            elif kind == "c_terminal_atom":
+                atom_name = "NXT" if raw.upper() == "NH2" else ("OXT" if raw.upper() == "OH" else None)
+            if atom_name is None:
+                generic_counter += 1
+                atom_name = f"{atom.GetSymbol()}{generic_counter}"[:4]
+            info = Chem.AtomPDBResidueInfo(
+                f"{atom_name:>4}", idx + 1, "", resname, int(resnum), chain, "", 1.0, 0.0, bool(hetero), 0, 0
+            )
+            atom.SetMonomerInfo(info)
+    return view
+
+
+def _pdb_sequence_resnames(atom_ranges) -> list[str]:
+    """Return the peptide-polymer residue names used for PDB SEQRES.
+
+    SEQRES is intentionally limited to peptide residue positions (chain P).
+    Terminal caps, lipid tails, labels and linkers remain explicit coordinate
+    records/REMARK metadata instead of being misrepresented as amino acids.
+    D/non-natural residues keep non-canonical residue labels; the exact Pepforge
+    notation is preserved separately in PEPFORGE_EXACT_SEQUENCE.
+    """
+    ranges = [r.__dict__ if hasattr(r, "__dict__") else dict(r) for r in atom_ranges]
+    out: list[str] = []
+    for rng in ranges:
+        kind = str(rng.get("kind", ""))
+        raw = str(rng.get("token", "") or "")
+        if kind == "std_aa":
+            out.append(AA1_TO_3.get(raw[:1].upper(), _pdb_safe_resname(raw, "UNK")))
+        elif kind == "d_std_aa":
+            aa = raw[-1:].upper()
+            out.append(_pdb_safe_resname(f"D{aa}", "DXX"))
+        elif kind == "sidechain_label_aa":
+            parent = raw.split("(", 1)[0][:1].upper()
+            out.append(AA1_TO_3.get(parent, _pdb_safe_resname(raw, "MOD")))
+        elif kind == "non_natural_aa":
+            out.append(_pdb_safe_resname(raw, "NNA"))
+    return out
+
+
+def _pdb_seqres_lines(atom_ranges, chain: str = "P") -> list[str]:
+    names = _pdb_sequence_resnames(atom_ranges)
+    if not names:
+        return []
+    total = len(names)
+    lines: list[str] = []
+    for idx in range(0, total, 13):
+        chunk = names[idx:idx + 13]
+        serial = idx // 13 + 1
+        lines.append(f"SEQRES {serial:3d} {chain[:1] or 'P'} {total:4d}  " + " ".join(f"{x:>3s}" for x in chunk))
+    return lines
+
+
+def _pdb_remark_value_lines(label: str, value: str, code: int = 901, width: int = 78) -> list[str]:
+    """Serialize a Pepforge metadata value into deterministic PDB REMARK lines."""
+    value = str(value or "").strip()
+    if not value:
+        return []
+    prefix = f"REMARK {code:3d} {label}: "
+    cont = f"REMARK {code:3d} {label}_CONT: "
+    first_room = max(8, width - len(prefix))
+    cont_room = max(8, width - len(cont))
+    lines = [prefix + value[:first_room]]
+    rest = value[first_room:]
+    while rest:
+        lines.append(cont + rest[:cont_room])
+        rest = rest[cont_room:]
+    return lines
+
+
+def _pdb_sequence_metadata_block(sequence: str, tokens, atom_ranges) -> str:
+    """Create PDB-readable sequence/construct metadata without inventing chemistry."""
+    token_rows = list(tokens or [])
+    exact = str(sequence or "").strip()
+    peptide_tokens: list[str] = []
+    modifier_tokens: list[str] = []
+    residue_kinds = {"std_aa", "d_std_aa", "non_natural_aa", "sidechain_label_aa"}
+    for tok in token_rows:
+        row = tok.__dict__ if hasattr(tok, "__dict__") else dict(tok)
+        raw = str(row.get("raw", "") or "")
+        kind = str(row.get("kind", "") or "")
+        if kind in residue_kinds:
+            peptide_tokens.append(raw)
+        elif kind not in {"tag_expansion"}:
+            modifier_tokens.append(f"{raw}[{kind}]")
+
+    lines = [
+        "REMARK 900 PEPFORGE RESIDUE-AWARE REVIEW PDB",
+        "REMARK 900 Exact chemistry/connectivity provenance is stored in the companion SDF/JSON files.",
+        "REMARK 900 Chain P = peptide residues; chain X = terminal/linker/modifier chemistry when separable.",
+    ]
+    lines.extend(_pdb_remark_value_lines("PEPFORGE_EXACT_SEQUENCE", exact, 901))
+    if peptide_tokens:
+        lines.extend(_pdb_remark_value_lines("PEPFORGE_PEPTIDE_TOKENS", "|".join(peptide_tokens), 902))
+    if modifier_tokens:
+        lines.extend(_pdb_remark_value_lines("PEPFORGE_MODIFIER_TOKENS", "|".join(modifier_tokens), 903))
+    seqres = _pdb_seqres_lines(atom_ranges, "P")
+    if seqres:
+        lines.append("REMARK 904 PEPFORGE SEQRES chain P contains peptide residue positions only.")
+        lines.extend(seqres)
+    return "\n".join(lines) + "\n"
+
+
+def _residue_aware_pdb_block(mol, atom_ranges, sequence: str = "", tokens=None) -> str:
+    view = _residue_aware_pdb_view_molecule(mol, atom_ranges)
+    if view is None:
+        view = Chem.RemoveHs(Chem.Mol(mol))
+    return _pdb_sequence_metadata_block(sequence, tokens, atom_ranges) + Chem.MolToPDBBlock(view)
+
+
+def _write_residue_aware_pdb(path: Path, mol, atom_ranges, sequence: str = "", tokens=None) -> None:
+    path.write_text(_residue_aware_pdb_block(mol, atom_ranges, sequence=sequence, tokens=tokens), encoding="utf-8", errors="ignore")
+
+
+def _canonical_l_pdb_view_molecule(mol, atom_ranges):
+    """Return a heavy-atom, residue-aware PDB view for plain canonical-L peptides.
+
+    The chemistry-faithful SDF/generic PDB export remains unchanged. This view
+    exists so PyMOL/Bio.PDB/DSSP-like tools can recognize residue numbers and
+    backbone atom names (N/CA/C/O). Modified/D/linker constructs intentionally
+    do not receive a fabricated canonical residue mapping.
+    """
+    if Chem is None or mol is None:
+        return None
+    ranges = [r.__dict__ if hasattr(r, "__dict__") else dict(r) for r in atom_ranges]
+    peptide = [r for r in ranges if str(r.get("kind", "")) in {"std_aa","d_std_aa","non_natural_aa","sidechain_label_aa","linker"}]
+    if not peptide or any(str(r.get("kind", "")) != "std_aa" for r in peptide):
+        return None
+    extras = [r for r in ranges if str(r.get("kind", "")) != "std_aa"]
+    if any(not (str(r.get("kind", "")) == "c_terminal_atom" and str(r.get("token", "")).upper() == "OH") for r in extras):
+        return None
+    view = Chem.RemoveHs(Chem.Mol(mol))
+    residues = _find_backbone_atoms(view, atom_ranges)
+    if len(residues) != len(peptide):
+        return None
+    for pos, (rng, backbone) in enumerate(zip(peptide, residues), 1):
+        token = str(rng.get("token", "")).upper()
+        resname = AA1_TO_3.get(token)
+        if not resname:
+            return None
+        start = int(rng.get("heavy_start_1based", 0)) - 1
+        end = int(rng.get("heavy_end_1based", 0)) - 1
+        generic_counter = 0
+        for idx in range(start, end + 1):
+            atom = view.GetAtomWithIdx(idx)
+            atom_name = None
+            for key in ("N", "CA", "C", "O"):
+                if backbone.get(key) == idx:
+                    atom_name = key
+                    break
+            if atom_name is None:
+                generic_counter += 1
+                atom_name = f"{atom.GetSymbol()}{generic_counter}"[:4]
+            info = Chem.AtomPDBResidueInfo(
+                f"{atom_name:>4}", idx + 1, "", resname, pos, "A", "", 1.0, 0.0, False, 0, 0
+            )
+            atom.SetMonomerInfo(info)
+    terminal = [r for r in extras if str(r.get("kind", "")) == "c_terminal_atom"]
+    if terminal:
+        idx = int(terminal[-1].get("heavy_start_1based", 0)) - 1
+        if 0 <= idx < view.GetNumAtoms():
+            last_resname = AA1_TO_3.get(str(peptide[-1].get("token", "")).upper(), "UNK")
+            info = Chem.AtomPDBResidueInfo(
+                " OXT", idx + 1, "", last_resname, len(peptide), "A", "", 1.0, 0.0, False, 0, 0
+            )
+            view.GetAtomWithIdx(idx).SetMonomerInfo(info)
+    return view
+
+
 def build_structure(
     sequence: str,
     output_dir: str | Path = ".",
@@ -1338,6 +1704,11 @@ def build_structure(
     mol_h = Chem.AddHs(mol, addCoords=True)
     _add_mol_properties(mol_h, sequence, tokens, atom_ranges, warnings, name)
 
+    helix_evidence = canonical_l_helix_evidence(tokens)
+    sequence_evidence = sequence_conformation_evidence(tokens)
+    family_plan = evidence_guided_family_plan(sequence_evidence, search_profile)
+    search_budget = dict(family_plan.get("budget") or {})
+
     params = AllChem.ETKDGv3()
     params.randomSeed = int(seed)
     params.useSmallRingTorsions = True
@@ -1351,7 +1722,9 @@ def build_structure(
         params.pruneRmsThresh = 0.5
     except Exception:
         LOGGER.debug("Optional operation skipped", exc_info=True)
-    requested_confs = max(1, int(num_confs or 1))
+    base_requested_confs = max(1, int(num_confs or 1))
+    sampling_multiplier = max(1, int(search_budget.get("etkdg_multiplier", 1) or 1))
+    requested_confs = min(60, max(base_requested_confs, base_requested_confs * sampling_multiplier))
     conf_ids = list(AllChem.EmbedMultipleConfs(mol_h, numConfs=requested_confs, params=params))
     if not conf_ids:
         warnings.append("ETKDG multi-conformer embedding failed; retrying one conformer with random coordinates.")
@@ -1375,22 +1748,73 @@ def build_structure(
     conformer_summary["worker_threads"] = max(1, int(num_threads))
     conformer_summary["max_optimization_iterations"] = int(max_iters)
 
+    conditions = dict(environment_conditions or {})
+    pde_design_intent = normalize_design_intent(conditions.get("pde_design_intent") or {})
+    pde_mode = str(pde_design_intent.get("mode") or "BALANCED").upper()
+    pde_preferred_structure = str(pde_design_intent.get("preferred_structure") or "NONE").upper()
+
+    # Bias-resistant structure evidence: record the optimized stochastic ETKDG
+    # ensemble *before* any requested-family or literature-guided torsion seeds
+    # are added.  This is an intent-independent challenge within the same PSB
+    # chemistry/backend, not an external/orthogonal validation and not a
+    # thermodynamic population estimate.
+    independent_challenge_analysis = analyze_conformer_ensemble(
+        mol_h, atom_ranges, conformer_summary.get("energies", []),
+        conformer_sources={int(cid): "ETKDG_independent_challenge" for cid in conf_ids},
+    )
+
     # v2.0.0 peptide-conformation upgrade: evaluate the stochastic ETKDG
     # ensemble plus explicit canonical-L backbone-basin seeds. This prevents a
     # short run from accidentally missing alpha/3_10/beta/PPII search regions.
     # Seeds are search candidates, not predictions, and are never forced onto
     # D/non-natural/side-chain-modified peptides.
-    seed_sources = add_canonical_l_backbone_seed_conformers(mol_h, atom_ranges)
+    intent_seed_labels = preferred_structure_seed_labels(pde_preferred_structure) if pde_mode != "INTERACTION_ONLY" else []
+    preferred_seed_labels = intent_seed_labels or preferred_canonical_seed_labels(list(family_plan.get("family_priority") or []))
+    guided_variants = int(search_budget.get("guided_seed_variants", 0) or 0)
+    if intent_seed_labels:
+        # When PDE explicitly requests a curated canonical-L basin, sample that
+        # basin densely enough to seek several independent clash-free local
+        # conformers instead of spending the seed budget on unrelated folds.
+        # Oversample the requested basin because some constrained seeds may
+        # fail the severe-clash screen after relaxation. Top-5 quality is more
+        # important than artificial fold diversity when PDE already fixed the
+        # structural intent.
+        guided_variants = max(guided_variants, min(6, max(4, max(1, int(min_final_conformers)))))
+    seed_sources = add_canonical_l_backbone_seed_conformers(
+        mol_h,
+        atom_ranges,
+        preferred_labels=preferred_seed_labels,
+        variants_per_preferred=guided_variants,
+    )
+    turn_seed_floor = 4 if pde_preferred_structure == "BETA_HAIRPIN" else 2
+    turn_seed_sources = add_literature_turn_seed_conformers(
+        mol_h, atom_ranges, preferred_structure=pde_preferred_structure,
+        variants=max(turn_seed_floor, min(5, guided_variants or turn_seed_floor)),
+    )
+    aib_310_seed_sources = add_explicit_aib_310_seed_conformers(
+        mol_h, atom_ranges, preferred_structure=pde_preferred_structure,
+        variants=max(3, min(5, guided_variants or 3)),
+    )
+    seed_sources.update(turn_seed_sources)
+    seed_sources.update(aib_310_seed_sources)
     if seed_sources:
-        for cid, label in seed_sources.items():
-            conformer_summary.setdefault("energies", []).append({
-                "conf_id": int(cid),
-                "energy": _energy_for_conformer(mol_h, int(cid)),
-                "not_converged": None,
-                "source": label,
-                "note": "torsion-basin seed; not force-field optimized after torsion steering",
-            })
+        seed_relaxation_records = relax_canonical_seed_conformers(
+            mol_h, atom_ranges, seed_sources, max_iters=max(200, int(max_iters))
+        )
+        conformer_summary.setdefault("energies", []).extend(seed_relaxation_records)
+        failed_relaxations = [r for r in seed_relaxation_records if r.get("relaxation") == "failed"]
+        for row in failed_relaxations:
+            warnings.append(
+                f"Backbone seed relaxation warning for conformer {row.get('conf_id')}: {row.get('warning', 'unknown error')}"
+            )
         conformer_summary["backbone_seed_conformers"] = seed_sources
+        conformer_summary["backbone_seed_relaxation"] = {
+            "method": "backbone-fixed side-chain relaxation, phi/psi-constrained whole-structure relaxation, with conditional final backbone-fixed side-chain polish",
+            "literature_turn_seed_count": len(turn_seed_sources),
+            "explicit_Aib_310_seed_count": len(aib_310_seed_sources),
+            "records": seed_relaxation_records,
+            "claim_guard": "Geometry cleanup for search seeds; not molecular dynamics, free-energy sampling, or a native-state prediction.",
+        }
         conformer_summary["embedded_conformers"] = int(mol_h.GetNumConformers())
 
     required_final = max(1, int(min_final_conformers))
@@ -1414,29 +1838,79 @@ def build_structure(
     conformation_analysis = analyze_conformer_ensemble(
         mol_h, atom_ranges, conformer_summary.get("energies", []), conformer_sources=conformer_sources
     )
-    helix_evidence = canonical_l_helix_evidence(tokens)
-    sequence_evidence = sequence_conformation_evidence(tokens)
-    family_plan = evidence_guided_family_plan(sequence_evidence, search_profile)
     rmsd_matrix = pairwise_conformer_rmsd(mol_h)
+    requested_rmsd_threshold = float(search_budget.get("rmsd_threshold_A", 1.0) or 1.0)
     top_conformers = select_top_conformers(
         conformation_analysis, sequence_evidence, limit=required_final,
         pairwise_rmsd=rmsd_matrix,
-        minimum_rmsd_A=float((family_plan.get("budget") or {}).get("rmsd_threshold_A", 1.0)),
+        minimum_rmsd_A=requested_rmsd_threshold,
         family_priority=list(family_plan.get("family_priority") or []),
+        preferred_structure=pde_preferred_structure,
+        design_mode=pde_mode,
     )
-    if len(top_conformers) != required_final:
+    if not top_conformers:
         raise PepforgeBuildError(
-            f"PSB generated {mol_h.GetNumConformers()} coordinate candidates but could rank only "
-            f"{len(top_conformers)} of the required {required_final}; inspect backbone resolution."
+            "PSB generated coordinate candidates but none passed the severe-steric-clash screen; "
+            "increase the search preset/budget or inspect the chemistry."
+        )
+    if len(top_conformers) < required_final:
+        warnings.append(
+            f"PSB returned {len(top_conformers)}/{required_final} conformers because it will not use severe-clash structures merely to fill Top-5."
         )
     conformation_analysis["top_conformers"] = top_conformers
     conformation_analysis["top_conformer_limit"] = required_final
+    requested_families = preferred_structure_families(pde_preferred_structure) if pde_mode != "INTERACTION_ONLY" else []
     conformation_analysis["ranking_method"] = (
-        "family-diverse ordinal selection: sequence-supported families first, "
-        "then contextual families, with a 1.0 A symmetry-aware heavy-atom RMSD diversity filter; "
-        "within-molecule force-field energy is used only as a tie-breaker"
+        "PDE-intent-aware steric-first selection without artificial family diversity: requested structure-family "
+        "conformers first when specified; otherwise clash-free geometry/energy ranking. Severe-clash conformers "
+        "are not used merely to fill Top-5."
     )
-    conformation_analysis["rmsd_diversity_threshold_A"] = 1.0
+    conformation_analysis["requested_structure"] = pde_preferred_structure
+    conformation_analysis["requested_structure_families"] = requested_families
+    conformation_analysis["requested_structure_match_count"] = sum(bool(r.get("requested_structure_match")) for r in top_conformers)
+    conformation_analysis["fallback_count"] = sum(bool(r.get("selection_fallback")) for r in top_conformers)
+    conformation_analysis["severe_clash_selected_count"] = sum(int(r.get("severe_steric_clashes") or 0) > 0 for r in top_conformers)
+    conformation_analysis["rmsd_diversity_threshold_A"] = requested_rmsd_threshold
+    conformation_analysis["rmsd_diversity_used_for_selection"] = False
+    conformation_analysis["top5_diversity_audit"] = assess_top_conformer_diversity(
+        top_conformers, rmsd_matrix, requested_rmsd_threshold
+    )
+    conformation_analysis["requested_structure_audit"] = requested_structure_audit(
+        pde_preferred_structure, pde_mode, top_conformers
+    )
+    independent_requested_families = preferred_structure_families(pde_preferred_structure) if pde_mode != "INTERACTION_ONLY" else []
+    independent_rows = list((independent_challenge_analysis or {}).get("conformers") or [])
+    independent_match_count = sum(str(row.get("family") or "") in set(independent_requested_families) for row in independent_rows)
+    independent_challenge = {
+        "status": (independent_challenge_analysis or {}).get("status", "unavailable"),
+        "method": "intent-independent ETKDG challenge using the same PSB chemistry/backend before guided seed addition",
+        "requested_structure": pde_preferred_structure,
+        "requested_structure_families": independent_requested_families,
+        "sampled_conformer_count": len(independent_rows),
+        "requested_family_match_count": independent_match_count,
+        "requested_family_fraction_of_sampled_ensemble": (independent_match_count / len(independent_rows) if independent_rows else None),
+        "family_counts": dict((independent_challenge_analysis or {}).get("family_counts") or {}),
+        "family_fraction_of_sampled_ensemble": dict((independent_challenge_analysis or {}).get("family_fraction_of_generated_ensemble") or {}),
+        "claim_guard": (
+            "Intent-independent challenge sampling uses the same RDKit/PSB chemistry and is not fully orthogonal external validation. "
+            "Fractions are generated-sample occupancy, not equilibrium populations, folded-state probabilities, or experimental validation."
+        ),
+    }
+    conformation_analysis["independent_challenge_sampling"] = independent_challenge
+    conformer_summary["base_requested_conformers"] = base_requested_confs
+    conformer_summary["evidence_sampling_multiplier"] = sampling_multiplier
+    # Distinguish requested evidence-guided canonical-L search basins from the
+    # seed conformers that were actually eligible and added. Modified, D-, and
+    # non-natural constructs intentionally receive no canonical-L torsion seeds.
+    conformer_summary["requested_canonical_seed_labels"] = preferred_seed_labels
+    conformer_summary["guided_seed_variants_per_preferred"] = guided_variants
+    applied_seed_labels = sorted({str(label) for label in seed_sources.values()})
+    conformer_summary["applied_backbone_seed_count"] = len(seed_sources)
+    conformer_summary["applied_backbone_seed_labels"] = applied_seed_labels
+    conformer_summary["canonical_l_seed_eligible"] = bool(seed_sources)
+    conformer_summary["canonical_seed_status"] = (
+        "applied" if seed_sources else "not_applied_for_this_construct"
+    )
 
     selected_best_id = top_conformers[0].get("conf_id") if top_conformers else conformer_summary.get("best_conf_id")
     conformer_summary["best_conf_id_by_sequence_aware_selection"] = selected_best_id
@@ -1445,6 +1919,7 @@ def build_structure(
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_") or "pepforge_structure"
     sdf_path = outdir / f"{safe}.sdf"
     pdb_path = outdir / f"{safe}.pdb"
+    canonical_view_pdb_path = outdir / f"{safe}_canonical_view.pdb"
     meta_path = outdir / f"{safe}.json"
     report_path = outdir / f"{safe}_report.txt"
     ensemble_sdf_path = outdir / f"{safe}_conformer_ensemble.sdf"
@@ -1454,7 +1929,7 @@ def build_structure(
     top5_csv_path = outdir / f"{safe}_top5_conformers.csv"
 
     # Preserve the full sampled ensemble as a separate SDF. The primary SDF/PDB
-    # remains the lowest-force-field-energy representative for compatibility.
+    # is the sequence-evidence-aware, steric-screened Rank 1 representative.
     top5_pdb_paths = []
     try:
         ensemble_writer = Chem.SDWriter(str(ensemble_sdf_path))
@@ -1502,13 +1977,14 @@ def build_structure(
         model.SetProp("Pepforge_family", str(row.get("family", "")))
         model.SetProp("Pepforge_sequence_support", str(row.get("sequence_support", "")))
         ranked_models.append((row, rank, model))
-        ranked_pdb = outdir / f"{safe}_rank{rank}_{str(row.get('family', 'conformer'))}.pdb"
-        try:
-            Chem.MolToPDBFile(model, str(ranked_pdb))
-        except Exception:
-            ranked_pdb.write_text(Chem.MolToPDBBlock(model), encoding="utf-8", errors="ignore")
+        ranked_pdb = outdir / f"{safe}_rank{rank}.pdb"
+        _write_residue_aware_pdb(ranked_pdb, model, atom_ranges, sequence=sequence, tokens=tokens)
         if ranked_pdb.exists() and ranked_pdb.stat().st_size > 0:
             top5_pdb_paths.append(str(ranked_pdb))
+        # Keep ranked filenames stable and compact (rank1.pdb ... rank5.pdb).
+        # Per-rank canonical_view duplicates were noisy for ordinary canonical
+        # peptide workflows and did not add unique chemistry information.  The
+        # main bundle-level canonical view remains available when applicable.
 
     try:
         top_writer = Chem.SDWriter(str(top5_sdf_path))
@@ -1519,9 +1995,9 @@ def build_structure(
         top_writer.close()
     except Exception as exc:
         warnings.append(f"Top-five SDF export warning: {exc}")
-    if len(top5_pdb_paths) != required_final:
+    if len(top5_pdb_paths) != len(top_conformers):
         raise PepforgeBuildError(
-            f"PSB ranked {required_final} structures but exported only {len(top5_pdb_paths)} PDB files."
+            f"PSB ranked {len(top_conformers)} structures but exported only {len(top5_pdb_paths)} PDB files."
         )
 
     # Pepforge V2.0.0 functional-stability behavior:
@@ -1547,16 +2023,38 @@ def build_structure(
             sdf_path.write_text("".join(blocks), encoding="utf-8", errors="ignore")
         else:
             sdf_path.write_text(Chem.MolToMolBlock(mol_export) + "\n$$$$\n", encoding="utf-8", errors="ignore")
+    # PDB is the human/PyMOL review representation. Keep the exact molecular
+    # graph, but attach residue names/positions so amino acids are visible.
+    # SDF/JSON remain the authoritative chemistry records for modified constructs.
     try:
-        Chem.MolToPDBFile(mol_export, str(pdb_path))
+        _write_residue_aware_pdb(pdb_path, mol_export, atom_ranges, sequence=sequence, tokens=tokens)
     except Exception as exc:
-        warnings.append(f"RDKit PDB writer path fallback used: {exc}")
-        pdb_path.write_text(Chem.MolToPDBBlock(mol_export), encoding="utf-8", errors="ignore")
+        warnings.append(f"Residue-aware PDB export fallback used: {exc}")
+        pdb_export_model = Chem.RemoveHs(Chem.Mol(mol_export))
+        pdb_path.write_text(Chem.MolToPDBBlock(pdb_export_model), encoding="utf-8", errors="ignore")
+
+    canonical_view = _canonical_l_pdb_view_molecule(mol_export, atom_ranges)
+    canonical_view_written = False
+    if canonical_view is not None:
+        try:
+            canonical_view_pdb_path.write_text(
+                _pdb_sequence_metadata_block(sequence, tokens, atom_ranges) + Chem.MolToPDBBlock(canonical_view),
+                encoding="utf-8", errors="ignore",
+            )
+            canonical_view_written = canonical_view_pdb_path.exists() and canonical_view_pdb_path.stat().st_size > 0
+        except Exception as exc:
+            warnings.append(f"Canonical peptide PDB view warning: {exc}")
 
     audit = _chemistry_audit(mol_export, tokens, smiles)
     attach_point_map = _build_attach_point_map(tokens, atom_ranges)
+    generation_route = _structure_generation_route(tokens, atom_ranges)
+    graph_validation = _covalent_graph_validation(mol_export, tokens, atom_ranges)
+    if not graph_validation.get("valid"):
+        raise PepforgeBuildError(
+            "Explicit chemistry graph validation failed: " + ", ".join(graph_validation.get("failed_connections") or ["disconnected graph"])
+        )
+    seed_fidelity = backbone_seed_fidelity_audit(mol_h, atom_ranges, seed_sources)
 
-    conditions = dict(environment_conditions or {})
     condition_record = {
         "pH": conditions.get("pH"),
         "temperature_C": conditions.get("temperature_C"),
@@ -1578,12 +2076,17 @@ def build_structure(
         "attach_point_map": attach_point_map,
         "category_counts": {},
         "chemistry_audit": audit,
+        "structure_generation_route": generation_route,
+        "covalent_graph_validation": graph_validation,
+        "backbone_seed_fidelity_audit": seed_fidelity,
         "conformer_summary": conformer_summary,
         "conformation_analysis": conformation_analysis,
         "canonical_L_helix_evidence": helix_evidence,
         "sequence_conformation_evidence": sequence_evidence,
         "evidence_guided_family_plan": family_plan,
         "environment_conditions": condition_record,
+        "pde_design_intent": pde_design_intent,
+        "pde_intent_claim_guard": "When PDE specifies a supported structure preference, PSB prioritizes clash-free conformers in that measured geometry family. Fallbacks are explicit and no family label is fabricated.",
         "conformation_evidence_references": EVIDENCE_REFERENCES,
         "conformation_claim_guard": "Generated family counts are conformer-sampling outcomes, not experimental populations or free-energy probabilities. Unsupported modified residues are not assigned invented propensity numbers.",
         "conformer_ensemble_sdf_path": str(ensemble_sdf_path),
@@ -1598,6 +2101,9 @@ def build_structure(
         "template_registry_notice": "Only explicitly defined chemistry is buildable. Tokens marked requires_curated_derivative are intentionally not assigned a display-only structure.",
         "sdf_path": str(sdf_path),
         "pdb_path": str(pdb_path),
+        "pdb_hydrogen_display_policy": "hydrogens retained for force-field calculations/SDF chemistry but omitted from default PDB/PyMOL display",
+        "canonical_view_pdb_path": str(canonical_view_pdb_path) if canonical_view_written else None,
+        "canonical_view_claim_guard": "Residue-aware heavy-atom visualization/export for plain canonical-L peptides only; chemistry-faithful SDF/generic PDB remains the primary graph record.",
         "meta_path": str(meta_path),
         "report_path": str(report_path),
     }

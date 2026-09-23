@@ -1,6 +1,6 @@
-# SPPS Planner V4 Evidence Workflow
+# SPPS Planner V5 Evidence Workflow (legacy document path)
 
-Pepforge V3.0.0 embeds the SPPS Planner V4 single-plan workflow. LOT Number and Batch Manager are excluded from the Pepforge operator surface.
+Pepforge V4.0.0 embeds the Public/Data-Sanitized SPPS Planner V5.0.0 single-plan workflow. This filename is retained only for backward documentation links. LOT Number and Batch Manager are excluded from the Pepforge operator surface.
 
 ## Planning flow
 
@@ -29,8 +29,8 @@ Pepforge V3.0.0 embeds the SPPS Planner V4 single-plan workflow. LOT Number and 
 - A fitted model can summarize evidence but cannot supply an invented optimum for Apply.
 - Loading and cleavage time do not alter calculated stoichiometric amounts.
 
-## Confirmed contract
+## Exact-condition contract
 
-For `Ac-EEMQRR-NH2`, the retained project contract is 30 resin equivalents of total cocktail, TFA 95% / water 5%, with no TIS. This project-specific rule has priority over the generic standard preset.
+The current embedded SPPS V5 workflow is evidence-first. Exact cleavage conditions are not hard-coded to a named peptide. When a complete reviewed historical record is compatible with the current sequence/context, the advisor may reproduce that single record as one coherent condition. Generic chemistry rules remain advisory when compatible history is absent and do not create an exact historical cocktail or enable exact-condition Apply. Imported records are not automatically promoted to `verified`.
 
 All outputs remain planning aids. Local SOPs, SDS requirements, resin behavior, reagent quality, instrument dead volume, reaction monitoring, and experimental verification remain the user's responsibility.

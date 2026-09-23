@@ -19,11 +19,13 @@ import json
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
-import pandas as pd
+from peptiforg_core.lazy_imports import lazy_module
+
+pd = lazy_module("pandas")
 from spps_v4_gui import state_persistence
 
-VERSION = "V4.0.0"
-TITLE = "SPPS Planner V4.0.0"
+VERSION = "V5.0.0"
+TITLE = "SPPS Planner V5.0.0"
 
 PLAN_COLUMNS = [
     "No", "Unit name", "MW", "Density(g/mL)", "Unit mmol", "Unit amount",
@@ -224,7 +226,7 @@ def _editor_payload(gui):
         # Direct-loading settings are peptide-specific.  Keeping these fields in
         # the item payload prevents a 2-CTC item from leaking into a preloaded
         # CTC synthesizer item when the operator clicks between peptides.
-        "apply_loading_calc": flag("apply_loading_calc", False),
+        "apply_loading_calc": flag("apply_loading_calc", True),
         "loading_aa_eq": value("loading_aa_eq", "2"),
         "loading_diea_eq": value("loading_diea_eq", "4"),
         "loading_time_h": value("loading_time_h", ""),
@@ -232,6 +234,10 @@ def _editor_payload(gui):
         "cleavage_eq_override": value("cleavage_eq_override", "0"),
         "cleavage_components_text": value("cleavage_components_text", ""),
         "cleavage_time_h": value("cleavage_time_h", ""),
+        "post_cleavage_rescue": value("post_cleavage_rescue", "None"),
+        "nh4i_eq": value("nh4i_eq", "2"),
+        "nh4i_concentration_m": value("nh4i_concentration_m", "0.2"),
+        "nh4i_time_h": value("nh4i_time_h", "1"),
         "branch_point": value("branch_point", ""),
         "branch_arm_sequence": value("branch_arm_sequence", ""),
         "branch_pg": value("branch_pg", ""),
@@ -310,7 +316,7 @@ def restore_item(gui, index, ns):
         _set_var(gui, "pm_lot", "")
         _set_var(gui, "pm_chemistry", item.get("chemistry", "DIC/HOBt"))
         _set_var(gui, "pm_copies", item.get("copies", "1"))
-        _set_bool(gui, "apply_loading_calc", item.get("apply_loading_calc", False))
+        _set_bool(gui, "apply_loading_calc", item.get("apply_loading_calc", True))
         _set_var(gui, "loading_aa_eq", item.get("loading_aa_eq", "2"))
         _set_var(gui, "loading_diea_eq", item.get("loading_diea_eq", "4"))
         _set_var(gui, "loading_time_h", item.get("loading_time_h", ""))
@@ -318,6 +324,10 @@ def restore_item(gui, index, ns):
         _set_var(gui, "cleavage_eq_override", item.get("cleavage_eq_override", "0"))
         _set_var(gui, "cleavage_components_text", item.get("cleavage_components_text", ""))
         _set_var(gui, "cleavage_time_h", item.get("cleavage_time_h", ""))
+        _set_var(gui, "post_cleavage_rescue", item.get("post_cleavage_rescue", "None"))
+        _set_var(gui, "nh4i_eq", item.get("nh4i_eq", "2"))
+        _set_var(gui, "nh4i_concentration_m", item.get("nh4i_concentration_m", "0.2"))
+        _set_var(gui, "nh4i_time_h", item.get("nh4i_time_h", "1"))
         _set_var(gui, "branch_point", item.get("branch_point", ""))
         _set_var(gui, "branch_arm_sequence", item.get("branch_arm_sequence", ""))
         _set_var(gui, "branch_pg", item.get("branch_pg", ""))
@@ -372,16 +382,10 @@ def live_sync(gui):
     """Save edits in place without clearing or regenerating the current plan."""
     if getattr(gui, "_v228_switching", False):
         return
-    # Only 2-CTC is a direct-loading profile.  Preloaded/synthesizer resins must
-    # not inherit a stale loading checkbox from the previously selected item.
-    try:
-        resin = str(gui.pm_resin.get() or "").strip()
-        if resin != "2-CTC" and hasattr(gui, "apply_loading_calc") and bool(gui.apply_loading_calc.get()):
-            gui._v228_switching = True
-            gui.apply_loading_calc.set(False)
-            gui._v228_switching = False
-    except Exception:
-        gui._v228_switching = False
+    # The checkbox is an operator preference and defaults ON.  The synthesis
+    # engine itself gates the direct-loading reaction by resin profile, so a
+    # preloaded/amide resin never receives a loading reaction merely because
+    # the checkbox is checked.
     index = _active_index(gui)
     if index is None:
         return
@@ -768,7 +772,7 @@ def _install_cleavage(gui, notebook):
             child.destroy()
         except Exception:
             pass
-    frame.rowconfigure(1, weight=1)
+    frame.rowconfigure(2, weight=1)
     frame.columnconfigure(0, weight=1)
     if not hasattr(gui, "loading_time_h"):
         gui.loading_time_h = tk.StringVar(value="")
@@ -801,6 +805,9 @@ def _install_cleavage(gui, notebook):
     ttk.Entry(controls, textvariable=gui.cleavage_reserve_mL, width=9).pack(side="left", padx=(0, 8))
     ttk.Button(controls, text="Apply cleavage", command=lambda: refresh_cleavage(gui, gui._v228_ns)).pack(side="left")
 
+    from spps_v4_gui.modules import cleavage_panel as _cleavage_panel
+    _cleavage_panel.install_post_cleavage_rescue_controls(gui, frame, row=1)
+
     tree = ttk.Treeview(frame, columns=["component", "role", "recommended_eq", "percent", "percent_basis", "volume_mL", "density_g_mL", "approx_g", "physical_state", "selected_preset", "auto_recommended_preset", "include", "note"], show="headings")
     for column in tree["columns"]:
         tree.heading(column, text=column)
@@ -808,9 +815,9 @@ def _install_cleavage(gui, notebook):
     ybar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     xbar = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
     tree.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
-    tree.grid(row=1, column=0, sticky="nsew")
-    ybar.grid(row=1, column=1, sticky="ns")
-    xbar.grid(row=2, column=0, sticky="ew")
+    tree.grid(row=2, column=0, sticky="nsew")
+    ybar.grid(row=2, column=1, sticky="ns")
+    xbar.grid(row=3, column=0, sticky="ew")
     gui.pm_cleavage_tree = tree
 
 
@@ -1009,6 +1016,7 @@ def _install_editor_traces(gui):
         "pm_loading", "pm_lot", "pm_chemistry", "pm_copies",
         "apply_loading_calc", "loading_aa_eq", "loading_diea_eq", "loading_time_h",
         "cleavage_preset", "cleavage_eq_override", "cleavage_components_text", "cleavage_time_h", "cleavage_reserve_mL",
+        "post_cleavage_rescue", "nh4i_eq", "nh4i_concentration_m", "nh4i_time_h",
         "branch_point", "branch_arm_sequence", "branch_pg", "branch_depro_condition",
         "step_overrides_text",
     ]
@@ -1034,45 +1042,25 @@ def _install_editor_traces(gui):
 
 
 def _install_action_buttons(gui, ns):
-    # Find the exact legacy action row by the Save Session Now button.
-    save_button = None
-    for widget in _walk(gui):
-        if isinstance(widget, ttk.Button):
-            try:
-                if str(widget.cget("text")) == "Save Session Now" and isinstance(widget.master, ttk.Frame):
-                    # Prefer the row inside the Selected peptide editor.
-                    siblings = [str(x.cget("text")) for x in widget.master.winfo_children() if isinstance(x, ttk.Button)]
-                    if any(text.startswith("Generate") for text in siblings):
-                        save_button = widget
-                        break
-            except Exception:
-                pass
-    if save_button is None:
-        return
-    parent = save_button.master
-    for child in list(parent.winfo_children()):
-        if isinstance(child, ttk.Button):
-            try:
-                text = str(child.cget("text"))
-            except Exception:
-                text = ""
-            if text.startswith("Generate") or text in {"Apply Change", "Apply Plan"}:
-                child.destroy()
-    # Repack in the requested order. Save is preserved, only moved.
-    try:
-        save_button.pack_forget()
-    except Exception:
-        pass
-    ttk.Button(parent, text="Generate", command=lambda: generate(gui, ns)).pack(side="left", padx=3)
-    ttk.Button(parent, text="Apply Change", command=lambda: apply_change(gui, ns)).pack(side="left", padx=3)
-    # Experimental / ML (V4): V4 advisors are next to the actual planner actions. They read the active
-    # item and can write recommendations back only after explicit Apply.
-    ttk.Button(parent, text="Recommend Conditions", command=gui.open_condition_optimizer).pack(side="left", padx=(9, 3))
-    ttk.Button(parent, text="Loading Advice", command=gui.open_loading_advisor).pack(side="left", padx=3)
-    ttk.Button(parent, text="Cleavage Advice", command=gui.open_cleavage_advisor).pack(side="left", padx=3)
-    ttk.Button(parent, text="Record Lab Data", command=gui.open_experimental_data).pack(side="left", padx=3)
-    save_button.pack(side="left", padx=3)
+    """Bind the explicit Project Manager action controls.
 
+    All controls are created by ``ClassicBaseCore`` and stored on stable
+    attributes.  This function only updates callbacks; it never searches UI
+    labels or replaces methods at runtime.
+    """
+    bindings = {
+        "pm_generate_button": lambda: generate(gui, ns),
+        "pm_apply_button": lambda: apply_change(gui, ns),
+        "pm_condition_button": gui.open_condition_optimizer,
+        "pm_loading_advice_button": gui.open_loading_advisor,
+        "pm_cleavage_advice_button": gui.open_cleavage_advisor,
+        "pm_record_lab_button": gui.open_experimental_data,
+        "pm_save_session_button": gui.save_autosave_state,
+    }
+    for attr, command in bindings.items():
+        button = getattr(gui, attr, None)
+        if button is not None:
+            button.configure(command=command)
 
 def _install_plan_toolbar(gui, ns):
     tree = gui.pm_selected_plan_tree
@@ -1316,12 +1304,16 @@ def export_outputs(gui, ns):
             "loading": item.get("loading", ""),
             "chemistry": item.get("chemistry", ""),
             "copies": item.get("copies", ""),
-            "apply_loading_calc": item.get("apply_loading_calc", False),
+            "apply_loading_calc": item.get("apply_loading_calc", True),
             "loading_aa_eq": item.get("loading_aa_eq", ""),
             "loading_diea_eq": item.get("loading_diea_eq", ""),
             "loading_time_h": item.get("loading_time_h", ""),
             "cleavage_time_h": item.get("cleavage_time_h", ""),
             "cleavage_preset": item.get("cleavage_preset", ""),
+            "post_cleavage_rescue": item.get("post_cleavage_rescue", "None"),
+            "nh4i_eq": item.get("nh4i_eq", "2"),
+            "nh4i_concentration_m": item.get("nh4i_concentration_m", "0.2"),
+            "nh4i_time_h": item.get("nh4i_time_h", "1"),
         }])
 
         xlsx = out / "project_manager_selected_outputs_v2.2.8.xlsx"

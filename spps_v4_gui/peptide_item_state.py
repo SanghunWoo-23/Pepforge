@@ -165,7 +165,7 @@ def restore_item(
             set_value(gui, name, current)
         try:
             gui.apply_loading_calc.set(
-                bool(item.get("apply_loading_calc", False))
+                bool(item.get("apply_loading_calc", True))
             )
         except Exception:
             pass

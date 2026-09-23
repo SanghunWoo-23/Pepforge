@@ -8,28 +8,32 @@ def _ops(inp):
     return generate_detailed_operations(inp)
 
 
-def test_regular_cycle_wash_order_is_depro6_coupling_post2():
+def test_regular_cycle_wash_order_matches_latest_spps_public_contract():
     m = generate_step_matrix(PlanInput(sequence="EEMQRR-NH2", scale_mmol=300))
     regular = m[m.phase == "Regular AA coupling"]
     assert not regular.empty
-    assert set(regular.dmf_wash_x.astype(int)) == {6}
-    assert set(regular.post_dmf_wash_x.astype(int)) == {2}
+    assert set(regular.dmf_wash_x.astype(int)) == {2}
+    assert set(regular.post_dmf_wash_x.astype(int)) == {6}
 
 
-def test_final_free_nterm_has_no_editable_fmoc_removal_unit():
+def test_final_free_nterm_counts_explicit_final_deprotection_in_engine_matrix():
     m = generate_step_matrix(PlanInput(sequence="EEMQRR-NH2", scale_mmol=300))
-    assert "Fmoc removal" not in set(m.unit.astype(str))
-    assert list(m.unit.astype(str))[-1] == "E"
+    final = m.iloc[-1]
+    assert final.unit == "Fmoc removal"
+    assert final.phase == "Final free N-term deprotection"
+    assert int(final.depro_x) == 2
+    assert int(final.post_dmf_wash_x) == 3
+    assert int(final.dcm_wash_x) == 3
 
 
-def test_ac_row_carries_final_depro_wash_without_dcm_final_wash():
+def test_ac_row_matches_latest_spps_public_final_cap_wash_contract():
     m = generate_step_matrix(PlanInput(sequence="Ac-EEMQRR-NH2", scale_mmol=300))
     ac = m[m.unit == "Ac"].iloc[-1]
     assert int(ac.depro_x) == 2
     assert int(ac.dmf_wash_x) == 6
     assert int(ac.reaction_x) == 1
-    assert int(ac.post_dmf_wash_x) == 0
-    assert int(ac.dcm_wash_x) == 0
+    assert int(ac.post_dmf_wash_x) == 3
+    assert int(ac.dcm_wash_x) == 3
     assert "Fmoc removal" not in set(m.unit.astype(str))
 
 

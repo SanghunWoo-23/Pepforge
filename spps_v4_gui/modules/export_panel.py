@@ -1,4 +1,4 @@
-"""Export routing helpers for SPPS Planner V4.0.0."""
+"""Export routing helpers for SPPS Planner V5.0.0."""
 from __future__ import annotations
 from pathlib import Path
 from . import gui_common as state

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from peptiforg_core.version import PEPFORGE_VERSION
+
 """Pepforge PyMOL Structure Builder compatibility layer.
 
-Pepforge V3.0.0 integrates the standalone Pepforge PyMOL Structure Tool v1.3.0.
+Pepforge V4.0.0 integrates the standalone Pepforge PyMOL Structure Tool v1.5.0.
 This wrapper preserves the earlier Pepforge GUI/API names while delegating actual
 3D generation to the RDKit-backed, attachment-aware builder.
 """
@@ -11,6 +13,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import csv
 import json
+import os
+import re
 import shutil
 import tempfile
 
@@ -42,7 +46,7 @@ class PeptideToken:
 def tokenize_modified_peptide(sequence: str) -> list[str]:
     """Compatibility tokenizer used by earlier Pepforge tests/UI.
 
-    The Pepforge V3.0.0 builder delegates generation to pepforge_structure_tool v1.3.0,
+    The Pepforge V4.0.0 builder delegates generation to pepforge_structure_tool v1.5.0,
     but this function keeps the simple public token list stable.
     """
     import re
@@ -154,6 +158,51 @@ def _path_needs_ascii_stage(path: Path) -> bool:
     return any(ord(ch) > 127 for ch in text) or "#" in text
 
 
+def _ascii_safe_stage_root(namespace: str) -> Path:
+    """Return an ASCII-safe writable staging root for RDKit exports.
+
+    RDKit can fail on some Windows Unicode paths.  ``tempfile.gettempdir()`` is
+    not sufficient because it often expands to an ASCII-unsafe user profile
+    path such as ``C:/Users/<unicode>/AppData``.
+    Prefer short, ASCII-only roots and probe them before use.
+    """
+    namespace = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(namespace or "pymol_structure_builder")).strip("._") or "pymol_structure_builder"
+    candidates: list[Path] = []
+    explicit = os.environ.get("PEPFORGE_ASCII_RUNTIME", "").strip()
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    if os.name == "nt":
+        system_drive = os.environ.get("SystemDrive", "C:") or "C:"
+        candidates.extend([
+            Path(f"{system_drive}/Pepforge_Runtime"),
+            Path(f"{system_drive}/Temp/Pepforge_Runtime"),
+            Path(f"{system_drive}/Users/Public/Pepforge_Runtime"),
+            Path.cwd() / "Pepforge_Runtime",
+        ])
+    else:
+        candidates.extend([
+            Path("/tmp/Pepforge_Runtime"),
+            Path.cwd() / "Pepforge_Runtime",
+            Path(tempfile.gettempdir()) / "Pepforge_Runtime",
+        ])
+    for base in candidates:
+        if _path_needs_ascii_stage(base):
+            continue
+        stage = base / namespace
+        try:
+            stage.mkdir(parents=True, exist_ok=True)
+            probe = stage / ".pepforge_stage_probe.tmp"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return stage
+        except Exception:
+            continue
+    # Final fallback: use tempfile and sanitize later if possible.
+    fallback = Path(tempfile.gettempdir()) / "Pepforge_Runtime" / namespace
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
 def _prepare_safe_output_dir(output_dir: str | Path, namespace: str = "pymol_structure_builder") -> tuple[Path, Path, bool]:
     requested = Path(output_dir).expanduser()
     requested.mkdir(parents=True, exist_ok=True)
@@ -162,13 +211,11 @@ def _prepare_safe_output_dir(output_dir: str | Path, namespace: str = "pymol_str
     try:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
-    except Exception as exc:
-        fallback = Path(tempfile.gettempdir()) / "Pepforge_Runtime" / namespace
-        fallback.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        fallback = _ascii_safe_stage_root(namespace)
         return requested, fallback, True
     if _path_needs_ascii_stage(requested):
-        fallback = Path(tempfile.gettempdir()) / "Pepforge_Runtime" / namespace
-        fallback.mkdir(parents=True, exist_ok=True)
+        fallback = _ascii_safe_stage_root(namespace)
         return requested, fallback, True
     return requested, requested, False
 
@@ -190,6 +237,27 @@ def _copy_outputs_to_requested(paths: dict[str, str], requested: Path, stage: Pa
                 out[key] = str(src)
         else:
             out[key] = value
+
+    # JSON/PML/report files may contain paths generated in the ASCII staging
+    # folder. Rewrite those references after copy-back so a Korean/Unicode
+    # destination is self-contained instead of depending on a temp directory.
+    stage_forms = {str(stage), stage.as_posix()}
+    requested_text = str(requested)
+    requested_posix = requested.as_posix()
+    for value in set(out.values()):
+        dst = Path(value)
+        if not dst.is_file() or dst.suffix.lower() not in {".json", ".pml", ".txt", ".csv", ".md"}:
+            continue
+        try:
+            text = dst.read_text(encoding="utf-8", errors="ignore")
+            updated = text
+            for stage_text in stage_forms:
+                replacement = requested_posix if "/" in stage_text else requested_text
+                updated = updated.replace(stage_text, replacement)
+            if updated != text:
+                dst.write_text(updated, encoding="utf-8")
+        except Exception:
+            LOGGER.debug("Could not rewrite staged paths in %s", dst, exc_info=True)
     return out
 
 
@@ -211,7 +279,7 @@ def export_modified_peptide_coordinate_seed(
     import re
     from rdkit import Chem
     from rdkit.Chem import AllChem
-    from pepforge_structure_tool.pepforge_core import expand_and_tokenize, tokens_to_smiles
+    from pepforge_structure_tool.pepforge_core import expand_and_tokenize, tokens_to_smiles, _write_residue_aware_pdb
 
     requested_out, out, staged = _prepare_safe_output_dir(output_dir, "docking_coordinate_seed")
     sequence_for_build = re.sub(r"([A-Za-z])\[([^\]]+)\]", r"\1(\2)", sequence or "")
@@ -249,9 +317,9 @@ def export_modified_peptide_coordinate_seed(
         raise OSError(f"RDKit SDWriter returned None for {sdf_path}")
     writer.write(mol, confId=conf_id)
     writer.close()
-    Chem.MolToPDBFile(mol, str(pdb_path), confId=conf_id)
+    _write_residue_aware_pdb(pdb_path, mol, atom_ranges, sequence=sequence, tokens=tokens)
     metadata = {
-        "pepforge_version": "3.0.0",
+        "pepforge_version": PEPFORGE_VERSION,
         "structure_component_version": STRUCTURE_TOOL_VERSION,
         "input": sequence,
         "smiles": smiles,
@@ -281,7 +349,7 @@ def export_modified_peptide_structure(
 ) -> dict[str, str]:
     """Export RDKit-backed SDF/PDB/JSON/report/PML plus a token-map CSV.
 
-    Pepforge V3.0.0 path-safety behavior:
+    Pepforge V4.0.0 path-safety behavior:
     - writes RDKit outputs in an ASCII-safe staging directory when the selected
       Windows path contains Korean/non-ASCII characters or shell-sensitive
       characters such as '#';
@@ -304,7 +372,7 @@ def export_modified_peptide_structure(
         min_final_conformers=max(1, int(min_final_conformers)),
         max_embedding_retries=max(0, int(max_embedding_retries)),
     )
-    pml = make_pymol_pml(result.meta_path, prefer="sdf")
+    pml = make_pymol_pml(result.meta_path, prefer="pdb")
 
     meta_path = Path(result.meta_path)
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -319,16 +387,21 @@ def export_modified_peptide_structure(
         "set antialias, 2",
         "set cartoon_fancy_helices, 1",
         "set cartoon_smooth_loops, 1",
+        "set seq_view, 1",
+        "hide everything, elem H",
     ]
+    family_rows = (meta.get("conformation_analysis") or {}).get("top_conformers") or []
     for rank, pdb_value in enumerate(meta.get("top5_conformer_pdb_paths") or [], start=1):
-        pdb_file = Path(pdb_value)
-        family_rows = (meta.get("conformation_analysis") or {}).get("top_conformers") or []
-        family = str(family_rows[rank - 1].get("family", "conformer")) if rank <= len(family_rows) else "conformer"
+        row = family_rows[rank - 1] if rank <= len(family_rows) else {}
+        display_value = row.get("canonical_view_pdb") or pdb_value
+        pdb_file = Path(display_value)
+        family = str(row.get("family", "conformer"))
         obj = re.sub(r"[^A-Za-z0-9_]+", "_", f"rank{rank}_{family}")
         top5_lines.extend([
-            f'load "{pdb_file.as_posix()}", {obj}',
+            f'load "{pdb_file.name}", {obj}',
             f"hide everything, {obj}",
-            f"show sticks, {obj}",
+            f"show cartoon, {obj}",
+            f"show sticks, {obj} and sidechain",
             f"color {palette[(rank - 1) % len(palette)]}, {obj}",
         ])
     top5_lines.extend(["group Pepforge_Top5, rank*", "orient Pepforge_Top5", "zoom Pepforge_Top5", "set ray_opaque_background, off"])
@@ -372,6 +445,7 @@ def export_modified_peptide_structure(
     paths = {
         "sdf": str(result.sdf_path),
         "pdb": str(result.pdb_path),
+        "canonical_view_pdb": str(meta.get("canonical_view_pdb_path")) if meta.get("canonical_view_pdb_path") else "",
         "json": str(result.meta_path),
         "report": str(result.report_path),
         "pml": str(pml),
@@ -389,7 +463,12 @@ def export_modified_peptide_structure(
         value = meta.get(meta_key)
         if value and Path(value).exists():
             paths[key] = str(value)
+    family_rows = (meta.get("conformation_analysis") or {}).get("top_conformers") or []
     for rank, value in enumerate(meta.get("top5_conformer_pdb_paths") or [], start=1):
         if value and Path(value).exists():
             paths[f"top{rank}_pdb"] = str(value)
+        if rank <= len(family_rows):
+            canonical_value = family_rows[rank - 1].get("canonical_view_pdb")
+            if canonical_value and Path(canonical_value).exists():
+                paths[f"top{rank}_canonical_view_pdb"] = str(canonical_value)
     return _copy_outputs_to_requested(paths, requested_out, out)

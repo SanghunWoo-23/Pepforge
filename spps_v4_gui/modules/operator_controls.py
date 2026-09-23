@@ -12,8 +12,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any
 
-APP_VERSION = "V4.0.0"
-VERSION_LABEL = "SPPS Planner V4.0.0"
+APP_VERSION = "V5.0.0"
+VERSION_LABEL = "SPPS Planner V5.0.0"
 
 
 def _walk(widget):

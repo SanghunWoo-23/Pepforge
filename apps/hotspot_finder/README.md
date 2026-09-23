@@ -314,6 +314,7 @@ Each run produces:
 ```text
 hotspot_full_YYYYMMDD_HHMMSS.csv
 hotspot_top_YYYYMMDD_HHMMSS.csv
+hotspot_ranked_regions_YYYYMMDD_HHMMSS.csv
 analysis_config_YYYYMMDD_HHMMSS.json
 input_used_YYYYMMDD_HHMMSS.fasta
 token_db_used_YYYYMMDD_HHMMSS.csv
@@ -335,7 +336,9 @@ If optional CSVs were used, they are also included in the result ZIP.
 | 0.00–0.50 | low candidate |
 | NaN | annotation-only token such as Ac, FITC, NH2 |
 
-The score is not a binding free energy or experimental ΔΔG. It is a prioritization score.
+The residue `hotspot_score` is not a binding free energy or experimental ΔΔG. It is a prioritization score.
+
+`hotspot_ranked_regions_*.csv` contains non-overlapping local-region recommendations with `rank`, `region_start`, `region_end`, `region_sequence`, `center_position`, `hotspot_residues`, and `priority_score`. Region `priority_score` is for within-run ordering only; it is not a binding probability, affinity, or experimental hotspot validation.
 
 ---
 

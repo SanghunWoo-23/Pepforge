@@ -141,7 +141,8 @@ def recent_path(gui: Any) -> Path:
     try:
         return Path(gui._state_file_path()).parent / "recent_projects.json"
     except Exception:
-        return Path.home() / ".spps_planner" / "recent_projects.json"
+        from spps_planner.build_profile import FALLBACK_DOT_DIR
+        return Path.home() / FALLBACK_DOT_DIR / "recent_projects.json"
 
 
 def add_recent(gui: Any, path: str | Path, *, recovered: bool = False) -> None:

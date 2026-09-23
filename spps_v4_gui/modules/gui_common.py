@@ -1,4 +1,4 @@
-"""Shared Tk Project Manager helpers for SPPS Planner V4.0.0.
+"""Shared Tk Project Manager helpers for SPPS Planner V5.0.0.
 
 This module is the first real extraction from the historical 43k-line Tk file.
 It owns state snapshots, list refresh, tree export, PlanInput construction, and
@@ -236,6 +236,7 @@ def blank_item(gui, n: int = 1) -> dict[str, Any]:
         "default_reagent": "DIC", "default_catalyst": "HOBt", "default_base": "", "default_coupling_solution_solvent": "DMF",
         "auto_short_peptide_eq": True, "short_peptide_coupling_eq": "2", "step_overrides_text": "",
         "cleavage_eq_override": "0", "cleavage_preset": "AUTO", "cleavage_components_text": "", "cleavage_time_h": "",
+        "post_cleavage_rescue": "None", "nh4i_eq": "2", "nh4i_concentration_m": "0.2", "nh4i_time_h": "1",
     }
 
 
@@ -278,6 +279,10 @@ def save_active(gui) -> None:
         "step_overrides_text": get_text_widget_value(gui, "step_overrides_text_widget", item.get("step_overrides_text", "")),
         "cleavage_components_text": get_var(gui, "cleavage_components_text", item.get("cleavage_components_text", "")),
         "cleavage_time_h": get_var(gui, "cleavage_time_h", item.get("cleavage_time_h", "")),
+        "post_cleavage_rescue": get_var(gui, "post_cleavage_rescue", item.get("post_cleavage_rescue", "None")),
+        "nh4i_eq": get_var(gui, "nh4i_eq", item.get("nh4i_eq", "2")),
+        "nh4i_concentration_m": get_var(gui, "nh4i_concentration_m", item.get("nh4i_concentration_m", "0.2")),
+        "nh4i_time_h": get_var(gui, "nh4i_time_h", item.get("nh4i_time_h", "1")),
     })
     # Never let a blank editor erase a valid item during duplicate/delete/reorder.
     for key in ("project", "peptide", "sequence", "scale", "resin", "loading", "lot", "lot_no", "chemistry", "copies"):
@@ -321,6 +326,10 @@ def load_item_to_editor(gui, idx: int) -> None:
         ("cleavage_preset", "cleavage_preset", "AUTO"),
         ("cleavage_components_text", "cleavage_components_text", ""),
         ("cleavage_time_h", "cleavage_time_h", ""),
+        ("post_cleavage_rescue", "post_cleavage_rescue", "None"),
+        ("nh4i_eq", "nh4i_eq", "2"),
+        ("nh4i_concentration_m", "nh4i_concentration_m", "0.2"),
+        ("nh4i_time_h", "nh4i_time_h", "1"),
     ]:
         value = item.get(key, default)
         if attr == "pm_lot" and not value:
@@ -387,6 +396,10 @@ def metadata(gui, inp=None) -> dict[str, Any]:
         "cleavage_eq_override": inp.cleavage_eq_override,
         "cleavage_preset": inp.cleavage_preset,
         "cleavage_components_text": inp.cleavage_components_text,
+        "post_cleavage_rescue": get_var(gui, "post_cleavage_rescue", item.get("post_cleavage_rescue", "None")),
+        "nh4i_eq": get_var(gui, "nh4i_eq", item.get("nh4i_eq", "2")),
+        "nh4i_concentration_m": get_var(gui, "nh4i_concentration_m", item.get("nh4i_concentration_m", "0.2")),
+        "nh4i_time_h": get_var(gui, "nh4i_time_h", item.get("nh4i_time_h", "1")),
     }
 
 

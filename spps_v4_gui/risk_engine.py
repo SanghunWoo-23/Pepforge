@@ -10,7 +10,10 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
-from spps_planner.parser import parse_sequence
+try:
+    from apps.spps_planner_app.spps_planner.parser import parse_sequence
+except ImportError:
+    from spps_planner.parser import parse_sequence
 
 
 ENGINE_VERSION = "3.0.0-rules.1"

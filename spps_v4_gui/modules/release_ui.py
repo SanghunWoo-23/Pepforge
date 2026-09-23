@@ -1,4 +1,4 @@
-"""SPPS Planner V4.0.0 final release adjustments.
+"""SPPS Planner V5.0.0 release UI normalization.
 
 This final layer is deliberately narrow: it preserves the accepted V2.2.15
 workflow and only normalizes startup, cleavage preset display names, and release
@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+from spps_v4_gui.resin_profiles import bind_resin_loading_autofill
 
-APP_VERSION = "V4.0.0"
-VERSION_LABEL = "SPPS Planner V4.0.0"
+APP_VERSION = "V5.0.0"
+VERSION_LABEL = "SPPS Planner V5.0.0"
 
 
 ACTIVE_RESINS = [
@@ -90,6 +91,13 @@ def _enforce_resin_choices(gui):
         pass
 
 
+    # Restore original resin -> default loading synchronization.
+    try:
+        bind_resin_loading_autofill(gui)
+    except Exception:
+        pass
+
+
 def _walk(widget):
     try:
         children = widget.winfo_children()
@@ -112,10 +120,15 @@ def _blank_item():
         "lot": "",
         "chemistry": "DIC/HOBt",
         "status": "Ready",
+        "apply_loading_calc": True,
         "cleavage_preset": "AUTO",
         "cleavage_components_text": "",
         "loading_time_h": "",
         "cleavage_time_h": "",
+        "post_cleavage_rescue": "None",
+        "nh4i_eq": "2",
+        "nh4i_concentration_m": "0.2",
+        "nh4i_time_h": "1",
     }
 
 
@@ -299,7 +312,7 @@ def _bind_resin_live_preview(gui, ns):
 
     Several legacy UI layers rebuild or replace bindings during startup, so the
     earlier Solvents/Wash trace can point at a stale variable.  Bind once more
-    at the final V3.0.0 layer and also listen to the actual ComboboxSelected
+    at the final V4.0.0 layer and also listen to the actual ComboboxSelected
     event.  This changes display refresh only; it does not generate/recalculate
     a Plan.
     """
@@ -356,7 +369,7 @@ def _bind_resin_live_preview(gui, ns):
 
 
 def apply_post_build(gui, ns):
-    """Apply the accepted V3.0.0 display/startup corrections."""
+    """Apply the accepted V4.0.0 display/startup corrections."""
     _ensure_one_start_item(gui)
     _enforce_resin_choices(gui)
     _bind_resin_live_preview(gui, ns)

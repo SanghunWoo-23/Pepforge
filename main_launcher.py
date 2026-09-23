@@ -5,13 +5,19 @@ import contextlib
 import os
 import subprocess
 import sys
+import threading
 import traceback
 import logging
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-APP_VERSION = "3.0.0"
+from peptiforg_core.version import PEPFORGE_VERSION
+
+APP_VERSION = PEPFORGE_VERSION
+LAUNCHER_SIDEBAR_WIDTH = 220
+LAUNCHER_CONTEXT_WIDTH = 420
+LAUNCHER_CENTER_MIN_WIDTH = 620
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APPS = ROOT / "apps"
 
@@ -96,12 +102,67 @@ def _run_subprocess(tool: str) -> None:
 
 
 def run_peptide_design_engine() -> None:
+    """Open PDE without making Windows look frozen during the heavy first import."""
     _ensure_runtime_environment()
     app_dir = APPS / "peptide_design_engine" / "Python"
     _add_to_path(app_dir)
+
+    state = {"module": None, "error": None}
+    loader = tk.Tk()
+    loader.title("Pepforge Peptide Design Engine")
+    loader.resizable(False, False)
+    _apply_icon(loader)
+    box = ttk.Frame(loader, padding=18)
+    box.pack(fill="both", expand=True)
+    ttk.Label(box, text="Peptide Design Engine", font=("Segoe UI Semibold", 13)).pack(anchor="w")
+    ttk.Label(box, text="Loading design engine...", padding=(0, 8, 0, 0)).pack(anchor="w")
+    bar = ttk.Progressbar(box, mode="indeterminate", length=360)
+    bar.pack(fill="x", pady=(10, 0))
+    # Avoid a distracting loading-window flash when the import is already warm.
+    # The loader becomes visible only if initialization actually takes noticeable time.
+    loader.withdraw()
+
+    def _load() -> None:
+        try:
+            import importlib
+            state["module"] = importlib.import_module("desktop_gui")
+        except Exception:
+            state["error"] = traceback.format_exc()
+
+    worker = threading.Thread(target=_load, daemon=True, name="PepforgePDEImport")
+    worker.start()
+
+    def _show_loader_if_needed() -> None:
+        if not worker.is_alive() or not loader.winfo_exists():
+            return
+        loader.deiconify()
+        bar.start(12)
+        loader.update_idletasks()
+        try:
+            loader.eval('tk::PlaceWindow . center')
+        except Exception:
+            pass
+
+    def _poll() -> None:
+        if worker.is_alive():
+            loader.after(50, _poll)
+            return
+        try:
+            bar.stop()
+        except Exception:
+            pass
+        loader.destroy()
+
+    loader.after(250, _show_loader_if_needed)
+    loader.after(50, _poll)
+    loader.mainloop()
+    if state["error"]:
+        raise RuntimeError(state["error"])
+    module = state["module"]
+    if module is None:
+        raise RuntimeError("Peptide Design Engine could not be loaded.")
     with _pushd(app_dir):
-        from desktop_gui import main
-        main()
+        module.main()
 
 
 def run_hotspot_finder() -> None:
@@ -195,6 +256,7 @@ def launcher_main() -> None:
 
     density_var = tk.StringVar(value="Standard")
     selected_tool = tk.StringVar(value="hotspot")
+    selected_tool_name = tk.StringVar(value="Hotspot Finder")
     run_status = tk.StringVar(value="Ready")
     apply_pepforge_theme(root, density_var.get())
 
@@ -257,6 +319,7 @@ def launcher_main() -> None:
             return
         selected_tool.set(tool)
         data = tools[tool]
+        selected_tool_name.set(data["name"])
         detail_title.configure(text=data["name"])
         detail_summary.configure(text=data["summary"])
         workflow_value.configure(text=data["workflow"])
@@ -292,7 +355,7 @@ def launcher_main() -> None:
         messagebox.showinfo(
             "About Pepforge",
             f"Pepforge V{APP_VERSION}\n\n"
-            "Modern / Classic Hybrid Workspace\n"
+            "Evidence-driven peptide design and synthesis workspace\n"
             "Modified-peptide design, conformational preparation, SPPS planning, screening, and external-validation hand-off.\n\n"
             "Pepforge does not present external Vina or GROMACS calculations as internal results.",
             parent=root,
@@ -333,20 +396,24 @@ def launcher_main() -> None:
     shell.grid(row=0, column=0, sticky="nsew")
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
-    shell.columnconfigure(0, weight=0)
-    shell.columnconfigure(1, weight=3)
-    shell.columnconfigure(2, weight=2)
+    # Stable three-panel contract: changing the selected tool never changes the
+    # sidebar/context widths. The center remains the only horizontally elastic
+    # panel when the user resizes the launcher.
+    shell.columnconfigure(0, weight=0, minsize=LAUNCHER_SIDEBAR_WIDTH)
+    shell.columnconfigure(1, weight=1, minsize=LAUNCHER_CENTER_MIN_WIDTH)
+    shell.columnconfigure(2, weight=0, minsize=LAUNCHER_CONTEXT_WIDTH)
     shell.rowconfigure(1, weight=1)
 
     header = ttk.Frame(shell)
     header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
     header.columnconfigure(0, weight=1)
     ttk.Label(header, text="Pepforge", style="Title.TLabel").grid(row=0, column=0, sticky="w")
-    ttk.Label(header, text=f"V{APP_VERSION}  •  Modern / Classic Hybrid Workspace", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
+    ttk.Label(header, text=f"V{APP_VERSION}  •  Evidence-driven peptide research workspace", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
     ttk.Label(header, textvariable=run_status, style="Muted.TLabel").grid(row=0, column=1, rowspan=2, sticky="e")
 
-    sidebar = ttk.Frame(shell, style="Surface.TFrame", padding=(10, 12))
+    sidebar = ttk.Frame(shell, style="Surface.TFrame", padding=(10, 12), width=LAUNCHER_SIDEBAR_WIDTH)
     sidebar.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
+    sidebar.grid_propagate(False)
     sidebar.columnconfigure(0, weight=1)
     row = 0
     for group in ("WORKFLOW", "ADVANCED"):
@@ -384,12 +451,13 @@ def launcher_main() -> None:
     launch_button.pack(side="left")
     ttk.Button(action_bar, text="Open workspace", command=open_selected_workspace).pack(side="left", padx=(8, 0))
 
-    context = ttk.Frame(shell, style="Surface.TFrame", padding=(18, 18))
+    context = ttk.Frame(shell, style="Surface.TFrame", padding=(18, 18), width=LAUNCHER_CONTEXT_WIDTH)
     context.grid(row=1, column=2, sticky="nsew")
+    context.grid_propagate(False)
     context.columnconfigure(0, weight=1)
     ttk.Label(context, text="CONTEXT", style="SurfaceMuted.TLabel", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
     ttk.Label(context, text="Selected tool", style="SurfaceSection.TLabel").grid(row=1, column=0, sticky="w", pady=(13, 3))
-    selected_label = ttk.Label(context, textvariable=selected_tool, style="SurfaceMuted.TLabel")
+    selected_label = ttk.Label(context, textvariable=selected_tool_name, style="SurfaceMuted.TLabel")
     selected_label.grid(row=2, column=0, sticky="w")
     ttk.Label(context, text="Sandbox workspace", style="SurfaceSection.TLabel").grid(row=3, column=0, sticky="w", pady=(18, 3))
     sandbox_value = ttk.Label(context, text="", style="SurfaceMuted.TLabel", wraplength=360, justify="left")

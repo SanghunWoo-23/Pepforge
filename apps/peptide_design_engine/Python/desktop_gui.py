@@ -16,6 +16,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 import contextlib
+import importlib
 import csv
 import json
 import os
@@ -26,7 +27,6 @@ import sys
 import threading
 import traceback
 import webbrowser
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -50,7 +50,10 @@ PROJECT_ROOT = PYTHON_DIR.parents[2] if len(PYTHON_DIR.parents) >= 3 else ROOT_D
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 from peptiforg_core.sandbox_runtime import configured_output  # noqa: E402
-from peptiforg_core.ui_theme import apply_pepforge_theme, BACKGROUND  # noqa: E402
+from peptiforg_core.output_bundle import create_result_bundle, write_bundle_manifest  # noqa: E402
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window, BACKGROUND  # noqa: E402
+from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible  # noqa: E402
+from peptiforg_core.msds_lookup import peptide_chemistry_terms, show_msds_lookup, unique_terms  # noqa: E402
 try:
     from peptiforg_core.ui_helpers import set_pepforge_icon  # noqa: E402
 except Exception:
@@ -76,10 +79,22 @@ try:
     import data_manager  # noqa: E402
 except Exception:
     data_manager = None
-try:
-    import ml_trainer  # noqa: E402
-except Exception:
-    ml_trainer = None
+_ML_TRAINER = None
+_ML_TRAINER_IMPORT_ERROR = None
+
+def _get_ml_trainer():
+    """Import the optional trainer only when training/reranking is requested."""
+    global _ML_TRAINER, _ML_TRAINER_IMPORT_ERROR
+    if _ML_TRAINER is not None:
+        return _ML_TRAINER
+    if _ML_TRAINER_IMPORT_ERROR is not None:
+        return None
+    try:
+        _ML_TRAINER = importlib.import_module("ml_trainer")
+    except Exception as exc:
+        _ML_TRAINER_IMPORT_ERROR = exc
+        return None
+    return _ML_TRAINER
 try:
     import external_parsers  # noqa: E402
 except Exception:
@@ -146,14 +161,8 @@ def write_rows(path: Path, rows: List[Dict[str, Any]]) -> None:
 
 
 def rebuild_output_zip(output_dir: Path) -> str:
-    zip_path = output_dir.with_suffix(".zip")
-    if zip_path.exists():
-        zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in output_dir.rglob("*"):
-            if p.is_file():
-                z.write(p, p.relative_to(output_dir))
-    return str(zip_path)
+    """Rebuild the PDE package inside the active result bundle."""
+    return str(eng.rebuild_output_zip(output_dir))
 
 
 def open_path(path: Path) -> None:
@@ -184,16 +193,17 @@ class PeptideDesktopGUI(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Pepforge Peptide Design Engine")
+        self._startup_trace = StartupTrace("peptide_design_engine", PROJECT_ROOT / "workspace" / "design" / "logs")
         set_pepforge_icon(self)
         apply_pepforge_theme(self)
-        self.geometry("1180x820")
-        self.minsize(1040, 720)
+        fit_window(self, preferred_width=1180, preferred_height=820, minimum_width=1040, minimum_height=720)
         self._app_icon_img = None
         self._header_logo_img = None
         self._splash_photo = None
         self._splash = None
         self._set_window_icon()
-        self._show_splash()
+        if str(os.environ.get("PEPFORGE_SPLASH", "0")).strip().lower() in {"1", "true", "yes"}:
+            self._show_splash()
 
         self.msg_q: queue.Queue = queue.Queue()
         self.worker: Optional[threading.Thread] = None
@@ -206,27 +216,49 @@ class PeptideDesktopGUI(tk.Tk):
         self._build_ui()
         self._install_settings_change_tracking()
         self.after(100, self._poll_queue)
-        self.after(950, self._close_splash)
+        self.after(700, self._poll_workflow_hotspot_selection)
+        if self._splash is not None:
+            self.after(350, self._close_splash)
+        mark_window_visible(self, self._startup_trace)
+
+    def _poll_workflow_hotspot_selection(self) -> None:
+        try:
+            folder = getattr(self, "_workflow_project_dir", None)
+            if folder is not None:
+                project_path = Path(folder) / "project.json"
+                if project_path.exists():
+                    payload = json.loads(project_path.read_text(encoding="utf-8"))
+                    selected = payload.get("selected_hotspots") or []
+                    row = selected[0] if selected else {}
+                    sequence = str(row.get("sequence", "") or "").strip()
+                    signature = (str(row.get("rank", "")), sequence)
+                    if sequence and signature != self._workflow_hotspot_signature:
+                        self._workflow_hotspot_signature = signature
+                        if self.var_targets.get().strip() != sequence:
+                            self.var_targets.set(sequence)
+                        profile = Path(folder) / "design" / "hotspot_chemistry_profile_for_PDE.json"
+                        if profile.exists():
+                            os.environ["PEPFORGE_HOTSPOT_PROFILE"] = str(profile)
+        except Exception:
+            LOGGER.debug("Workflow Hot Spot live sync skipped", exc_info=True)
+        finally:
+            self.after(700, self._poll_workflow_hotspot_selection)
 
     # --------------------------- branding ---------------------------
     def _set_window_icon(self) -> None:
-        try:
-            ico = resource_path("assets/PeptideDesignEngine_Icon.ico")
-            png = resource_path("assets/PeptideDesignEngine_Icon.png")
-            if ico.exists():
-                self.iconbitmap(str(ico))
-            elif Image is not None and ImageTk is not None and png.exists():
-                im = Image.open(png).resize((64, 64), Image.Resampling.LANCZOS)
-                self._app_icon_img = ImageTk.PhotoImage(im)
-                self.iconphoto(True, self._app_icon_img)
-        except Exception:
-            LOGGER.debug("Optional operation skipped", exc_info=True)
+        # Pepforge V4 uses one suite-level application icon across all first-party
+        # windows so legacy component artwork does not make individual tools look
+        # like separate/unmodernized applications.
+        set_pepforge_icon(self)
+
     def _show_splash(self) -> None:
         try:
             splash_path = resource_path("assets/PeptideDesignEngine_Splash.png")
             if Image is None or ImageTk is None or not splash_path.exists():
                 return
             splash = tk.Toplevel(self)
+            set_pepforge_icon(splash)
+            apply_pepforge_theme(splash)
             splash.overrideredirect(True)
             splash.attributes("-topmost", True)
             im = Image.open(splash_path)
@@ -253,11 +285,23 @@ class PeptideDesktopGUI(tk.Tk):
     # --------------------------- vars ---------------------------
     def _build_vars(self) -> None:
         c = eng.CONFIG
+        workflow_target = str(os.environ.get("PEPFORGE_WORKFLOW_TARGET_SEQUENCE", "") or "").strip()
+        workflow_project = str(os.environ.get("PEPFORGE_WORKFLOW_PROJECT", "") or "").strip()
+        self._workflow_project_dir = Path(workflow_project).expanduser() if workflow_project else None
+        if self._workflow_project_dir is not None and not (self._workflow_project_dir / "project.json").exists():
+            self._workflow_project_dir = None
+        self._workflow_hotspot_signature = None
         self.var_preset = tk.StringVar(value="custom")
-        self.var_targets = tk.StringVar(value="")
+        self.var_targets = tk.StringVar(value=workflow_target)
         self.var_target_mode = tk.StringVar(value=c.get("TARGET_MODE_LABEL", "MULTI"))
         self.var_design_mode = tk.StringVar(value=c.get("DESIGN_MODE", "MULTI_TARGET_BINDER"))
         self.var_binder_mode = tk.StringVar(value=c.get("BINDER_MODE", "BALANCED"))
+        self.var_pde_objective_mode = tk.StringVar(value=c.get("PDE_OBJECTIVE_MODE", "BALANCED"))
+        self.var_preferred_structure = tk.StringVar(value=c.get("PREFERRED_STRUCTURE", "NONE"))
+        self.var_structure_bias = tk.StringVar(value=c.get("STRUCTURE_BIAS", "BALANCED"))
+        self.var_structure_environment = tk.StringVar(value=c.get("STRUCTURE_ENVIRONMENT", "AQUEOUS"))
+        self.var_conformational_strategy = tk.StringVar(value=c.get("CONFORMATIONAL_STRATEGY", "PREORGANIZED"))
+        self.var_hotspot_complementarity_mode = tk.StringVar(value=c.get("HOTSPOT_COMPLEMENTARITY_MODE", "REPORT_ONLY"))
 
         self.var_pop = tk.IntVar(value=int(c.get("POP", 200)))
         self.var_gen = tk.IntVar(value=int(c.get("GEN", 20)))
@@ -307,7 +351,7 @@ class PeptideDesktopGUI(tk.Tk):
 
         self.var_auto_hotspot = tk.BooleanVar(value=to_bool(c.get("AUTO_HOTSPOT", False)))
         self.var_hotspot_source = tk.StringVar(value=c.get("HOTSPOT_SOURCE", "SEQUENCE"))
-        self.var_hotspot_sequence = tk.StringVar(value=c.get("HOTSPOT_SEQUENCE", ""))
+        self.var_hotspot_sequence = tk.StringVar(value=workflow_target or c.get("HOTSPOT_SEQUENCE", ""))
         self.var_hotspot_pdb_file = tk.StringVar(value="")
         self.var_hotspot_window = tk.IntVar(value=int(c.get("HOTSPOT_WINDOW", 6)))
         self.var_hotspot_topk = tk.IntVar(value=int(c.get("HOTSPOT_TOPK", 5)))
@@ -360,7 +404,7 @@ class PeptideDesktopGUI(tk.Tk):
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(2, weight=1)
 
-        logo_path = resource_path("assets/PeptideDesignEngine_Icon.png")
+        logo_path = PROJECT_ROOT / "assets" / "Pepforge_Icon.png"
         if Image is not None and ImageTk is not None and logo_path.exists():
             try:
                 im = Image.open(logo_path).resize((54, 54), Image.Resampling.LANCZOS)
@@ -470,7 +514,7 @@ class PeptideDesktopGUI(tk.Tk):
         preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_preset_to_ui(), add=True)
         self._row_combo(inner, 4, "Target Scope", self.var_target_mode, ["SINGLE", "MULTI", "BRIDGE"])
         self._row_combo(inner, 5, "Design Strategy", self.var_design_mode, ["SINGLE_TARGET", "MULTI_TARGET_BINDER", "BRIDGE_LINKER"])
-        self._row_combo(inner, 6, "Optimization Goal", self.var_binder_mode, ["BALANCED", "AFFINITY_FIRST", "DEVELOPABILITY", "DUAL_BINDER", "CYCLIC_PEPTIDE"])
+        self._row_combo(inner, 6, "Legacy Binder Profile", self.var_binder_mode, ["BALANCED", "AFFINITY_FIRST", "DEVELOPABILITY", "DUAL_BINDER", "CYCLIC_PEPTIDE"])
         self._row_entry(inner, 7, "Candidates / Generation", self.var_pop)
         self._row_entry(inner, 8, "Optimization Generations", self.var_gen)
         self._row_entry(inner, 9, "Final Candidates", self.var_topk)
@@ -501,13 +545,35 @@ class PeptideDesktopGUI(tk.Tk):
         ttk.Combobox(inner, textvariable=self.var_length_metric, values=["TOKEN", "RESIDUE", "EXPANDED"], state="readonly").grid(row=7, column=3, sticky="ew", padx=6, pady=4)
         ttk.Checkbutton(inner, text="Trim to length", variable=self.var_trim).grid(row=8, column=2, columnspan=2, sticky="w", padx=6, pady=4)
 
-        ttk.Label(inner, text="Output Folder").grid(row=11, column=0, sticky="w", padx=6, pady=(14, 4))
-        ttk.Entry(inner, textvariable=self.var_outdir).grid(row=11, column=1, columnspan=2, sticky="ew", padx=6, pady=(14, 4))
-        ttk.Button(inner, text="Browse", command=lambda: self._pick_dir(self.var_outdir)).grid(row=11, column=3, sticky="w", padx=6, pady=(14, 4))
+        objective_frame = ttk.LabelFrame(inner, text="Scientific Design Objective", padding=8)
+        objective_frame.grid(row=11, column=0, columnspan=4, sticky="ew", padx=6, pady=(12, 6))
+        for cidx in range(4): objective_frame.columnconfigure(cidx, weight=1)
+        self._row_combo(objective_frame, 0, "PDE Objective", self.var_pde_objective_mode, ["INTERACTION_ONLY", "INTERACTION_FIRST", "BALANCED", "STRUCTURE_GUIDED", "STRUCTURE_EXPLORATION"], width=24)
+        self.structure_combo = self._row_combo(objective_frame, 1, "Preferred Structure", self.var_preferred_structure, ["NONE", "ALPHA_HELIX", "AMPHIPATHIC_ALPHA", "HELIX_310", "BETA_HAIRPIN", "BETA_STRAND", "PPII_EXTENDED", "TURN_RICH", "COILED_COIL"], width=24)
+        self.bias_combo = self._row_combo(objective_frame, 2, "Structure Bias", self.var_structure_bias, ["MILD", "BALANCED", "STRONG"], width=24)
+        self._row_combo(objective_frame, 3, "Environment", self.var_structure_environment, ["AQUEOUS", "MEMBRANE_INTERFACE", "TRANSMEMBRANE", "LOW_DIELECTRIC", "UNSPECIFIED"], width=24)
+        self._row_combo(objective_frame, 4, "Conformational Strategy", self.var_conformational_strategy, ["PREORGANIZED", "ADAPTIVE", "FLEXIBLE"], width=24)
+        self._row_combo(objective_frame, 5, "Hotspot Complementarity", self.var_hotspot_complementarity_mode, ["OFF", "REPORT_ONLY", "EVIDENCE_AND_SELECTION"], width=24)
+        ttk.Label(objective_frame, text="Interaction Only removes structure from PDE selection. Conformational Strategy controls optimization pressure only; it is not a folded-state or binding-mechanism prediction.", foreground="#555", wraplength=760).grid(row=6,column=0,columnspan=4,sticky="w",padx=6,pady=(5,2))
+        self.var_pde_objective_mode.trace_add("write", lambda *_: self._sync_structure_objective_controls())
+        self._sync_structure_objective_controls()
 
-        ttk.Label(inner, text="Optional Settings JSON").grid(row=12, column=0, sticky="w", padx=6, pady=4)
-        ttk.Entry(inner, textvariable=self.var_config_file).grid(row=12, column=1, columnspan=2, sticky="ew", padx=6, pady=4)
-        ttk.Button(inner, text="Browse", command=lambda: self._pick_file(self.var_config_file, [("JSON", "*.json"), ("All", "*.*")])).grid(row=12, column=3, sticky="w", padx=6, pady=4)
+        ttk.Label(inner, text="Output Folder").grid(row=12, column=0, sticky="w", padx=6, pady=(14, 4))
+        ttk.Entry(inner, textvariable=self.var_outdir).grid(row=12, column=1, columnspan=2, sticky="ew", padx=6, pady=(14, 4))
+        ttk.Button(inner, text="Browse", command=lambda: self._pick_dir(self.var_outdir)).grid(row=12, column=3, sticky="w", padx=6, pady=(14, 4))
+
+        ttk.Label(inner, text="Optional Settings JSON").grid(row=13, column=0, sticky="w", padx=6, pady=4)
+        ttk.Entry(inner, textvariable=self.var_config_file).grid(row=13, column=1, columnspan=2, sticky="ew", padx=6, pady=4)
+        ttk.Button(inner, text="Browse", command=lambda: self._pick_file(self.var_config_file, [("JSON", "*.json"), ("All", "*.*")])).grid(row=13, column=3, sticky="w", padx=6, pady=4)
+
+    def _sync_structure_objective_controls(self) -> None:
+        mode = str(self.var_pde_objective_mode.get() or "BALANCED").upper()
+        disabled = mode == "INTERACTION_ONLY"
+        try:
+            self.structure_combo.configure(state="disabled" if disabled else "readonly")
+            self.bias_combo.configure(state="disabled" if disabled else "readonly")
+        except Exception:
+            LOGGER.debug("Could not update structure objective controls", exc_info=True)
 
     def _selected_tokens(self, var_map: Dict[str, tk.BooleanVar]) -> List[str]:
         return [token for token, var in var_map.items() if bool(var.get())]
@@ -688,6 +754,17 @@ class PeptideDesktopGUI(tk.Tk):
             wraplength=980
         )
         base_info.grid(row=r, column=0, columnspan=4, sticky="w", padx=6, pady=(8, 12))
+        r += 1
+
+        msds_bar = ttk.LabelFrame(inner, text="Safety data lookup", padding=8)
+        msds_bar.grid(row=r, column=0, columnspan=4, sticky="ew", padx=6, pady=(4, 10))
+        ttk.Button(msds_bar, text="MSDS / SDS (Google)", command=self.open_msds_lookup).pack(side="left", padx=(0, 8))
+        ttk.Label(
+            msds_bar,
+            text="Searches enabled chemistry tokens or the selected result candidate. Verify the exact supplier/product SDS before lab use.",
+            foreground="#555",
+            wraplength=760,
+        ).pack(side="left", fill="x", expand=True)
         r += 1
 
         self.chem_sections = {
@@ -900,6 +977,7 @@ class PeptideDesktopGUI(tk.Tk):
         ttk.Button(btns, text="Clear log", command=lambda: self.log_text.delete("1.0", "end")).pack(side="left", padx=4)
         ttk.Button(btns, text="Open output folder", command=self.open_output).pack(side="left", padx=4)
         ttk.Button(btns, text="Open output ZIP", command=self.open_zip).pack(side="left", padx=4)
+        ttk.Button(btns, text="MSDS / SDS (Google)", command=self.open_msds_lookup).pack(side="left", padx=4)
         self.log_text = scrolledtext.ScrolledText(tab, wrap="word", height=14)
         self.log_text.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
         self.tree = ttk.Treeview(tab, columns=("rank", "score", "length", "valid", "sequence"), show="headings", height=10)
@@ -907,6 +985,67 @@ class PeptideDesktopGUI(tk.Tk):
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor="w")
         self.tree.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 8))
+
+    def _msds_context_terms(self) -> List[str]:
+        """Collect explicit PDE chemistry tokens for operator SDS lookup.
+
+        PDE tokens describe design chemistry, not a supplier-specific protected
+        SPPS bottle.  Natural one-letter residues are therefore not converted
+        into guessed Fmoc/protection identities here.
+        """
+        terms: List[str] = []
+        tree = getattr(self, "tree", None)
+        if tree is not None:
+            try:
+                selection = list(tree.selection())
+                columns = list(tree.cget("columns"))
+            except Exception:
+                selection, columns = [], []
+            for iid in selection[:3]:
+                try:
+                    values = list(tree.item(iid, "values"))
+                    row = dict(zip(columns, values))
+                    terms.extend(peptide_chemistry_terms(row.get("sequence", "")))
+                except Exception:
+                    LOGGER.debug("Candidate MSDS context extraction skipped", exc_info=True)
+
+        groups = [
+            (getattr(self, "var_use_tag", None), getattr(self, "var_tag_types", {})),
+            (getattr(self, "var_use_linker", None), getattr(self, "var_linker_types", {})),
+            (getattr(self, "var_use_label", None), getattr(self, "var_label_types", {})),
+            (getattr(self, "var_use_non_nat", None), getattr(self, "var_non_nat_types", {})),
+            (getattr(self, "var_use_base_chem", None), getattr(self, "var_base_chem_types", {})),
+        ]
+        for enabled, mapping in groups:
+            try:
+                if enabled is not None and not bool(enabled.get()):
+                    continue
+            except Exception:
+                continue
+            for token, variable in dict(mapping or {}).items():
+                try:
+                    if bool(variable.get()):
+                        terms.append(str(token))
+                except Exception:
+                    continue
+
+        try:
+            if bool(getattr(self, "var_use_linker").get()) and str(getattr(self, "var_linker_mode").get()).upper() == "FIX":
+                terms.insert(0, str(getattr(self, "var_fix_linker_type").get()))
+        except Exception:
+            LOGGER.debug("Fixed-linker MSDS context extraction skipped", exc_info=True)
+        return unique_terms(terms)
+
+    def open_msds_lookup(self) -> Any:
+        return show_msds_lookup(
+            self,
+            self._msds_context_terms(),
+            title="Peptide Design Engine — MSDS / SDS lookup",
+            note=(
+                "PDE chemistry names are design tokens, not guaranteed supplier/protection-state bottle identities. "
+                "Use SPPS Materials for the exact synthesis reagent and verify the supplier/CAS on the SDS."
+            ),
+        )
 
     # --------------------------- file pickers ---------------------------
     def _pick_file(self, var: tk.StringVar, types) -> None:
@@ -1028,6 +1167,12 @@ class PeptideDesktopGUI(tk.Tk):
             "TARGET_MODE_LABEL": self.var_target_mode.get(),
             "DESIGN_MODE": self.var_design_mode.get(),
             "BINDER_MODE": self.var_binder_mode.get(),
+            "PDE_OBJECTIVE_MODE": self.var_pde_objective_mode.get(),
+            "PREFERRED_STRUCTURE": self.var_preferred_structure.get(),
+            "STRUCTURE_BIAS": self.var_structure_bias.get(),
+            "STRUCTURE_ENVIRONMENT": self.var_structure_environment.get(),
+            "CONFORMATIONAL_STRATEGY": self.var_conformational_strategy.get(),
+            "HOTSPOT_COMPLEMENTARITY_MODE": self.var_hotspot_complementarity_mode.get(),
             "POP": int(self.var_pop.get()),
             "GEN": int(self.var_gen.get()),
             "FINAL_TOPK": int(self.var_topk.get()),
@@ -1082,6 +1227,8 @@ class PeptideDesktopGUI(tk.Tk):
             "ML_PRIOR_TABLE_PATH": self.var_ml_prior_table.get().strip(),
         })
 
+        if str(cfg.get("PDE_OBJECTIVE_MODE", "BALANCED")).upper() == "INTERACTION_ONLY":
+            cfg["PREFERRED_STRUCTURE"] = "NONE"
         if self.var_target_mode.get() in {"SINGLE", "MULTI", "BRIDGE"}:
             cfg["DESIGN_MODE"] = {"SINGLE": "SINGLE_TARGET", "MULTI": "MULTI_TARGET_BINDER", "BRIDGE": "BRIDGE_LINKER"}[self.var_target_mode.get()]
 
@@ -1241,6 +1388,8 @@ class PeptideDesktopGUI(tk.Tk):
             )
             if not has_target and not has_hotspot_input:
                 raise ValueError("Enter at least one target sequence, or enable automatic hot-spot detection and provide its sequence/PDB input.")
+            eng.update_config(config)
+            eng.design_objective_contract()
             if int(config.get("POP", 0)) <= 0 or int(config.get("GEN", 0)) <= 0 or int(config.get("FINAL_TOPK", 0)) <= 0:
                 raise ValueError("Candidates per generation, optimization generations, and final candidates must be greater than zero.")
             if str(config.get("LEN_MODE", "RANDOM")).upper() == "FIX":
@@ -1284,9 +1433,13 @@ class PeptideDesktopGUI(tk.Tk):
 
     def _launch_run(self, cfg: Dict[str, Any], repeat: bool) -> None:
         outdir = self._effective_outdir()
-        outdir.mkdir(parents=True, exist_ok=True)
         run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        run_outdir = outdir / f"run_{run_stamp}"
+        objective_label = str(cfg.get("PDE_OBJECTIVE_MODE", "Balanced")).replace("_", " ").title().replace(" ", "_")
+        run_outdir = create_result_bundle(outdir, name=f"PDE_{objective_label}", tool="PDE")
+        write_bundle_manifest(
+            run_outdir, tool="PDE", name=f"PDE_{objective_label}",
+            extra={"seed": cfg.get("SEED"), "objective_mode": cfg.get("PDE_OBJECTIVE_MODE", "")},
+        )
         self.last_run_config = dict(cfg)
         self.nb.select(self.nb.tabs()[-1])
         self._log("\n" + "=" * 80 + "\n")
@@ -1309,9 +1462,10 @@ class PeptideDesktopGUI(tk.Tk):
                 rows, progress, paths = eng.run(cfg, verbose=True, outdir=str(outdir))
                 trained_model = self.var_trained_model.get().strip()
                 if trained_model:
-                    if ml_trainer is None:
-                        raise RuntimeError("ml_trainer.py could not be imported.")
-                    rows = ml_trainer.rerank_rows(rows, trained_model, blend_weight=float(self.var_trained_ml_weight.get()))
+                    trainer = _get_ml_trainer()
+                    if trainer is None:
+                        raise RuntimeError(f"ml_trainer.py could not be imported: {_ML_TRAINER_IMPORT_ERROR}")
+                    rows = trainer.rerank_rows(rows, trained_model, blend_weight=float(self.var_trained_ml_weight.get()))
                     rerank_path = Path(paths["output_dir"]) / "trained_ml_reranked_candidates.csv"
                     write_rows(rerank_path, rows[:int(cfg.get("FINAL_TOPK", 10))])
                     paths["trained_ml_reranked_csv"] = str(rerank_path)
@@ -1483,11 +1637,12 @@ class PeptideDesktopGUI(tk.Tk):
             messagebox.showerror("PRODIGY parse/import error", str(e))
 
     def train_ml(self) -> None:
-        if ml_trainer is None:
-            messagebox.showerror("Missing module", "ml_trainer.py could not be imported.")
+        trainer = _get_ml_trainer()
+        if trainer is None:
+            messagebox.showerror("Missing module", f"ml_trainer.py could not be imported.\n{_ML_TRAINER_IMPORT_ERROR or ''}")
             return
         try:
-            model_path = ml_trainer.train_from_csv(self.var_training_db.get(), self.var_models_dir.get(), label_col=self.var_ml_label.get())
+            model_path = trainer.train_from_csv(self.var_training_db.get(), self.var_models_dir.get(), label_col=self.var_ml_label.get())
             self.var_trained_model.set(str(model_path))
             self.update_model_status()
             self._log(f"[OK] user-data ranking model saved: {model_path}\n")

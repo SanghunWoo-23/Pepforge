@@ -1,5 +1,7 @@
 
 from __future__ import annotations
+
+from peptiforg_core.version import PEPFORGE_VERSION
 import logging
 LOGGER = logging.getLogger(__name__)
 
@@ -10,7 +12,7 @@ import json
 import py_compile
 import re
 
-RELEASE_GATE_VERSION = "3.0.0"
+RELEASE_GATE_VERSION = PEPFORGE_VERSION
 TEXT_EXTS = {".md", ".txt", ".py", ".json", ".cff", ".yaml", ".yml", ".ini", ".bat", ".spec", ".iss"}
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames=None) -> str:
@@ -45,13 +47,13 @@ def release_gate_check(root_dir: str | Path, output_dir: str | Path) -> dict[str
 
     version_file = root / "VERSION.txt"
     vf = version_file.read_text(encoding="utf-8", errors="ignore").strip() if version_file.exists() else ""
-    add("version_file_3_0_0", vf == RELEASE_GATE_VERSION, vf or "missing")
+    add("version_file_current_release", vf == RELEASE_GATE_VERSION, vf or "missing")
 
     citation = root / "CITATION.cff"
     if citation.exists():
         c = citation.read_text(encoding="utf-8", errors="ignore")
         add("citation_schema_1_2_0", 'cff-version: "1.2.0"' in c or "cff-version: 1.2.0" in c, "CITATION.cff")
-        add("citation_version_3_0_0", f'version: "{RELEASE_GATE_VERSION}"' in c or f"version: {RELEASE_GATE_VERSION}" in c, "CITATION.cff")
+        add("citation_version_current_release", f'version: "{RELEASE_GATE_VERSION}"' in c or f"version: {RELEASE_GATE_VERSION}" in c, "CITATION.cff")
     else:
         add("citation_exists", False, "missing")
 
@@ -61,6 +63,7 @@ def release_gate_check(root_dir: str | Path, output_dir: str | Path) -> dict[str
         "pepforge_cli.py", "peptiforg_core/public_api.py", "peptiforg_core/release_verify_matrix.py",
         "peptiforg_core/release_integrity.py", "peptiforg_core/regression_audit.py", "peptiforg_core/runtime_validation.py",
         "peptiforg_core/source_integrity_audit.py",
+        "peptiforg_core/design_intent.py", "peptiforg_core/candidate_summary_report.py",
     ]
     for rel in required:
         add("required_" + rel, (root / rel).exists(), rel)

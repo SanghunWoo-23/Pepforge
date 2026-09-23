@@ -15,8 +15,11 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from peptiforg_core.ui_helpers import set_pepforge_icon, open_path
-from peptiforg_core.ui_theme import apply_pepforge_theme
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window
+from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
+from peptiforg_core.version import PEPFORGE_VERSION
 from peptiforg_core.sandbox_runtime import configured_output
+from peptiforg_core.output_bundle import create_result_bundle, write_bundle_manifest, build_bundle_zip
 from peptiforg_core.rcsb_pdb_bridge import search_rcsb, download_rcsb_structure, results_to_rows, RCSB_BRIDGE_VERSION
 from peptiforg_core.target_structure_preparation import export_target_preparation_package, TARGET_PREP_VERSION
 from peptiforg_core.binding_site_selector import export_binding_site_selection_package, BINDING_SITE_SELECTOR_VERSION
@@ -30,8 +33,23 @@ from peptiforg_core.experimental_data_importer import make_experimental_template
 from peptiforg_core.workflow_automation_runner import default_workflow_config, save_workflow_config, run_workflow, WORKFLOW_AUTOMATION_VERSION
 from peptiforg_core.run_comparison import export_run_comparison_package, RUN_COMPARISON_VERSION
 from peptiforg_core.peptide_target_complex_builder import export_complex_builder_package, COMPLEX_BUILDER_VERSION
+from peptiforg_core.lazy_imports import lazy_module
 
-import pandas as pd
+pd = lazy_module("pandas")
+_interaction_evidence_backend = lazy_module("peptiforg_core.interaction_evidence")
+_interface_quality_backend = lazy_module("peptiforg_core.interface_quality")
+
+def analyze_interaction_evidence(*args, **kwargs):
+    return _interaction_evidence_backend.analyze_interaction_evidence(*args, **kwargs)
+
+def interaction_profile_table(*args, **kwargs):
+    return _interaction_evidence_backend.profile_table(*args, **kwargs)
+
+def interaction_summary(*args, **kwargs):
+    return _interaction_evidence_backend.interaction_summary(*args, **kwargs)
+
+def interface_quality_evidence(*args, **kwargs):
+    return _interface_quality_backend.interface_quality_evidence(*args, **kwargs)
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -62,13 +80,13 @@ CTERM_AMIDE_MARKERS = ("CONH2", "NH2", "AMIDE")
 # These are reported in the UI/export so users can interpret the contact table.
 # Hydrogen bonds are treated as donor-acceptor heavy-atom distance proxies because
 # many PDB/mmCIF files do not contain explicit hydrogens.
-HYDROGEN_BOND_DA_CUTOFF_A = 3.9
+HYDROGEN_BOND_DA_CUTOFF_A = 3.5
 HYDROGEN_BOND_STRONG_DA_CUTOFF_A = 3.5
 HYDROPHOBIC_CONTACT_CUTOFF_A = 5.0
 CONTACT_CUTOFF_A = 5.0
 CLASH_CUTOFF_A = 2.0
-CHARGE_PROXIMITY_CUTOFF_A = 5.0
-POLAR_PROXIMITY_CUTOFF_A = 5.0
+CHARGE_PROXIMITY_CUTOFF_A = 4.0
+POLAR_PROXIMITY_CUTOFF_A = 3.5
 HBOND_CAPABLE = POLAR | BASIC | ACIDIC | set("YWHC")
 
 def _residue_can_hbond(aa: str) -> bool:
@@ -95,12 +113,27 @@ def _is_atom_hydrophobic(atom_row) -> bool:
     return aa in HYDROPHOBIC and elem in {"C", "S"} and atom not in {"C"}
 
 def interaction_distance_criteria_df() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"metric":"hydrogen_bond_DA_cutoff", "value":HYDROGEN_BOND_DA_CUTOFF_A, "unit":"Angstrom", "interpretation":"donor-acceptor heavy-atom distance proxy", "method_note":"Used when explicit hydrogens/angles are unavailable; stronger contacts are typically <= 3.5 A."},
-        {"metric":"hydrophobic_contact_cutoff", "value":HYDROPHOBIC_CONTACT_CUTOFF_A, "unit":"Angstrom", "interpretation":"hydrophobic residue/atom contact distance", "method_note":"Used for residue-level hydrophobic contact counting and atom-level hydrophobic contact labels."},
-        {"metric":"generic_interface_contact_cutoff", "value":CONTACT_CUTOFF_A, "unit":"Angstrom", "interpretation":"generic residue-level target-peptide contact cutoff", "method_note":"Used for interface contact counting in the screening model."},
-        {"metric":"steric_clash_cutoff", "value":CLASH_CUTOFF_A, "unit":"Angstrom", "interpretation":"distance below this is treated as a clash/covalent-range warning", "method_note":"Lower clash counts are better."},
-    ], columns=["metric","value","unit","interpretation","method_note"])
+    # User-approved conservative PyMOL/manual-screening criteria.  The full
+    # geometry-aware implementation/export lives in peptiforg_core.interaction_evidence.
+    rows = [
+        {"metric":"hydrogen_bond_DA_cutoff", "value":3.5, "unit":"Angstrom", "interpretation":"donor heavy atom - acceptor heavy atom", "method_note":"D-H...A >=120 deg recommended when H is available."},
+        {"metric":"hydrophobic_contact_min", "value":3.3, "unit":"Angstrom", "interpretation":"nonpolar atom - nonpolar atom", "method_note":"Manual conservative range is 3.3-5.0 A."},
+        {"metric":"hydrophobic_contact_cutoff", "value":5.0, "unit":"Angstrom", "interpretation":"nonpolar atom - nonpolar atom", "method_note":"Manual conservative maximum; residue-center distance is not the criterion."},
+        {"metric":"salt_bridge_cutoff", "value":4.0, "unit":"Angstrom", "interpretation":"opposite charged group/center", "method_note":"Direct conservative salt-bridge criterion."},
+        {"metric":"pi_pi_centroid_cutoff", "value":5.0, "unit":"Angstrom", "interpretation":"aromatic ring centroid - centroid", "method_note":"Also requires 0-30 or 60-90 deg plane geometry and offset <=2 A."},
+        {"metric":"cation_pi_centroid_cutoff", "value":5.0, "unit":"Angstrom", "interpretation":"cation center - aromatic ring centroid", "method_note":"Cation must approach ring face; offset <=2 A."},
+        {"metric":"serious_clash_vdw_overlap", "value":0.4, "unit":"Angstrom", "interpretation":"sum(vdW radii) - atom distance", "method_note":"Structure warning, not a favorable interaction."},
+        {"metric":"disulfide_SG_SG_min", "value":2.0, "unit":"Angstrom", "interpretation":"Cys SG - SG", "method_note":"Manual range ~2.0-2.1 A; covalent geometry/connectivity review remains required."},
+        {"metric":"disulfide_SG_SG_max", "value":2.1, "unit":"Angstrom", "interpretation":"Cys SG - SG", "method_note":"Manual range ~2.0-2.1 A."},
+        {"metric":"water_bridge_each_max", "value":3.5, "unit":"Angstrom", "interpretation":"polar atom - water O on both sides", "method_note":"Each leg 2.5-3.5 A plus H-bond geometry."},
+        {"metric":"metal_coordination_cutoff", "value":3.0, "unit":"Angstrom", "interpretation":"metal - coordinating atom", "method_note":"Metal-specific coordination geometry must also be reviewed."},
+        {"metric":"halogen_bond_cutoff", "value":3.5, "unit":"Angstrom", "interpretation":"halogen X - acceptor", "method_note":"C-X...A about >=150 deg recommended."},
+        {"metric":"aromatic_s_cutoff", "value":5.0, "unit":"Angstrom", "interpretation":"S atom - aromatic system", "method_note":"Secondary interaction; inspect sulfur placement relative to ring."},
+        {"metric":"weak_C_H_O_N_cutoff", "value":3.5, "unit":"Angstrom", "interpretation":"C - O/N screening", "method_note":"C-H...A >=120 deg recommended; secondary evidence without H."},
+        {"metric":"NH_pi_screen", "value":3.9, "unit":"Angstrom", "interpretation":"N-H donor - aromatic system", "method_note":"Secondary screen; aromatic-plane/donor-H direction requires review."},
+        {"metric":"generic_interface_contact_cutoff", "value":CONTACT_CUTOFF_A, "unit":"Angstrom", "interpretation":"coarse residue/token-centroid screening only", "method_note":"Not used to confirm a specific interaction type."},
+    ]
+    return pd.DataFrame(rows, columns=["metric","value","unit","interpretation","method_note"])
 
 def _residue_label(chain, resi, aa) -> str:
     """Human-readable residue label such as A:134D or 4Q."""
@@ -140,6 +173,198 @@ def _pose_columns() -> list[str]:
         "rotation_z_deg", "translation_x_A", "translation_y_A", "translation_z_A",
         "center_x_A", "center_y_A", "center_z_A", "note"
     ]
+
+
+def _pose_display_columns() -> list[str]:
+    """Readable geometry table shown in the normal Results tab.
+
+    Raw transform/center coordinates remain available through Results data full
+    and CSV export; the default screen shows only values useful for comparing
+    candidate interfaces.
+    """
+    return [
+        "rank", "orientation", "contacts", "protein_residues", "peptide_residues",
+        "closest_A", "hydrophobic", "charge", "aromatic", "polar", "clash_warnings",
+    ]
+
+
+def _contact_display_columns() -> list[str]:
+    return ["rank", "protein_residue", "peptide_residue", "distance_A", "interaction"]
+
+
+def _atom_pair_display_columns() -> list[str]:
+    return [
+        "protein_residue", "peptide_residue", "min_distance_A",
+        "interaction_candidates", "protein_atoms", "peptide_atoms", "atom_pairs",
+    ]
+
+
+def _specific_interaction_display_columns() -> list[str]:
+    return [
+        "interaction", "target_residue", "peptide_residue", "distance_A",
+        "angle_deg", "plane_angle_deg", "offset_A", "geometry_status",
+        "evidence_level",
+    ]
+
+
+def specific_interaction_display_df(frame: pd.DataFrame, top_n: int = 120) -> pd.DataFrame:
+    cols = _specific_interaction_display_columns()
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=cols)
+    df = frame.copy()
+    for col in cols:
+        if col not in df.columns:
+            df[col] = ""
+    if "distance_A" in df.columns:
+        df["distance_A"] = pd.to_numeric(df["distance_A"], errors="coerce")
+    return df.sort_values(["target_residue", "peptide_residue", "distance_A"], na_position="last").head(max(1, int(top_n)))[cols].reset_index(drop=True)
+
+
+def _interaction_label_for_display(value: object) -> str:
+    mapping = {
+        "centroid_contact": "Contact",
+        "hydrophobic_proximity": "Hydrophobic",
+        "aromatic_proximity": "Aromatic / pi candidate",
+        "opposite_charge_proximity": "Opposite-charge / salt-bridge candidate",
+        "polar_residue_proximity": "Polar / H-bond candidate",
+        "centroid_overlap_warning": "Clash warning",
+        "atom_overlap_or_covalent_range_warning": "Clash warning",
+        "hbond_distance_candidate": "H-bond distance candidate",
+        "opposite_charge_residue_atom_proximity": "Opposite-charge candidate",
+        "hydrophobic_atom_proximity": "Hydrophobic",
+        "atom_proximity": "Atom contact",
+    }
+    raw = str(value or "").strip()
+    if not raw:
+        return "Contact"
+    labels=[]
+    for token in raw.split(";"):
+        token=token.strip()
+        label=mapping.get(token, token.replace("_", " ").strip().title())
+        if label and label not in labels:
+            labels.append(label)
+    # A more specific label makes the generic Contact tag redundant.
+    if len(labels) > 1 and "Contact" in labels:
+        labels.remove("Contact")
+    return "; ".join(labels) or "Contact"
+
+
+def contact_display_df(contacts: pd.DataFrame, poses: pd.DataFrame | None = None, *, best_pose_only: bool = False, top_n: int = 50) -> pd.DataFrame:
+    cols = _contact_display_columns()
+    if contacts is None or contacts.empty:
+        return pd.DataFrame(columns=cols)
+    df=contacts.copy()
+    rank_map={}
+    if poses is not None and not poses.empty and "pose_id" in poses.columns:
+        for _, row in poses.iterrows():
+            try: rank_map[str(row.get("pose_id", ""))] = int(float(row.get("pose_rank", 0) or 0))
+            except Exception: rank_map[str(row.get("pose_id", ""))] = 0
+    df["rank"] = df.get("pose_id", "").astype(str).map(rank_map).fillna(0).astype(int)
+    if best_pose_only and rank_map:
+        df=df[df["rank"] == min(r for r in rank_map.values() if r > 0)]
+    df["distance_A"] = pd.to_numeric(df.get("distance_A"), errors="coerce")
+    df["interaction"] = df.get("interaction", "").map(_interaction_label_for_display)
+    df=df.sort_values(["rank", "distance_A"], na_position="last")
+    df=df.drop_duplicates(subset=["rank", "protein_residue", "peptide_residue", "interaction"], keep="first")
+    return df.head(max(1, int(top_n)))[cols].reset_index(drop=True)
+
+
+def pose_display_df(poses: pd.DataFrame, contacts: pd.DataFrame | None = None) -> pd.DataFrame:
+    cols=_pose_display_columns()
+    if poses is None or poses.empty:
+        return pd.DataFrame(columns=cols)
+    cdf = contacts.copy() if isinstance(contacts, pd.DataFrame) else pd.DataFrame()
+    rows=[]
+    for _, pose in poses.iterrows():
+        pid=str(pose.get("pose_id", ""))
+        pc = cdf[cdf.get("pose_id", pd.Series(dtype=str)).astype(str).eq(pid)] if not cdf.empty and "pose_id" in cdf.columns else pd.DataFrame()
+        protein=[]; peptide=[]
+        if not pc.empty:
+            protein=[str(x) for x in pc.get("protein_residue", pd.Series(dtype=str)).tolist() if str(x).strip()]
+            peptide=[str(x) for x in pc.get("peptide_residue", pd.Series(dtype=str)).tolist() if str(x).strip()]
+        def compact(values, limit=5):
+            vals=[]
+            for value in values:
+                if value not in vals: vals.append(value)
+            if len(vals) <= limit: return ", ".join(vals)
+            return ", ".join(vals[:limit]) + f" +{len(vals)-limit}"
+        rows.append({
+            "rank": pose.get("pose_rank", ""),
+            "orientation": str(pose.get("orientation", "")).replace("forward_N_to_C", "N→C").replace("reverse_C_to_N", "C→N").replace("imported_or_direct", "Direct"),
+            "contacts": pose.get("contact_count", 0),
+            "protein_residues": compact(protein),
+            "peptide_residues": compact(peptide),
+            "closest_A": pose.get("min_centroid_distance_A", ""),
+            "hydrophobic": pose.get("hydrophobic_proximities", 0),
+            "charge": pose.get("opposite_charge_proximities", 0),
+            "aromatic": pose.get("aromatic_proximities", 0),
+            "polar": pose.get("polar_residue_proximities", 0),
+            "clash_warnings": pose.get("centroid_overlap_warnings", 0),
+        })
+    return pd.DataFrame(rows, columns=cols)
+
+
+def atom_pair_display_df(atom_contacts: pd.DataFrame, *, top_n: int = 60) -> pd.DataFrame:
+    cols=_atom_pair_display_columns()
+    if atom_contacts is None or atom_contacts.empty:
+        return pd.DataFrame(columns=cols)
+    df=atom_contacts.copy()
+    df["distance_A"] = pd.to_numeric(df.get("distance_A"), errors="coerce")
+    rows=[]
+    for (target, pep), group in df.groupby(["target_residue", "peptide_residue"], dropna=False):
+        classes=[]
+        for value in group.get("contact_class", pd.Series(dtype=str)).tolist():
+            for label in _interaction_label_for_display(value).split("; "):
+                if label and label not in classes: classes.append(label)
+        ta=[]; pa=[]
+        for value in group.get("target_atom", pd.Series(dtype=str)).tolist():
+            value=str(value or "").strip()
+            if value and value not in ta: ta.append(value)
+        for value in group.get("peptide_atom", pd.Series(dtype=str)).tolist():
+            value=str(value or "").strip()
+            if value and value not in pa: pa.append(value)
+        rows.append({
+            "protein_residue": target,
+            "peptide_residue": pep,
+            "min_distance_A": round(float(group["distance_A"].min()), 2) if group["distance_A"].notna().any() else "",
+            "interaction_candidates": "; ".join(classes) or "Atom contact",
+            "protein_atoms": ", ".join(ta[:6]) + (f" +{len(ta)-6}" if len(ta)>6 else ""),
+            "peptide_atoms": ", ".join(pa[:6]) + (f" +{len(pa)-6}" if len(pa)>6 else ""),
+            "atom_pairs": len(group),
+        })
+    out=pd.DataFrame(rows, columns=cols)
+    if not out.empty:
+        out["_d"]=pd.to_numeric(out["min_distance_A"], errors="coerce")
+        out=out.sort_values("_d", na_position="last").drop(columns=["_d"])
+    return out.head(max(1, int(top_n))).reset_index(drop=True)
+
+
+def screening_overview_df(poses: pd.DataFrame, contacts: pd.DataFrame, atom_contacts: pd.DataFrame | None = None, specific_interactions: pd.DataFrame | None = None) -> pd.DataFrame:
+    cols=["item", "value", "interpretation"]
+    if poses is None or poses.empty:
+        return pd.DataFrame([
+            {"item":"Screening", "value":"No 3D result", "interpretation":"Load target coordinates and a peptide sequence/PDB, then run screening."}
+        ], columns=cols)
+    best=poses.sort_values("pose_rank").iloc[0]
+    best_id=str(best.get("pose_id", ""))
+    best_contacts=contacts[contacts.get("pose_id", pd.Series(dtype=str)).astype(str).eq(best_id)] if isinstance(contacts,pd.DataFrame) and not contacts.empty and "pose_id" in contacts.columns else pd.DataFrame()
+    protein_n=int(best_contacts.get("protein_residue", pd.Series(dtype=str)).replace("", pd.NA).dropna().nunique()) if not best_contacts.empty else 0
+    peptide_n=int(best_contacts.get("peptide_residue", pd.Series(dtype=str)).replace("", pd.NA).dropna().nunique()) if not best_contacts.empty else 0
+    atom_pairs=0
+    if isinstance(atom_contacts,pd.DataFrame) and not atom_contacts.empty:
+        atom_pairs=int(atom_contacts[["target_residue","peptide_residue"]].drop_duplicates().shape[0]) if {"target_residue","peptide_residue"}.issubset(atom_contacts.columns) else len(atom_contacts)
+    interaction_counts={}
+    if isinstance(specific_interactions,pd.DataFrame) and not specific_interactions.empty and "interaction" in specific_interactions.columns:
+        interaction_counts=specific_interactions["interaction"].astype(str).value_counts().to_dict()
+    interaction_text=", ".join(f"{k.replace('_',' ')} {v}" for k,v in interaction_counts.items()) or "Atom-level specific interaction evidence unavailable"
+    return pd.DataFrame([
+        {"item":"Best candidate", "value":f"Rank {best.get('pose_rank','')} / {best.get('orientation','')}", "interpretation":"Geometry/contact rank only; not ΔG or Kd."},
+        {"item":"Residue contacts", "value":str(int(float(best.get('contact_count',0) or 0))), "interpretation":f"{protein_n} protein residues contact {peptide_n} peptide residues in the best candidate."},
+        {"item":"Closest residue distance", "value":f"{best.get('min_centroid_distance_A','')} Å", "interpretation":"Residue/token-centroid distance; inspect atom-level table for actual atom distances."},
+        {"item":"Interaction evidence", "value":interaction_text, "interpretation":"Geometry-derived candidates are listed explicitly in Contacts; they are not affinity measurements."},
+        {"item":"Atom-level residue pairs", "value":str(atom_pairs) if atom_pairs else "not available", "interpretation":"Available when both target and peptide atomic coordinates can be mapped."},
+        {"item":"Clash warnings", "value":str(int(float(best.get('centroid_overlap_warnings',0) or 0))), "interpretation":"Short-distance warnings; lower is preferable and should be inspected before downstream use."},
+    ], columns=cols)
 
 # Common project aliases.  The canonical notation is used for metadata so
 # N-terminal Ac and C-terminal NH2 are not lost when a user types an alias.
@@ -591,7 +816,8 @@ def _points_from_structure_builder_metadata(pdb_path: str | Path, metadata_path:
         return pd.DataFrame(columns=cols)
     ranges = meta.get("atom_ranges") or []
     rows = []
-    unit_index = 0
+    peptide_position = 0
+    peptide_kinds = {"std_aa", "d_std_aa", "non_natural_aa", "sidechain_label_aa"}
     for item in ranges:
         try:
             start = int(item.get("heavy_start_1based")) - 1
@@ -605,19 +831,29 @@ def _points_from_structure_builder_metadata(pdb_path: str | Path, metadata_path:
             continue
         token = str(item.get("token") or "")
         kind = str(item.get("kind") or "unknown")
-        # C-terminal atoms are part of the preceding residue and should not
-        # become an extra peptide residue/contact position.
+        # C-terminal atoms belong to the preceding peptide residue and must not
+        # create a second centroid/residue position.
         if kind in {"c_terminal", "c_terminal_atom", "c_terminal_modifier"}:
             continue
-        unit_index += 1
+        is_peptide_residue = kind in peptide_kinds
+        if is_peptide_residue:
+            peptide_position += 1
         up = token.upper()
         aa = ""
         if kind == "std_aa" and len(token) == 1 and up in AA_MASS:
             aa = up
         elif kind == "d_std_aa" and len(token) >= 2 and token[-1].upper() in AA_MASS:
+            # Canonical one-letter identity is retained only as a chemistry
+            # classification helper; the visible token/resname remains D-X.
             aa = token[-1].upper()
+        elif kind == "sidechain_label_aa":
+            parent = token.split("(", 1)[0][:1].upper()
+            if parent in AA_MASS:
+                aa = parent
         rows.append({
-            "pep_pos": unit_index,
+            # Non-residue chemistry (Ac/linker/free label) is coordinate-bearing
+            # but must never consume peptide residue numbering.
+            "pep_pos": peptide_position if is_peptide_residue else 0,
             "aa": aa or "X",
             "token": token,
             "token_class": kind,
@@ -665,6 +901,106 @@ def build_peptide_structure_bundle(
     if points.empty:
         raise ValueError("Structure Builder produced no token-level peptide coordinates.")
     return points.copy(), dict(paths)
+
+
+def annotate_peptide_atoms_from_structure_metadata(atoms: pd.DataFrame, metadata_path: str | Path | None) -> pd.DataFrame:
+    """Restore PSB residue identity without canonicalizing modified chemistry.
+
+    The companion JSON supplies exact heavy-atom ranges while the review PDB
+    supplies human-readable residue names.  Rebuilding the mapping here keeps
+    legacy/generic PDB files usable, but follows the same identity rules as the
+    PSB residue-aware exporter: canonical L residues use standard 3-letter names;
+    D/non-natural residues remain explicitly non-standard; terminal atoms stay
+    attached to the preceding peptide residue; separable modifiers use chain X.
+    """
+    if atoms is None or atoms.empty or not metadata_path:
+        return atoms
+    path = Path(metadata_path)
+    if not path.exists():
+        return atoms
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return atoms
+    ranges = list(payload.get("atom_ranges") or [])
+    tokens = list(payload.get("tokens") or [])
+    if not ranges:
+        return atoms
+
+    out = atoms.copy().reset_index(drop=True)
+    # pandas 3.x StringDtype rejects integer assignment. Identity columns are
+    # deliberately textual; coordinates remain numeric.
+    for col in ("chain", "resi", "resn", "aa"):
+        if col not in out.columns:
+            out[col] = ""
+        else:
+            out[col] = out[col].astype("object")
+    for col in ("x", "y", "z"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    heavy_indices = [idx for idx, row in out.iterrows() if str(row.get("element", "")).upper() != "H"]
+    heavy_serial_to_row = {serial: row_idx for serial, row_idx in enumerate(heavy_indices, start=1)}
+    one_to_three = {
+        "A":"ALA","R":"ARG","N":"ASN","D":"ASP","C":"CYS","Q":"GLN","E":"GLU","G":"GLY","H":"HIS","I":"ILE",
+        "L":"LEU","K":"LYS","M":"MET","F":"PHE","P":"PRO","S":"SER","T":"THR","W":"TRP","Y":"TYR","V":"VAL",
+    }
+    peptide_kinds = {"std_aa", "d_std_aa", "non_natural_aa", "sidechain_label_aa"}
+
+    def safe_resn(raw: str, fallback: str = "MOD") -> str:
+        text = re.sub(r"[^A-Za-z0-9]", "", str(raw or "").upper())
+        return (text[:3] or fallback)[:3]
+
+    peptide_position = 0
+    modifier_position = 0
+    last_peptide: tuple[str, str, str] | None = None
+    for idx, rng in enumerate(ranges):
+        tok = tokens[idx] if idx < len(tokens) else {}
+        kind = str(rng.get("kind") or tok.get("kind") or "")
+        raw = str(rng.get("token") or tok.get("raw") or "")
+
+        if kind in peptide_kinds:
+            peptide_position += 1
+            if kind == "std_aa":
+                aa = raw[:1].upper()
+                resn = one_to_three.get(aa, safe_resn(raw, "UNK"))
+            elif kind == "d_std_aa":
+                aa = raw[-1:].upper() if raw[-1:].upper() in one_to_three else "X"
+                resn = safe_resn(f"D{aa}" if aa != "X" else raw, "DXX")
+            elif kind == "sidechain_label_aa":
+                parent = str(tok.get("parent_residue") or raw.split("(", 1)[0])[:1].upper()
+                aa = parent if parent in one_to_three else "X"
+                resn = one_to_three.get(aa, safe_resn(raw, "MOD"))
+            else:
+                aa = "X"
+                resn = safe_resn(raw, "NNA")
+            chain, resi = "P", str(peptide_position)
+            last_peptide = (resn, resi, aa)
+        elif kind in {"c_terminal", "c_terminal_atom", "c_terminal_modifier"} and last_peptide is not None:
+            # NH2/OH terminal atoms are part of the last residue in the review
+            # PDB; do not overwrite that residue with a fabricated NH2/OH resn.
+            resn, resi, aa = last_peptide
+            chain = "P"
+        else:
+            modifier_position += 1
+            special = {"AC": "ACE", "NH2": "AMD", "OH": "OH"}
+            resn = special.get(raw.upper(), safe_resn(raw, "MOD"))
+            chain, resi, aa = "X", str(modifier_position), "X"
+
+        try:
+            first = int(rng.get("heavy_start_1based"))
+            last = int(rng.get("heavy_end_1based"))
+        except (TypeError, ValueError):
+            continue
+        for serial in range(first, last + 1):
+            row_idx = heavy_serial_to_row.get(serial)
+            if row_idx is None:
+                continue
+            out.at[row_idx, "chain"] = chain
+            out.at[row_idx, "resi"] = resi
+            out.at[row_idx, "resn"] = resn
+            out.at[row_idx, "aa"] = aa
+    return out
 
 
 def apply_pose_transform_to_pdb(source_pdb: str | Path, output_pdb: str | Path, pose_row) -> Path:
@@ -770,14 +1106,23 @@ def pdb_to_peptide_points(path: str | Path):
         if not mapped.empty:
             return mapped
     atoms = parse_pdb_atoms(p)
+    # Pepforge residue-aware PDBs reserve chain P for peptide residues and X
+    # for separable terminal/linker/modifier chemistry. If chain P is present,
+    # do not let chain X consume peptide numbering when the JSON sidecar is absent.
+    if not atoms.empty and "chain" in atoms.columns and atoms["chain"].astype(str).eq("P").any():
+        atoms = atoms[atoms["chain"].astype(str).eq("P")].copy()
     pts = receptor_residue_points(atoms)
     if pts.empty:
         return pd.DataFrame(columns=["pep_pos","aa","token","token_class","x","y","z"])
     pts = pts.reset_index(drop=True)
+    parsed_pos = pd.to_numeric(pts.get("resi", pd.Series(dtype=float)), errors="coerce")
+    fallback_pos = pd.Series(range(1, len(pts) + 1), index=pts.index, dtype="int64")
+    pep_pos = parsed_pos.where(parsed_pos.notna(), fallback_pos).astype(int)
+    token = pts.get("resn", pts["aa"]).astype(str)
     return pd.DataFrame({
-        "pep_pos": range(1,len(pts)+1),
+        "pep_pos": pep_pos.tolist(),
         "aa": pts["aa"].tolist(),
-        "token": pts["aa"].tolist(),
+        "token": token.tolist(),
         "token_class": ["pdb_residue"] * len(pts),
         "x": pts["x"].tolist(), "y": pts["y"].tolist(), "z": pts["z"].tolist()
     })
@@ -803,7 +1148,14 @@ def _score_contacts(receptor: pd.DataFrame, pep: pd.DataFrame, pose_id: str):
     contact_rows = []
     if receptor is None or receptor.empty or pep is None or pep.empty:
         return contacts, overlaps, hyd, charge, aromatic, polar, min_d, contact_rows
+    peptide_kinds = {"std_aa", "d_std_aa", "non_natural_aa", "sidechain_label_aa", "pdb_residue"}
     for _, pr in pep.iterrows():
+        token_class = str(pr.get("token_class", "pdb_residue") or "pdb_residue")
+        # Coordinate-bearing modifiers/linkers affect the rigid-body geometry but
+        # are not peptide residues. Keep them out of residue-numbered contact
+        # tables rather than fabricating 0X/GLY identities.
+        if token_class not in peptide_kinds:
+            continue
         dx = receptor["x"] - pr["x"]
         dy = receptor["y"] - pr["y"]
         dz = receptor["z"] - pr["z"]
@@ -831,14 +1183,19 @@ def _score_contacts(receptor: pd.DataFrame, pep: pd.DataFrame, pose_id: str):
                 polar += 1; labels.append("polar_residue_proximity"); cutoff_used = POLAR_PROXIMITY_CUTOFF_A
             if d <= CLASH_CUTOFF_A:
                 overlaps += 1; labels.append("centroid_overlap_warning"); cutoff_used = CLASH_CUTOFF_A
-            pep_label = _residue_label("", pr.get("pep_pos", "?"), paa)
+            pep_pos = int(pr.get("pep_pos", 0) or 0)
+            token = str(pr.get("token", "") or "").strip()
+            if token_class in {"d_std_aa", "non_natural_aa", "sidechain_label_aa"} and token:
+                pep_label = f"{pep_pos}{token}"
+            else:
+                pep_label = _residue_label("", pep_pos or "?", paa)
             target_label = _residue_label(rr.get("chain", ""), rr.get("resi", "?"), raa)
             orientation = "reverse_C_to_N" if "reverse_C_to_N" in str(pose_id) else ("forward_N_to_C" if "forward_N_to_C" in str(pose_id) else "imported_or_direct")
             contact_rows.append({
                 "protein_residue": target_label, "peptide_residue": pep_label,
                 "distance_A": round(d, 2), "interaction": ";".join(dict.fromkeys(labels)),
                 "pose_id": pose_id, "orientation": orientation, "protein_window": "", "peptide_window": "",
-                "target_residue": target_label, "pep_pos": int(pr.get("pep_pos", 0) or 0),
+                "target_residue": target_label, "pep_pos": pep_pos,
                 "pep_aa": paa, "target_chain": rr.get("chain", ""), "target_resi": rr.get("resi", ""),
                 "target_aa": raa, "cutoff_A": cutoff_used,
                 "note": "Residue/token-centroid geometry only; inspect atom-level contacts separately when available.",
@@ -854,10 +1211,19 @@ def analyze_atom_level_contact_frames(t: pd.DataFrame, p: pd.DataFrame, cutoff_A
     if t is None or p is None or t.empty or p.empty:
         return pd.DataFrame(columns=cols)
     rows=[]
-    for _,pa in p.iterrows():
-        dx=t["x"]-pa["x"]; dy=t["y"]-pa["y"]; dz=t["z"]-pa["z"]
+    t_use=t[t.get("element", pd.Series(index=t.index, dtype=str)).astype(str).str.upper().ne("H")].copy()
+    p_use=p[p.get("element", pd.Series(index=p.index, dtype=str)).astype(str).str.upper().ne("H")].copy()
+    # Generated Structure Builder atoms are mapped back to peptide positions
+    # before this function.  Ignore unmapped terminal/helper atoms in the
+    # residue-pair UI instead of displaying ?X rows.
+    if "aa" in p_use.columns:
+        mapped=p_use[~p_use["aa"].astype(str).str.upper().isin({"", "X", "NAN"})]
+        if not mapped.empty:
+            p_use=mapped
+    for _,pa in p_use.iterrows():
+        dx=t_use["x"]-pa["x"]; dy=t_use["y"]-pa["y"]; dz=t_use["z"]-pa["z"]
         dist=(dx*dx+dy*dy+dz*dz)**0.5
-        close=t[dist<=cutoff_A].copy(); close["_distance"]=dist[dist<=cutoff_A]
+        close=t_use[dist<=cutoff_A].copy(); close["_distance"]=dist[dist<=cutoff_A]
         for _,ta in close.sort_values("_distance").head(80).iterrows():
             d=float(ta["_distance"]); cls=[]; cutoff_used=CONTACT_CUTOFF_A
             if d<=CLASH_CUTOFF_A:
@@ -867,7 +1233,7 @@ def analyze_atom_level_contact_frames(t: pd.DataFrame, p: pd.DataFrame, cutoff_A
                 cls.append("hbond_distance_candidate"); cutoff_used=HYDROGEN_BOND_DA_CUTOFF_A
             if ((str(pa.get("aa","")).upper() in BASIC and str(ta.get("aa","")).upper() in ACIDIC) or (str(pa.get("aa","")).upper() in ACIDIC and str(ta.get("aa","")).upper() in BASIC)) and d<=CHARGE_PROXIMITY_CUTOFF_A:
                 cls.append("opposite_charge_residue_atom_proximity"); cutoff_used=CHARGE_PROXIMITY_CUTOFF_A
-            if _is_atom_hydrophobic(pa) and _is_atom_hydrophobic(ta) and d<=HYDROPHOBIC_CONTACT_CUTOFF_A:
+            if _is_atom_hydrophobic(pa) and _is_atom_hydrophobic(ta) and 3.3 <= d <= HYDROPHOBIC_CONTACT_CUTOFF_A:
                 cls.append("hydrophobic_atom_proximity"); cutoff_used=HYDROPHOBIC_CONTACT_CUTOFF_A
             if not cls:
                 cls.append("atom_proximity")
@@ -911,7 +1277,10 @@ def pdb_points_from_atoms(atoms: pd.DataFrame):
     if pts.empty:
         return pd.DataFrame(columns=["pep_pos","aa","x","y","z"])
     pts = pts.reset_index(drop=True)
-    return pd.DataFrame({"pep_pos": range(1, len(pts)+1), "aa": pts["aa"].tolist(), "x": pts["x"].tolist(), "y": pts["y"].tolist(), "z": pts["z"].tolist()})
+    parsed_pos = pd.to_numeric(pts.get("resi", pd.Series(dtype=float)), errors="coerce")
+    fallback_pos = pd.Series(range(1, len(pts) + 1), index=pts.index, dtype="int64")
+    pep_pos = parsed_pos.where(parsed_pos.notna(), fallback_pos).astype(int)
+    return pd.DataFrame({"pep_pos": pep_pos.tolist(), "aa": pts["aa"].tolist(), "x": pts["x"].tolist(), "y": pts["y"].tolist(), "z": pts["z"].tolist()})
 
 
 def complex_chain_split(path: str | Path | None):
@@ -1072,10 +1441,96 @@ def _clean_protein_sequence(seq: str) -> str:
         lines.append(s)
     return "".join([c for c in "".join(lines).upper() if c in AA_MASS])
 
+def _pdb_pepforge_remark_value(path: str | Path | None, label: str) -> str:
+    """Read one Pepforge REMARK value, including deterministic continuation lines."""
+    p = Path(path) if path else None
+    if not p or not p.exists() or p.suffix.lower() in {".cif", ".mmcif"}:
+        return ""
+    try:
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return ""
+    label = str(label or "").strip().upper()
+    if not label:
+        return ""
+    first_prefix = f"{label}:"
+    cont_prefix = f"{label}_CONT:"
+    chunks: list[str] = []
+    for line in lines:
+        if not line.startswith("REMARK"):
+            continue
+        payload = line[10:].strip() if len(line) > 10 else ""
+        upper = payload.upper()
+        if upper.startswith(first_prefix):
+            chunks.append(payload[len(first_prefix):].lstrip())
+        elif upper.startswith(cont_prefix):
+            chunks.append(payload[len(cont_prefix):].lstrip())
+    return "".join(chunks).strip()
+
+
+def _pdb_seqres_resnames(path: str | Path | None, chain: str | None = None) -> list[str]:
+    p = Path(path) if path else None
+    if not p or not p.exists() or p.suffix.lower() in {".cif", ".mmcif"}:
+        return []
+    out: list[str] = []
+    try:
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return []
+    wanted = str(chain or "").strip()
+    for line in lines:
+        if not line.startswith("SEQRES"):
+            continue
+        line_chain = line[11:12].strip() if len(line) >= 12 else ""
+        if wanted and line_chain != wanted:
+            continue
+        # PDB SEQRES residue names start at column 20 (1-based), whitespace separated.
+        out.extend(x.upper() for x in line[19:].split() if x.strip())
+    return out
+
+
+def pdb_to_peptide_notation(path: str | Path | None) -> str:
+    """Return the richest peptide notation recoverable from a PDB.
+
+    Pepforge exact-construct REMARK metadata wins because it preserves Ac/Pal,
+    labels, linkers, D/non-natural residues and terminal state.  External PDBs
+    fall back to SEQRES and finally residue-aware ATOM/HETATM records.
+    """
+    exact = _pdb_pepforge_remark_value(path, "PEPFORGE_EXACT_SEQUENCE")
+    if exact:
+        return canonical_peptide_notation(exact)
+    names = _pdb_seqres_resnames(path, chain="P") or _pdb_seqres_resnames(path)
+    if names:
+        seq = "".join(THREE_TO_ONE.get(name, "") for name in names)
+        if seq:
+            return seq
+    return pdb_to_sequence(path)
+
+
 def pdb_to_sequence(path: str | Path | None) -> str:
+    """Extract a canonical residue sequence from Pepforge or external PDB files.
+
+    Exact Pepforge notation is reduced to its residue core for legacy sequence
+    consumers.  Standard SEQRES is preferred to ATOM-derived sequence because
+    coordinate files can omit unresolved residues.
+    """
+    exact = _pdb_pepforge_remark_value(path, "PEPFORGE_EXACT_SEQUENCE")
+    if exact:
+        core = clean_sequence(exact)
+        if core:
+            return core
+    names = _pdb_seqres_resnames(path, chain="P") or _pdb_seqres_resnames(path)
+    if names:
+        seq = "".join(THREE_TO_ONE.get(name, "") for name in names)
+        if seq:
+            return seq
     atoms = parse_pdb_atoms(path) if path else pd.DataFrame()
     if atoms.empty:
         return ""
+    # Prefer the explicit peptide chain when PSB wrote one.  Chain X contains
+    # caps/linkers/modifiers and must not consume peptide residue positions.
+    if "chain" in atoms.columns and (atoms["chain"].astype(str) == "P").any():
+        atoms = atoms[atoms["chain"].astype(str) == "P"].copy()
     residues = atoms.drop_duplicates(["chain", "resi"]).copy()
     return "".join(residues.get("aa", pd.Series(dtype=str)).astype(str).tolist()).replace("X", "")
 
@@ -1705,13 +2160,35 @@ def combined_complex_pdb(target_atoms: pd.DataFrame, peptide_points: pd.DataFram
             serial+=1
     lines.append("TER")
     if peptide_points is not None and not peptide_points.empty:
+        modifier_serial = 0
         for _, r in peptide_points.iterrows():
-            aa=str(r.get('aa','G'))[:1] or 'G'
-            resn=ONE_TO_THREE.get(aa, 'GLY')
-            try: resi=int(float(r.get('pep_pos', serial)))
-            except Exception: resi=serial
-            lines.append(f"ATOM  {serial:5d}  CA  {resn:>3s} P{resi:4d}    {float(r.get('x',0)):8.3f}{float(r.get('y',0)):8.3f}{float(r.get('z',0)):8.3f}  1.00  0.00           C")
-            serial+=1
+            kind = str(r.get("token_class", "pdb_residue") or "pdb_residue")
+            token = str(r.get("token", "") or "").strip()
+            aa = str(r.get("aa", "X") or "X")[:1].upper()
+            x, y, z = float(r.get('x',0)), float(r.get('y',0)), float(r.get('z',0))
+            if kind in {"std_aa", "pdb_residue"}:
+                resn = ONE_TO_THREE.get(aa, (re.sub(r"[^A-Za-z0-9]", "", token.upper())[:3] or "UNK"))
+                try: resi = int(float(r.get('pep_pos', serial)))
+                except Exception: resi = serial
+                record, chain = "ATOM  ", "P"
+            elif kind in {"d_std_aa", "non_natural_aa", "sidechain_label_aa"}:
+                if kind == "d_std_aa" and aa in ONE_TO_THREE:
+                    resn = ("D" + aa)[:3]
+                elif kind == "sidechain_label_aa" and aa in ONE_TO_THREE:
+                    resn = ONE_TO_THREE[aa]
+                else:
+                    resn = (re.sub(r"[^A-Za-z0-9]", "", token.upper())[:3] or "NNA")
+                try: resi = int(float(r.get('pep_pos', serial)))
+                except Exception: resi = serial
+                record, chain = "HETATM", "P"
+            else:
+                modifier_serial += 1
+                special = {"AC": "ACE", "NH2": "AMD", "OH": "OH"}
+                resn = special.get(token.upper(), (re.sub(r"[^A-Za-z0-9]", "", token.upper())[:3] or "MOD"))
+                resi = modifier_serial
+                record, chain = "HETATM", "X"
+            lines.append(f"{record}{serial:5d}  CA  {resn:>3s} {chain}{resi:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           C")
+            serial += 1
     lines.append("END")
     return "\n".join(lines)+"\n"
 
@@ -1749,25 +2226,44 @@ def resolve_target_input(target_mode: str, target_path: str | Path | None, targe
 class DockingWorkbenchGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Docking Workbench")
+        self.title("Pepforge Docking Workbench")
         set_pepforge_icon(self)
-        self.geometry("1780x1040")
-        self.minsize(1180, 760)
         apply_pepforge_theme(self)
+        fit_window(self, preferred_width=1780, preferred_height=1040, minimum_width=1180, minimum_height=760)
+        self._startup_trace = StartupTrace("docking_workbench", ROOT / "workspace" / "docking" / "logs")
         self.last_outdir=None
+        self._active_result_bundle: Path | None = None
+        self._active_result_key: tuple[str, str] | None = None
         self._install_green_progress_style()
         self._build()
+        mark_window_visible(self, self._startup_trace)
 
     def _default_outdir(self) -> Path:
         return configured_output(ROOT/"outputs"/"docking_workbench", "docking")
 
-    def _effective_outdir(self) -> Path:
+    def _output_base_dir(self) -> Path:
         raw = str(self.outdir.get() or "").strip()
         if raw:
-            return Path(raw).expanduser()
-        outdir = self._default_outdir()
-        self.outdir.set(str(outdir))
-        return outdir
+            base = Path(raw).expanduser()
+        else:
+            base = self._default_outdir()
+            self.outdir.set(str(base))
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _effective_outdir(self) -> Path:
+        base = self._output_base_dir()
+        sequence = ""
+        seq_var = getattr(self, "seq", None)
+        if hasattr(seq_var, "get"):
+            sequence = str(seq_var.get() or "").strip()
+        key = (str(base.resolve()), sequence or "Docking")
+        if self._active_result_bundle is not None and self._active_result_key == key and self._active_result_bundle.exists():
+            return self._active_result_bundle
+        bundle = create_result_bundle(base, sequence=sequence or None, name=None if sequence else "Docking", tool="Docking")
+        self._active_result_bundle = bundle
+        self._active_result_key = key
+        return bundle
 
     @staticmethod
     def _path_fingerprint(path_text: str) -> tuple:
@@ -1866,6 +2362,9 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Label(mode_row,text="Peptide input",width=14).pack(side="left",padx=(16,0))
         cb2=ttk.Combobox(mode_row,textvariable=self.peptide_mode,values=["Sequence","PDB"],width=12,state="readonly"); cb2.pack(side="left",padx=4)
         ttk.Label(mode_row,textvariable=self.mode_hint,foreground="#444").pack(side="left",padx=12)
+        self.advanced_input_visible=False
+        self.advanced_input_toggle=ttk.Button(mode_row,text="Show advanced input",command=self.toggle_advanced_input)
+        self.advanced_input_toggle.pack(side="right",padx=(8,0))
         pdb_box=ttk.LabelFrame(top,text="PDB",padding=8); pdb_box.grid(row=1,column=0,sticky="nsew",padx=(0,6))
         seq_box=ttk.LabelFrame(top,text="SEQUENCE",padding=8); seq_box.grid(row=1,column=1,sticky="nsew",padx=(6,0))
         ttk.Label(pdb_box,text="Protein / complex PDB or mmCIF",width=28).grid(row=0,column=0,sticky="w")
@@ -1876,13 +2375,17 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Entry(pdb_box,textvariable=self.result_path).grid(row=2,column=1,sticky="ew",padx=4); ttk.Button(pdb_box,text="Import",command=self.browse_result).grid(row=2,column=2,padx=4,sticky="e")
         pdb_box.columnconfigure(1,weight=1)
         ttk.Label(seq_box,text="Protein sequence",width=22).grid(row=0,column=0,sticky="w")
-        ttk.Entry(seq_box,textvariable=self.target_seq).grid(row=0,column=1,sticky="ew",padx=4)
+        ttk.Entry(seq_box,textvariable=self.target_seq).grid(row=0,column=1,columnspan=2,sticky="ew",padx=4)
         ttk.Label(seq_box,text="Peptide sequence",width=22).grid(row=1,column=0,sticky="w")
-        ttk.Entry(seq_box,textvariable=self.seq).grid(row=1,column=1,sticky="ew",padx=4)
+        ttk.Entry(seq_box,textvariable=self.seq).grid(row=1,column=1,columnspan=2,sticky="ew",padx=4)
         ttk.Label(seq_box,text="Output folder",width=22).grid(row=2,column=0,sticky="w")
         ttk.Entry(seq_box,textvariable=self.outdir).grid(row=2,column=1,sticky="ew",padx=4); ttk.Button(seq_box,text="Browse",command=self.browse_outdir).grid(row=2,column=2,padx=4,sticky="e")
         seq_box.columnconfigure(1,weight=1)
-        rcsb_box=ttk.LabelFrame(top,text="RCSB PDB Search / Fetch",padding=8); rcsb_box.grid(row=2,column=0,columnspan=2,sticky="ew",pady=(8,0))
+        advanced_input=ttk.Frame(top)
+        advanced_input.grid(row=2,column=0,columnspan=2,sticky="ew",pady=(6,0))
+        advanced_input.columnconfigure(0,weight=1)
+        self.advanced_input_frame=advanced_input
+        rcsb_box=ttk.LabelFrame(advanced_input,text="RCSB PDB Search / Fetch",padding=8); rcsb_box.grid(row=0,column=0,sticky="ew",pady=(0,6))
         ttk.Label(rcsb_box,text="PDB code / protein name / sequence",width=30).grid(row=0,column=0,sticky="w")
         ttk.Entry(rcsb_box,textvariable=self.rcsb_query).grid(row=0,column=1,sticky="ew",padx=4)
         ttk.Label(rcsb_box,text="Mode").grid(row=0,column=2,sticky="e")
@@ -1893,7 +2396,7 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Button(rcsb_box,text="Fetch selected to Target",command=self.fetch_selected_rcsb_target).grid(row=0,column=7,padx=4)
         ttk.Button(rcsb_box,text="Open RCSB page",command=self.open_selected_rcsb_page).grid(row=0,column=8,padx=4)
         rcsb_box.columnconfigure(1,weight=1)
-        prep_box=ttk.LabelFrame(top,text="Target Preparation",padding=8); prep_box.grid(row=3,column=0,columnspan=2,sticky="ew",pady=(8,0))
+        prep_box=ttk.LabelFrame(advanced_input,text="Target Preparation",padding=8); prep_box.grid(row=1,column=0,sticky="ew",pady=(0,6))
         ttk.Label(prep_box,text="Selected chains",width=18).grid(row=0,column=0,sticky="w")
         ttk.Entry(prep_box,textvariable=self.target_selected_chains,width=18).grid(row=0,column=1,sticky="w",padx=4)
         ttk.Checkbutton(prep_box,text="keep waters",variable=self.keep_waters).grid(row=0,column=2,sticky="w",padx=4)
@@ -1902,25 +2405,24 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Button(prep_box,text="Prepare Target",command=self.prepare_target_structure).grid(row=0,column=5,padx=8)
         ttk.Label(prep_box,text="Example: A or A,B. Blank = all chains.",foreground="#555").grid(row=0,column=6,sticky="w")
         prep_box.columnconfigure(6,weight=1)
-        complex_box=ttk.LabelFrame(top,text="Complex Builder",padding=8); complex_box.grid(row=4,column=0,columnspan=2,sticky="ew",pady=(8,0))
+        complex_box=ttk.LabelFrame(advanced_input,text="Complex Builder",padding=8); complex_box.grid(row=2,column=0,sticky="ew")
         ttk.Label(complex_box,text="Peptide chain ID",width=18).grid(row=0,column=0,sticky="w")
         ttk.Entry(complex_box,textvariable=self.complex_chain_id,width=6).grid(row=0,column=1,sticky="w",padx=4)
         ttk.Button(complex_box,text="Build Initial Complex",command=self.build_initial_complex).grid(row=0,column=2,padx=8)
         ttk.Label(complex_box,text="Uses target PDB plus peptide coordinates. Sequence peptides are built by Peptide Structure Builder; no surrogate residue model is used.",foreground="#555").grid(row=0,column=3,sticky="w")
         complex_box.columnconfigure(3,weight=1)
+        advanced_input.grid_remove()
         top.columnconfigure(0,weight=1); top.columnconfigure(1,weight=1)
         for var in (self.target_mode, self.peptide_mode): var.trace_add("write", lambda *_: self._update_mode_hint())
         btns=ttk.Frame(main); btns.pack(fill="x",pady=8)
         self.input_toggle_btn = ttk.Button(btns,text="Collapse Input",command=self.toggle_input_panel)
         self.input_toggle_btn.pack(side="left",padx=3)
-        ttk.Button(btns,text="Analyze",command=self.analyze).pack(side="left",padx=3)
-        self.run_screening_btn = ttk.Button(btns,text="Run Screening",command=self.run_docking)
+        ttk.Button(btns,text="Analyze Inputs",command=self.analyze).pack(side="left",padx=3)
+        self.run_screening_btn = ttk.Button(btns,text="Run Screening",command=self.run_docking,style="Accent.TButton")
         self.run_screening_btn.pack(side="left",padx=3)
-        ttk.Button(btns,text="Export",command=self.export).pack(side="left",padx=3)
-        ttk.Button(btns,text="Load",command=self.load_output_folder).pack(side="left",padx=3)
-        ttk.Button(btns,text="Open Folder",command=self.open_output).pack(side="left",padx=3)
-        ttk.Button(btns,text="Input data full",command=lambda: self.show_data_full("input")).pack(side="left",padx=3)
-        ttk.Button(btns,text="Results data full",command=lambda: self.show_data_full("results")).pack(side="left",padx=3)
+        ttk.Button(btns,text="Export Results",command=self.export).pack(side="left",padx=3)
+        ttk.Button(btns,text="Load Results",command=self.load_output_folder).pack(side="left",padx=3)
+        ttk.Button(btns,text="Open Output Folder",command=self.open_output).pack(side="left",padx=3)
         
         self.progress_var=tk.DoubleVar(value=0.0)
         self.progress_text=tk.StringVar(value="Ready")
@@ -1929,6 +2431,9 @@ class DockingWorkbenchGUI(tk.Tk):
         adv=ttk.Menubutton(btns,text="Advanced")
         adv_menu=tk.Menu(adv,tearoff=False)
         adv_menu.add_command(label="Run docking only", command=self.run_docking)
+        adv_menu.add_separator()
+        adv_menu.add_command(label="Show full input tables", command=lambda: self.show_data_full("input"))
+        adv_menu.add_command(label="Show full result tables", command=lambda: self.show_data_full("results"))
         adv["menu"]=adv_menu
         adv.pack(side="left",padx=3)
         self.tabs=ttk.Notebook(main); self.tabs.pack(fill="both",expand=True)
@@ -1951,23 +2456,25 @@ class DockingWorkbenchGUI(tk.Tk):
         self.compat_tree=self._tree_panel(input_tab,"Modified residues and chemicals",["metric","value","note"], height=5)
         self.pipeline_tree=self._tree_panel(input_tab,"Workflow",["stage","status","function","input_used","output","note"], height=6)
 
-        self.interpret_tree=self._tree_panel(results,"Result interpretation",["item","status","interpretation"], height=5)
-        self.pose_tree=self._tree_panel(results,"Geometry candidates",_pose_columns(), height=10)
-        self.import_tree=self._tree_panel(results,"Screening evidence / external result",["source","metric","value","unit","interpretation","method_note"], height=8)
-        self.external_style_tree=self._tree_panel(results,"External validation status",["engine_style","metric","value","unit","interpretation","external_equivalent"], height=8)
-        self.risk_tree=self._tree_panel(results,"Risk summary",["risk","score","level","note"], height=5)
-        self.readiness_tree=self._tree_panel(results,"Readiness",["metric","value","note"], height=4)
+        # Readability-first normal result view.  Raw transforms, centers, and
+        # every legacy evidence table remain in Results data full / CSV export.
+        self.interpret_tree=self._tree_panel(results,"Screening summary",["item","value","interpretation"], height=6)
+        self.best_contact_tree=self._tree_panel(results,"Best pose — contacting residues",_contact_display_columns(), height=12)
+        self.pose_tree=self._tree_panel(results,"Pose comparison",_pose_display_columns(), height=8)
+        self.import_tree=None
+        self.external_style_tree=None
+        self.risk_tree=None
+        self.readiness_tree=None
 
-        self.contact_tree=self._tree_panel(contacts,"Top interaction contacts",_contact_columns(), height=22)
-        self.complex_tree=self._tree_panel(contacts,"Initial complex builder",["item","value","note"], height=6)
-        # Technical atom/proxy contacts and peptide residue maps are still exported,
-        # but are no longer shown as separate panes in the public UI because they
-        # made the Contacts tab hard to read.
-        self.atom_contact_tree = None
+        self.contact_tree=self._tree_panel(contacts,"Residue contacts",_contact_display_columns(), height=12)
+        self.specific_interaction_tree=self._tree_panel(contacts,"Specific interactions — conservative PyMOL criteria",_specific_interaction_display_columns(), height=12)
+        self.atom_contact_tree=self._tree_panel(contacts,"Atom-level residue pairs / interaction candidates",_atom_pair_display_columns(), height=10)
+        self.complex_tree=None
         self.residue_tree = None
 
-        self.sim_tree=self._tree_panel(md,"MD screening summary",["metric","value","unit","interpretation"], height=8)
-        self.md_tree=self._tree_panel(md,"MD readable trend",["frame","time_ps","rmsd_A","contacts","clashes","min_distance_A","interpretation"], height=12)
+        self.external_style_tree=self._tree_panel(md,"External validation status",["engine_style","metric","value","unit","interpretation","external_equivalent"], height=7)
+        self.sim_tree=self._tree_panel(md,"MD / dynamics status",["metric","value","unit","interpretation"], height=7)
+        self.md_tree=self._tree_panel(md,"Imported MD trend",["frame","time_ps","rmsd_A","contacts","clashes","min_distance_A","interpretation"], height=10)
         self.md_result_tree=self._tree_panel(imports,"Imported external validation results",["source","series","points","last_value","mean_value","note"], height=8)
         ed_box=ttk.LabelFrame(imports,text="External Docking Result Import",padding=6); ed_box.pack(fill="x",expand=False,pady=3)
         ttk.Label(ed_box,text="File or folder",width=14).grid(row=0,column=0,sticky="w")
@@ -2116,17 +2623,18 @@ class DockingWorkbenchGUI(tk.Tk):
         return str(resolved.get("sequence") or "")
 
     def _active_peptide_sequence(self):
-        # When peptide input is explicitly a PDB, prefer the sequence parsed from that file.
-        # This prevents the default example peptide text from overriding the loaded peptide PDB.
+        # Pepforge PSB PDBs carry exact construct notation in REMARK metadata.
+        # Prefer it over residue-only extraction so Ac/Pal/linker/D/non-natural
+        # identity survives the PSB -> Docking hand-off.
         if self.peptide_mode.get() == "PDB" and self._path_exists(self.pep_pdb_path.get()):
-            pdb_seq = pdb_to_sequence(self._peptide_pdb_path())
-            if pdb_seq:
-                return pdb_seq
-        seq = clean_sequence(self.seq.get())
+            pdb_notation = pdb_to_peptide_notation(self._peptide_pdb_path())
+            if pdb_notation:
+                return pdb_notation
+        seq = canonical_peptide_notation(self.seq.get())
         if seq:
             return seq
         if self._path_exists(self.pep_pdb_path.get()):
-            return pdb_to_sequence(self._peptide_pdb_path())
+            return pdb_to_peptide_notation(self._peptide_pdb_path())
         return ""
 
     def _normalize_input_modes(self):
@@ -2175,18 +2683,36 @@ class DockingWorkbenchGUI(tk.Tk):
         box.rowconfigure(0, weight=1)
         box.columnconfigure(0, weight=1)
         tr = ttk.Treeview(box, columns=cols, show="headings", height=height)
+        heading_map = {
+            "rank":"Rank", "orientation":"Orientation", "contacts":"Contacts",
+            "protein_residues":"Protein contact residues", "peptide_residues":"Peptide contact residues",
+            "closest_A":"Closest (Å)", "hydrophobic":"Hydrophobic", "charge":"Charge",
+            "aromatic":"Aromatic", "polar":"Polar", "clash_warnings":"Clash warnings",
+            "protein_residue":"Protein residue", "peptide_residue":"Peptide residue",
+            "distance_A":"Distance (Å)", "interaction":"Interaction / evidence",
+            "min_distance_A":"Min distance (Å)", "interaction_candidates":"Interaction candidates",
+            "protein_atoms":"Protein atoms", "peptide_atoms":"Peptide atoms", "atom_pairs":"Atom pairs",
+            "item":"Item", "value":"Value", "status":"Status", "interpretation":"Interpretation",
+        }
+        width_map = {
+            "rank":60, "orientation":105, "contacts":75, "protein_residues":300, "peptide_residues":250,
+            "closest_A":95, "hydrophobic":95, "charge":80, "aromatic":85, "polar":75, "clash_warnings":105,
+            "protein_residue":145, "peptide_residue":145, "distance_A":95, "interaction":360,
+            "min_distance_A":110, "interaction_candidates":360, "protein_atoms":220, "peptide_atoms":220, "atom_pairs":80,
+            "item":190, "value":320, "interpretation":620,
+        }
         for c in cols:
-            tr.heading(c, text=c)
-            width = 380 if c in ("note", "method_note", "interpretation") else 150
+            tr.heading(c, text=heading_map.get(c, str(c).replace("_", " ").title()))
+            width = width_map.get(c, 380 if c in ("note", "method_note", "interpretation") else 150)
             if c in ("protein_window", "peptide_window"):
                 width = 260
-            if c in ("protein_residue", "peptide_residue", "target_residue"):
-                width = 130
-            if c in ("interaction", "contact_class"):
-                width = 260
+            if c in ("target_residue",):
+                width = 140
+            if c in ("contact_class",):
+                width = 280
             if c in ("function", "input_used", "output"):
                 width = 260
-            tr.column(c, width=width, minwidth=80, stretch=True, anchor="w")
+            tr.column(c, width=width, minwidth=55, stretch=True, anchor="w")
         y = ttk.Scrollbar(box, orient="vertical", command=tr.yview)
         x = ttk.Scrollbar(box, orient="horizontal", command=tr.xview)
         tr.configure(yscrollcommand=y.set, xscrollcommand=x.set)
@@ -2212,6 +2738,18 @@ class DockingWorkbenchGUI(tk.Tk):
         return tr
     def _text_tab(self,name):
         fr=ttk.Frame(self.tabs); self.tabs.add(fr,text=name); txt=tk.Text(fr,wrap="word"); txt.pack(fill="both",expand=True); return txt
+
+    def toggle_advanced_input(self):
+        """Show optional target-search/preparation tools without cluttering the default screen."""
+        frame=getattr(self,"advanced_input_frame",None)
+        if frame is None:
+            return
+        if getattr(self,"advanced_input_visible",False):
+            frame.grid_remove(); self.advanced_input_visible=False
+            self.advanced_input_toggle.configure(text="Show advanced input")
+        else:
+            frame.grid(); self.advanced_input_visible=True
+            self.advanced_input_toggle.configure(text="Hide advanced input")
 
     def toggle_input_panel(self):
         """Collapse/expand the large Input block so Target summary and result panes remain visible."""
@@ -2813,13 +3351,23 @@ class DockingWorkbenchGUI(tk.Tk):
         if p: self.pdb_path.set(p); self.analyze()
     def browse_peptide_pdb(self):
         p=filedialog.askopenfilename(filetypes=[("Structure files","*.pdb *.ent *.cif *.mmcif *.txt"),("All files","*.*")])
-        if p: self.pep_pdb_path.set(p); self.analyze()
+        if p:
+            self.pep_pdb_path.set(p)
+            recovered = pdb_to_peptide_notation(p)
+            if recovered:
+                # Make the recovered construct visible/editable to the operator.
+                self.seq.set(recovered)
+            self.analyze()
     def browse_result(self):
         p=filedialog.askopenfilename(filetypes=[("Docking/MD result files","*.csv *.xlsx *.pdb *.cif *.mmcif *.txt *.log *.out *.xvg"),("All files","*.*")])
         if p: self.result_path.set(p); self.import_external_result()
+
     def browse_outdir(self):
         p=filedialog.askdirectory()
-        if p: self.outdir.set(p)
+        if p:
+            self.outdir.set(p)
+            self._active_result_bundle = None
+            self._active_result_key = None
 
     def _all_docking_data_tables(self):
         """Return complete Docking Workbench tables for full-data popups/export review.
@@ -2845,6 +3393,8 @@ class DockingWorkbenchGUI(tk.Tk):
             "docking_residue_contact_report": getattr(self, "contacts", pd.DataFrame()),
             "docking_residue_contact_report_full": getattr(self, "all_contacts", getattr(self, "contacts", pd.DataFrame())),
             "docking_atom_contact_report": getattr(self, "atom_contacts", pd.DataFrame()),
+            "docking_specific_interaction_evidence": getattr(self, "specific_interactions", pd.DataFrame()),
+            "interaction_evidence_profiles": interaction_profile_table(),
             "screening_evidence_summary": getattr(self, "screening_evidence", screening_evidence_df(getattr(self, "poses", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame()))),
             "external_result_import_summary": getattr(self, "imported_results", pd.DataFrame()),
             "external_style_validation_summary": self._external_style_validation_df(),
@@ -2863,14 +3413,16 @@ class DockingWorkbenchGUI(tk.Tk):
         group = str(group or "results").lower()
         groups = {
             "input": ["peptide_properties", "terminal_state", "target_structure_summary", "target_preparation_report", "binding_site_selector_report", "rcsb_pdb_search_results", "sequence_pair_heuristic", "workflow", "modified_residue_compatibility", "terminal_modifier_policy", "all_atom_parameter_requirements"],
-            "results": ["result_interpretation", "docking_pose_candidates", "screening_evidence_summary", "external_result_import_summary", "external_style_validation_summary", "peptide_risk_summary", "docking_readiness", "simulation_summary", "docking_residue_contact_report", "docking_residue_contact_report_full", "docking_atom_contact_report"],
+            "results": ["result_interpretation", "docking_pose_candidates", "screening_evidence_summary", "external_result_import_summary", "external_style_validation_summary", "peptide_risk_summary", "docking_readiness", "simulation_summary", "docking_residue_contact_report", "docking_residue_contact_report_full", "docking_atom_contact_report", "docking_specific_interaction_evidence", "interaction_evidence_profiles"],
             "md": ["external_style_validation_summary", "molecular_dynamics_status", "md_result_import_summary"],
         }
         tables = self._all_docking_data_tables()
         names = groups.get(group, groups["results"])
         win = tk.Toplevel(self)
         win.title(f"Docking Workbench - {group.title()} data full")
-        win.geometry("1180x760")
+        set_pepforge_icon(win)
+        apply_pepforge_theme(win)
+        fit_window(win, preferred_width=1180, preferred_height=760, minimum_width=920, minimum_height=620)
         win.rowconfigure(0, weight=1)
         win.columnconfigure(0, weight=1)
         nb = ttk.Notebook(win)
@@ -2904,6 +3456,8 @@ class DockingWorkbenchGUI(tk.Tk):
         self.progress_text.set(f"{group.title()} data full opened")
 
     def _write_tree(self,tree,df):
+        if tree is None:
+            return
         tree.delete(*tree.get_children())
         if df is None or df.empty:
             try:
@@ -3015,6 +3569,7 @@ class DockingWorkbenchGUI(tk.Tk):
             self.poses = pd.DataFrame(columns=self.pose_tree["columns"])
             self.contacts = pd.DataFrame(columns=self.contact_tree["columns"])
             self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
+            self.specific_interactions = pd.DataFrame()
             # Analyze is intentionally lightweight: sequence-derived 3D peptide
             # geometry is generated only when Run Screening is requested.
             self.peptide_model = pd.DataFrame(columns=["pep_pos","aa","token","token_class","x","y","z"])
@@ -3027,6 +3582,7 @@ class DockingWorkbenchGUI(tk.Tk):
                 (self.prop_tree,self.props),(self.terminal_tree,self.terminal_status),(self.pdb_tree,self.pdb),
                 (self.seqpair_tree,self.seqpair),(self.pipeline_tree,self.pipeline),(self.risk_tree,self.risk),
                 (self.readiness_tree,self.readiness),(self.pose_tree,self.poses),(self.contact_tree,self.contacts),
+                (self.specific_interaction_tree,specific_interaction_display_df(self.specific_interactions)),
                 (self.import_tree,self._combined_result_report()),(self.external_style_tree,self._external_style_validation_df()),
                 (self.md_result_tree,getattr(self,"md_result_import",pd.DataFrame())),
                 (self.sim_tree,simulation_summary_df(self.poses,self.contacts,self.risk)),
@@ -3230,9 +3786,38 @@ class DockingWorkbenchGUI(tk.Tk):
                     # transform to the actual peptide atomic coordinates and analyze those.
                     if (self.atom_contacts is None or self.atom_contacts.empty) and isinstance(self.poses,pd.DataFrame) and not self.poses.empty and getattr(self,"peptide_source_pdb",""):
                         source_atoms=parse_pdb_atoms(self.peptide_source_pdb)
+                        meta_path=(getattr(self, "peptide_structure_paths", {}) or {}).get("json")
+                        source_atoms=annotate_peptide_atoms_from_structure_metadata(source_atoms, meta_path)
                         if not source_atoms.empty:
                             self.peptide_posed_atoms=apply_pose_transform_to_atoms(source_atoms,self.poses.iloc[0])
                             self.atom_contacts=analyze_atom_level_contact_frames(self.target_atoms,self.peptide_posed_atoms)
+
+                # Specific interaction evidence is a geometry-aware review layer,
+                # kept separate from the legacy coarse screening labels for backward compatibility.
+                self.specific_interactions = pd.DataFrame()
+                try:
+                    evidence_target = pd.DataFrame()
+                    evidence_peptide = pd.DataFrame()
+                    if complex_mode and resolved.get("path"):
+                        evidence_target, evidence_peptide, _, _ = complex_chain_split(resolved.get("path"))
+                    elif isinstance(getattr(self, "target_atoms", None), pd.DataFrame) and not self.target_atoms.empty:
+                        evidence_target = self.target_atoms
+                        if isinstance(getattr(self, "peptide_posed_atoms", None), pd.DataFrame) and not self.peptide_posed_atoms.empty:
+                            evidence_peptide = self.peptide_posed_atoms
+                        elif self.peptide_mode.get() == "PDB" and self._peptide_pdb_path():
+                            evidence_peptide = parse_pdb_atoms(self._peptide_pdb_path())
+                    self.interface_quality_evidence = {"status":"not_available","reason":"target/peptide coordinate pair unavailable"}
+                    if not evidence_target.empty and not evidence_peptide.empty:
+                        self.specific_interactions = analyze_interaction_evidence(
+                            evidence_target, evidence_peptide, profile_name="CONSERVATIVE_MANUAL", representative_only=True
+                        )
+                        self.interface_quality_evidence = interface_quality_evidence(
+                            evidence_target, evidence_peptide, interaction_profile="CONSERVATIVE_MANUAL"
+                        )
+                except Exception:
+                    LOGGER.exception("Specific interaction evidence analysis failed; coarse screening remains available")
+                    self.specific_interactions = pd.DataFrame()
+                    self.interface_quality_evidence = {"status":"unavailable","reason":"interface quality analysis failed"}
 
                 stage = "contact summary"
                 self._set_progress(75, "Summarizing coordinate contacts...")
@@ -3243,14 +3828,24 @@ class DockingWorkbenchGUI(tk.Tk):
 
             stage = "results rendering"
             self._set_progress(90, "Updating results...")
+            pose_view = pose_display_df(self.poses, getattr(self, "all_contacts", self.contacts))
+            contact_view = contact_display_df(self.contacts, self.poses, best_pose_only=False, top_n=80)
+            best_contact_view = contact_display_df(getattr(self, "all_contacts", self.contacts), self.poses, best_pose_only=True, top_n=30)
+            atom_pair_view = atom_pair_display_df(getattr(self, "atom_contacts", pd.DataFrame()), top_n=80)
+            overview = screening_overview_df(
+                self.poses, getattr(self, "all_contacts", self.contacts),
+                getattr(self, "atom_contacts", pd.DataFrame()),
+                getattr(self, "specific_interactions", pd.DataFrame()),
+            )
             for tree, df in [
                 (self.prop_tree,self.props),(self.terminal_tree,self.terminal_status),(self.pdb_tree,self.pdb),
-                (self.seqpair_tree,self.seqpair),(self.pipeline_tree,self.pipeline),(self.risk_tree,self.risk),
-                (self.readiness_tree,self.readiness),(self.pose_tree,self.poses),(self.contact_tree,self.contacts),
-                (self.import_tree,self._combined_result_report()),(self.external_style_tree,self._external_style_validation_df()),
+                (self.seqpair_tree,self.seqpair),(self.pipeline_tree,self.pipeline),
+                (self.pose_tree,pose_view),(self.best_contact_tree,best_contact_view),(self.contact_tree,contact_view),
+                (self.specific_interaction_tree,specific_interaction_display_df(getattr(self,"specific_interactions",pd.DataFrame()))),
+                (self.atom_contact_tree,atom_pair_view),(self.external_style_tree,self._external_style_validation_df()),
                 (self.sim_tree,simulation_summary_df(self.poses,self.contacts,self.risk)),
                 (self.md_tree,self._md_readable_frames(getattr(self,"md_frames",pd.DataFrame()))),
-                (self.interpret_tree,self._interpretation_df()),
+                (self.interpret_tree,overview),
             ]:
                 self._write_tree(tree, df)
             try:
@@ -3328,9 +3923,7 @@ class DockingWorkbenchGUI(tk.Tk):
 
         active_target_seq=self._active_target_sequence()
         active_peptide_seq=self._peptide_metadata_sequence()
-        out_base=self._effective_outdir(); out_base.mkdir(parents=True,exist_ok=True)
-        stamp=datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        out=out_base/("docking_"+stamp); out.mkdir(parents=True,exist_ok=True)
+        out=self._effective_outdir()
 
         self.screening_evidence=screening_evidence_df(getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
         external_results=getattr(self,"imported_results",pd.DataFrame())
@@ -3351,9 +3944,16 @@ class DockingWorkbenchGUI(tk.Tk):
             "terminal_modifier_policy":terminal_modifier_policy_df(active_peptide_seq),
             "all_atom_parameter_requirements":all_atom_parameter_requirements_df(active_peptide_seq),
             "docking_pose_candidates":getattr(self,"poses",pd.DataFrame()),
+            "docking_pose_summary_readable":pose_display_df(getattr(self,"poses",pd.DataFrame()), getattr(self,"all_contacts",getattr(self,"contacts",pd.DataFrame()))),
             "docking_residue_contact_report":getattr(self,"contacts",pd.DataFrame()),
+            "docking_residue_contact_report_readable":contact_display_df(getattr(self,"contacts",pd.DataFrame()), getattr(self,"poses",pd.DataFrame()), best_pose_only=False, top_n=200),
+            "docking_best_pose_contacts_readable":contact_display_df(getattr(self,"all_contacts",getattr(self,"contacts",pd.DataFrame())), getattr(self,"poses",pd.DataFrame()), best_pose_only=True, top_n=200),
             "docking_residue_contact_report_full":getattr(self,"all_contacts",getattr(self,"contacts",pd.DataFrame())),
             "docking_atom_contact_report":getattr(self,"atom_contacts",pd.DataFrame()),
+            "docking_atom_pair_summary_readable":atom_pair_display_df(getattr(self,"atom_contacts",pd.DataFrame()), top_n=200),
+            "docking_screening_overview_readable":screening_overview_df(getattr(self,"poses",pd.DataFrame()), getattr(self,"all_contacts",getattr(self,"contacts",pd.DataFrame())), getattr(self,"atom_contacts",pd.DataFrame()), getattr(self,"specific_interactions",pd.DataFrame())),
+            "docking_specific_interaction_evidence":getattr(self,"specific_interactions",pd.DataFrame()),
+            "interaction_evidence_profiles":interaction_profile_table(),
             "screening_evidence_summary":self.screening_evidence,
             "external_result_import_summary":external_results,
             "external_md_result_import_summary":md_import,
@@ -3369,6 +3969,10 @@ class DockingWorkbenchGUI(tk.Tk):
             if not isinstance(df,pd.DataFrame): df=pd.DataFrame(df)
             df.to_csv(out/f"{name}.csv",index=False,encoding="utf-8-sig")
         (out/"screening_evidence_report.md").write_text(screening_report_markdown(self.screening_evidence),encoding="utf-8")
+        specific_summary = interaction_summary(getattr(self, "specific_interactions", pd.DataFrame()))
+        (out/"specific_interaction_evidence_summary.json").write_text(json.dumps(specific_summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        interface_quality = dict(getattr(self, "interface_quality_evidence", {"status":"not_available"}) or {})
+        (out/"interface_quality_evidence.json").write_text(json.dumps(interface_quality, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         if active_peptide_seq:
             fasta_name=re.sub(r"[^A-Za-z0-9_\-]","_",active_peptide_seq)[:50] or "peptide"
@@ -3457,10 +4061,12 @@ class DockingWorkbenchGUI(tk.Tk):
             encoding="utf-8"
         )
         (out/"CITATION_NOTICE.txt").write_text(
-            "Pepforge Citation Notice\n\nRecommended citation:\nWoo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version 3.0.0.\n\n"
+            f"Pepforge Citation Notice\n\nRecommended citation:\nWoo, S. Pepforge: An Integrated Peptide Research Workbench. GitHub repository, Version {PEPFORGE_VERSION}.\n\n"
             "Pepforge internal Docking Workbench output is geometry/contact screening evidence, not an experimental or thermodynamic affinity result.\n",
             encoding="utf-8"
         )
+        zip_path = build_bundle_zip(out, filename="Docking_Result_Package.zip")
+        write_bundle_manifest(out, tool="Docking", sequence=active_peptide_seq, artifacts={"zip": zip_path, "xlsx": out/"docking_workbench_report.xlsx"})
         self.last_outdir=out
         messagebox.showinfo("Export complete",f"Exported to:\n{out}")
         return out
@@ -3477,8 +4083,11 @@ class DockingWorkbenchGUI(tk.Tk):
                 ("target_structure_summary.csv", self.pdb_tree, "pdb"),
                 ("sequence_pair_descriptors.csv", self.seqpair_tree, "seqpair"),
                 ("workflow.csv", self.pipeline_tree, "pipeline"),
-                ("docking_pose_candidates.csv", self.pose_tree, "poses"),
-                ("docking_residue_contact_report.csv", self.contact_tree, "contacts"),
+                ("docking_pose_candidates.csv", None, "poses"),
+                ("docking_residue_contact_report.csv", None, "contacts"),
+                ("docking_residue_contact_report_full.csv", None, "all_contacts"),
+                ("docking_atom_contact_report.csv", None, "atom_contacts"),
+                ("docking_specific_interaction_evidence.csv", None, "specific_interactions"),
                 ("peptide_risk_summary.csv", self.risk_tree, "risk"),
                 ("docking_readiness.csv", self.readiness_tree, "readiness"),
                 ("token_compatibility.csv", self.compat_tree, "compatibility"),
@@ -3505,9 +4114,17 @@ class DockingWorkbenchGUI(tk.Tk):
             self.imported_results=pd.read_csv(ext) if ext.exists() else pd.DataFrame(columns=["source","metric","value","unit","interpretation","method_note"])
             if not hasattr(self,"screening_evidence"):
                 self.screening_evidence=screening_evidence_df(getattr(self,"poses",pd.DataFrame()),getattr(self,"contacts",pd.DataFrame()))
-                self._write_tree(self.import_tree,self._combined_result_report())
+            raw_contacts=getattr(self,"all_contacts",getattr(self,"contacts",pd.DataFrame()))
+            self._write_tree(self.pose_tree, pose_display_df(getattr(self,"poses",pd.DataFrame()), raw_contacts))
+            self._write_tree(self.best_contact_tree, contact_display_df(raw_contacts, getattr(self,"poses",pd.DataFrame()), best_pose_only=True, top_n=30))
+            self._write_tree(self.contact_tree, contact_display_df(getattr(self,"contacts",pd.DataFrame()), getattr(self,"poses",pd.DataFrame()), best_pose_only=False, top_n=80))
+            self._write_tree(self.specific_interaction_tree, specific_interaction_display_df(getattr(self,"specific_interactions",pd.DataFrame())))
+            self._write_tree(self.atom_contact_tree, atom_pair_display_df(getattr(self,"atom_contacts",pd.DataFrame()), top_n=80))
+            self._write_tree(self.interpret_tree, screening_overview_df(getattr(self,"poses",pd.DataFrame()), raw_contacts, getattr(self,"atom_contacts",pd.DataFrame()), getattr(self,"specific_interactions",pd.DataFrame())))
             self.last_outdir=base
             self.outdir.set(str(base.parent))
+            self._active_result_bundle = base
+            self._active_result_key = (str(base.parent.resolve()), str(self.seq.get() or "").strip() or "Docking")
             self.log.insert("end",f"Loaded output folder: {base} ({loaded} tables).\n")
             self.log.see("end")
         except Exception as exc:

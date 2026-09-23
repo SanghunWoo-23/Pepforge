@@ -56,6 +56,7 @@ class WorkItemWindow:
         self.gui = gui
         self.window = tk.Toplevel(gui)
         self.window.title(self._title())
+        ui_system.apply_theme(self.window)
         ui_system.fit_window(
             self.window, preferred_width=1500, preferred_height=860,
             minimum_width=1000, minimum_height=650,
@@ -105,6 +106,10 @@ class WorkItemWindow:
         self._risk_assessment: dict[str, Any] = {}
         self._build()
         ui_system.apply_theme(self.window, getattr(gui, "_v3_density", "Standard"))
+        ui_system.fit_window_to_content(
+            self.window, preferred_width=1550, preferred_height=900,
+            minimum_width=1100, minimum_height=700,
+        )
         self._bind_shortcuts()
         self.notebook.bind(
             "<<NotebookTabChanged>>", self._refresh_selected_tab, add="+",
@@ -118,7 +123,7 @@ class WorkItemWindow:
             label = self.gui.pm_display_name(item)
         except Exception:
             label = "Selected Work Item"
-        return f"{label} — SPPS Planner V4.0.0"
+        return f"{label} — SPPS Planner V5.0.0"
 
     def _build(self) -> None:
         outer = ttk.Frame(self.window, padding=10)

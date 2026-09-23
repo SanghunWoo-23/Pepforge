@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import re
 
-import pandas as pd
+from peptiforg_core.lazy_imports import lazy_module
+
+pd = lazy_module("pandas")
 
 from spps_v4_gui import catalogs
 

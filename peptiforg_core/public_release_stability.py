@@ -1,12 +1,14 @@
 
 from __future__ import annotations
 
+from peptiforg_core.version import PEPFORGE_VERSION
+
 from pathlib import Path
 from typing import Any
 import json
 import csv
 
-STABILITY_REPORT_VERSION = "3.0.0"
+STABILITY_REPORT_VERSION = PEPFORGE_VERSION
 
 PUBLIC_OUTPUT_CONTRACT = {
     "workflow_automation": [

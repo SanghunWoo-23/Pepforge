@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Pepforge Project Session Manager v3.5.0.
+"""Pepforge Project Session Manager for the current Pepforge suite.
 
 This module adds a lightweight project/session layer so a Pepforge workflow can be
 saved, resumed, audited, and shared without relying on scattered output files.
@@ -22,12 +22,14 @@ import json
 import time
 import csv
 
-PROJECT_SESSION_VERSION = "3.5.0"
+from peptiforg_core.version import PEPFORGE_VERSION
+
+PROJECT_SESSION_VERSION = PEPFORGE_VERSION
 
 DEFAULT_STAGE_ORDER = [
     "design_engine",
-    "spps_planner",
     "structure_builder",
+    "spps_planner",
     "rcsb_target_fetch",
     "target_preparation",
     "binding_site_selector",
@@ -68,6 +70,7 @@ def new_project_session(
         "evidence_files": {},
         "next_actions": [
             "Create or import peptide candidates.",
+            "Build/inspect peptide starting conformers for the selected candidate.",
             "Generate SPPS plan if synthesis is intended.",
             "Prepare target structure before docking/contact interpretation.",
         ],
@@ -174,8 +177,10 @@ def recommend_next_actions(session: dict[str, Any]) -> list[str]:
 
     if not done("design_engine"):
         actions.append("Run Design Engine or import candidate peptides.")
+    if done("design_engine") and not done("structure_builder"):
+        actions.append("Build and inspect PSB starting conformers for the selected candidate.")
     if done("design_engine") and not done("spps_planner"):
-        actions.append("Generate SPPS Planner output for synthesis feasibility.")
+        actions.append("Generate SPPS Planner output for synthesis feasibility; PSB may run before or in parallel when only synthesis planning is needed.")
     if not done("target_preparation"):
         actions.append("Fetch/load target and run Target Preparation before interpreting contacts.")
     if done("target_preparation") and not done("binding_site_selector"):

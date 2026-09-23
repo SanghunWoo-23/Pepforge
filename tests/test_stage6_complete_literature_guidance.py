@@ -15,11 +15,12 @@ def _categories(frame):
     return set(frame["category"].astype(str))
 
 
-def test_confirmed_ac_eemqrr_cleavage_contract_is_preserved():
+def test_latest_public_engine_keeps_exact_conditions_out_of_hardcoded_sequence_rules():
     inp = PlanInput(sequence="Ac-EEMQRR-NH2", resin="Rink Amide AM", scale_mmol=1)
     rec = recommend_cleavage_preset(inp)
-    assert rec["preset"] == "DEFAULT_TFA_WATER"
-    assert "30 eq" in rec["reason"] and "95% TFA / 5% DW" in rec["reason"] and "no TIS" in rec["reason"]
+    assert rec["preset"] == "DEFAULT_TFA_TIS_WATER"
+    guidance = generate_literature_guidance(inp)
+    assert not guidance.empty
 
 
 def test_complete_guidance_separates_major_decision_domains():
@@ -69,7 +70,10 @@ def test_explicit_protecting_groups_and_met_route_are_preserved():
     pg_text = " ".join(frame.loc[frame.category == "protecting_group", "trigger"])
     assert "Acm" in pg_text and "Pbf" in pg_text
     rec = recommend_cleavage_preset(PlanInput(sequence="AMAA-NH2"))
-    assert rec["preset"] == "REAGENT_H"
+    assert rec["preset"] == "DEFAULT_TFA_TIS_WATER"
+    met = generate_literature_guidance(PlanInput(sequence="AMAA-NH2"))
+    met_text = " ".join(met.loc[(met.category == "cleavage") & (met.trigger == "Met present"), "recommendation"])
+    assert "Reagent H" in met_text
     cys_rows = frame.loc[(frame.category == "cleavage") & (frame.trigger == "Cys present")]
     assert "+56.0626 Da" in cys_rows.iloc[0].verification_required
 

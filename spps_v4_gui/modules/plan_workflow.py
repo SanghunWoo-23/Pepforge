@@ -15,7 +15,9 @@ import math
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
-import pandas as pd
+from peptiforg_core.lazy_imports import lazy_module
+
+pd = lazy_module("pandas")
 
 from spps_v4_gui.modules import workspace_widgets as v228
 from spps_v4_gui import peptide_item_state
@@ -23,8 +25,8 @@ from spps_v4_gui import peptide_item_collection
 from spps_v4_gui import state_persistence
 from spps_v4_gui import position_rules
 
-VERSION = "V4.0.0"
-TITLE = "SPPS Planner V4.0.0"
+VERSION = "V5.0.0"
+TITLE = "SPPS Planner V5.0.0"
 
 PLAN_COLUMNS = [
     "No", "Unit name", "MW", "Density(g/mL)", "Unit eq", "Unit mmol", "Unit amount",
@@ -230,8 +232,44 @@ def _is_terminal_chemical(unit: str) -> bool:
     return not _has_nterm_temporary_protection(text)
 
 
+def _visible_sequence(gui) -> str:
+    """Return the sequence currently visible in the Project Manager editor.
+
+    ``pm_sequence`` is the operator-facing source of truth for Generate/Apply.
+    Older compatibility code also keeps a legacy ``seq`` variable; that mirror
+    may lag one Tk idle cycle behind what the operator can see.  When the
+    Project Manager field exists we therefore use it exactly (including an
+    intentional blank) and only mirror a non-empty value into legacy state.
+    ``seq`` is used only by non-Project-Manager callers that do not expose
+    ``pm_sequence`` at all.
+    """
+    pm_var = getattr(gui, "pm_sequence", None)
+    if pm_var is not None and hasattr(pm_var, "get"):
+        try:
+            visible = str(pm_var.get() or "").strip()
+        except Exception:
+            visible = ""
+        if visible:
+            # Do not depend on an idle trace having fired before Generate.
+            try:
+                index = _active_index(gui)
+                if index is not None and 0 <= index < len(getattr(gui, "pm_items", []) or []):
+                    gui.pm_items[index]["sequence"] = visible
+            except Exception:
+                pass
+            try:
+                legacy = getattr(gui, "seq", None)
+                if hasattr(legacy, "set") and str(legacy.get() or "").strip() != visible:
+                    legacy.set(visible)
+            except Exception:
+                pass
+        return visible
+
+    return str(_var(gui, "seq", "") or "").strip()
+
+
 def _build_plan_input(gui, ns: dict[str, Any]):
-    seq = str(_var(gui, "pm_sequence", "") or "").strip()
+    seq = _visible_sequence(gui)
     if not seq:
         raise ValueError("Sequence is empty. Enter a sequence before Generate or Apply Change.")
     from spps_v4_gui.plan_input_factory import build_editor_plan_input
@@ -289,7 +327,7 @@ def _build_plan_input(gui, ns: dict[str, Any]):
         cleavage_time_h=_num(_var(gui, "cleavage_time_h", 0), 0.0),
         loading_time_h=_num(_var(gui, "loading_time_h", 0), 0.0),
         cleavage_eq_override=_num(_var(gui, "cleavage_eq_override", 0), 0.0),
-        apply_resin_loading=bool(_var(gui, "apply_loading_calc", False)),
+        apply_resin_loading=bool(_var(gui, "apply_loading_calc", True)),
     )
 
 
@@ -1330,20 +1368,23 @@ def _install_plan_toolbar(gui, ns):
 
 
 def _install_action_buttons(gui, ns):
+    """Bind Project Manager actions through stable object references only."""
+    # The lower-level installer creates any supplemental controls exactly once
+    # from the explicit action-bar reference.  It does not scan button text.
     v228._install_action_buttons(gui, ns)
-    # v228 creates buttons bound to its controller; reconnect exact V2.2.9 routes.
-    for widget in v228._walk(gui):
-        if not isinstance(widget, ttk.Button):
-            continue
-        try:
-            text = str(widget.cget("text"))
-        except Exception:
-            continue
-        if text == "Generate":
-            widget.configure(command=gui.generate_update_plan)
-        elif text == "Apply Change":
-            widget.configure(command=gui.apply_change)
-
+    bindings = {
+        "pm_generate_button": gui.generate_update_plan,
+        "pm_apply_button": gui.apply_change,
+        "pm_condition_button": gui.open_condition_optimizer,
+        "pm_loading_advice_button": gui.open_loading_advisor,
+        "pm_cleavage_advice_button": gui.open_cleavage_advisor,
+        "pm_record_lab_button": gui.open_experimental_data,
+        "pm_save_session_button": gui.save_autosave_state,
+    }
+    for attr, command in bindings.items():
+        widget = getattr(gui, attr, None)
+        if widget is not None:
+            widget.configure(command=command)
 
 def _find_setup_notebook(gui):
     for widget in v228._walk(gui):
@@ -1366,7 +1407,7 @@ def _install_loading_controls(gui):
     so it is normalized instead of replaced with another parallel panel.
     """
     if not hasattr(gui, "apply_loading_calc"):
-        gui.apply_loading_calc = tk.BooleanVar(value=False)
+        gui.apply_loading_calc = tk.BooleanVar(value=True)
     # The V2.2.8 normalizer removes the duplicated pm_loading and loading
     # solvent controls, renames the tab to Direct loading, and preserves the
     # useful checkbox plus loading AA/DIEA eq controls.
@@ -1526,6 +1567,7 @@ def _install_traces(gui):
     names = [
         "pm_project", "pm_peptide", "pm_sequence", "pm_scale", "pm_resin", "pm_loading", "pm_lot", "pm_chemistry", "pm_copies",
         "apply_loading_calc", "loading_aa_eq", "loading_diea_eq", "loading_time_h", "cleavage_preset", "cleavage_eq_override", "cleavage_components_text", "cleavage_time_h",
+        "post_cleavage_rescue", "nh4i_eq", "nh4i_concentration_m", "nh4i_time_h",
     ]
     gui._v229_trace_tokens = []
     for name in names:
@@ -1575,7 +1617,8 @@ def _session_path(gui) -> Path:
     try:
         path = gui._state_file_path()
     except Exception:
-        path = Path.home() / ".spps_planner" / "spps_planner_session_v1.json"
+        from spps_planner.build_profile import FALLBACK_DOT_DIR
+        path = Path.home() / FALLBACK_DOT_DIR / "spps_planner_session_v1.json"
     gui.state_file = path
     return path
 
@@ -1583,20 +1626,34 @@ def _session_path(gui) -> Path:
 def _load_items_only(gui) -> None:
     path = _session_path(gui)
     items = []
+    selected_index = 0
+    loaded_from_session = False
     try:
         if path.exists():
             data = state_persistence.read_json_object(path)
             items = state_persistence.normalize_items(data.get("pm_items", []))
+            loaded_from_session = bool(items)
+            selected_index = int(data.get("selected_pm_index", data.get("active_index", 0)) or 0)
     except Exception:
         items = []
+        loaded_from_session = False
+        selected_index = 0
     if not items:
-        # Keep one empty project slot without loading it into the editor.
+        # A genuinely new planner still starts with an empty sequence.
         items = [{
             "project": "", "peptide": "", "sequence": "", "copies": "1",
             "scale": "0.2", "resin": "Rink Amide AM", "loading": "0.8", "lot": "",
-            "chemistry": "DIC/HOBt", "status": "Ready", "cleavage_preset": "",
+            "chemistry": "DIC/HOBt", "status": "Ready", "apply_loading_calc": True, "cleavage_preset": "",
         }]
+    else:
+        # Loading is checked by default for legacy saved items that predate the
+        # explicit flag. The engine still applies a direct-loading reaction only
+        # to direct-loading resin profiles.
+        for item in items:
+            item.setdefault("apply_loading_calc", True)
     gui.pm_items = items
+    gui._startup_loaded_session = loaded_from_session
+    gui._startup_restore_index = max(0, min(selected_index, len(items) - 1)) if items else 0
     gui.pm_list.delete(0, "end")
     for item in items:
         try:
@@ -1708,7 +1765,7 @@ def _bind_item_actions(gui, ns):
 
 
 def export_outputs(gui, ns):
-    """Export the exact visible V4.0.0 state without replacing manual edits."""
+    """Export the exact visible V5.0.0 state without replacing manual edits."""
     try:
         if not v228._tree_rows(getattr(gui, "pm_selected_plan_tree", None)):
             if not generate(gui, ns):
@@ -1754,13 +1811,15 @@ def export_outputs(gui, ns):
             "sequence": item.get("sequence", ""), "scale": item.get("scale", ""),
             "resin": item.get("resin", ""), "loading": item.get("loading", ""),
             "lot": item.get("lot", item.get("lot_no", "")), "chemistry": item.get("chemistry", ""),
-            "copies": item.get("copies", ""), "apply_loading_calc": item.get("apply_loading_calc", False),
+            "copies": item.get("copies", ""), "apply_loading_calc": item.get("apply_loading_calc", True),
             "loading_aa_eq": item.get("loading_aa_eq", ""), "loading_diea_eq": item.get("loading_diea_eq", ""), "loading_time_h": item.get("loading_time_h", ""),
             "cleavage_time_h": item.get("cleavage_time_h", ""), "cleavage_preset": item.get("cleavage_preset", ""),
             "cleavage_components_text": item.get("cleavage_components_text", ""),
+            "post_cleavage_rescue": item.get("post_cleavage_rescue", "None"),
+            "nh4i_eq": item.get("nh4i_eq", "2"), "nh4i_concentration_m": item.get("nh4i_concentration_m", "0.2"), "nh4i_time_h": item.get("nh4i_time_h", "1"),
         }])
 
-        xlsx = out / "project_manager_selected_outputs_v4.0.0.xlsx"
+        xlsx = out / "project_manager_selected_outputs_v5.0.0.xlsx"
         with pd.ExcelWriter(xlsx, engine="openpyxl") as writer:
             editor_summary.to_excel(writer, index=False, sheet_name="00_EDITOR_SUMMARY")
             visible_plan.to_excel(writer, index=False, sheet_name="01_SELECTED_PLAN_VISIBLE")
@@ -1784,9 +1843,9 @@ def export_outputs(gui, ns):
         state = {
             "app_version": VERSION, "saved_at": datetime.now().isoformat(timespec="seconds"),
             "active_index": index, "pm_items": list(getattr(gui, "pm_items", []) or []),
-            "visible_selected_plan_source": "current edited TreeView; Apply Change-linked V4.0.0 tables; no regeneration during export",
+            "visible_selected_plan_source": "current edited TreeView; Apply Change-linked V5.0.0 tables; no regeneration during export",
         }
-        (out / "project_manager_state_v4.0.0.json").write_text(
+        (out / "project_manager_state_v5.0.0.json").write_text(
             json.dumps(state, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
         )
         gui.last_outdir = out

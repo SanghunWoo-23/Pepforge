@@ -20,5 +20,8 @@
     "conservation_score": 0.05,
     "structure_score": 0.05,
     "supervised_score": 0.0
-  }
+  },
+  "ranking_window_size": 15,
+  "ranking_overlap": 5,
+  "ranking_min_score": 0.0
 }

@@ -17,6 +17,8 @@ from peptiforg_core.regression_audit import run_regression_audit
 from peptiforg_core.release_integrity import audit_release_integrity
 from peptiforg_core.release_verify_matrix import verify_release_matrix
 from peptiforg_core.release_gate import release_gate_check
+from peptiforg_core.simulation_protocol import build_simulation_protocol
+from peptiforg_core.structure_consensus import compare_structures
 
 
 def cmd_version(args):
@@ -116,6 +118,28 @@ def cmd_release_gate(args):
         raise SystemExit(1)
 
 
+
+def cmd_simulation_protocol(args):
+    payload = build_simulation_protocol(
+        args.sequence,
+        design_mode=args.design_mode,
+        preferred_structure=args.preferred_structure,
+        environment=args.environment,
+        peptide_class=args.peptide_class or None,
+    )
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    if args.output_json:
+        path = Path(args.output_json); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(text + "\n", encoding="utf-8")
+        print(path)
+    else:
+        print(text)
+
+
+def cmd_compare_structures(args):
+    paths = compare_structures(args.reference, args.comparison, args.output_dir, name=args.name)
+    print(json.dumps(paths, indent=2, ensure_ascii=False))
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="pepforge_cli",
@@ -189,6 +213,23 @@ def build_parser():
     sp.add_argument("--root-dir", default=str(Path(__file__).resolve().parent))
     sp.add_argument("--output-dir", required=True)
     sp.set_defaults(func=cmd_release_gate)
+
+
+    sp = sub.add_parser("simulation-protocol")
+    sp.add_argument("--sequence", required=True)
+    sp.add_argument("--design-mode", default="BALANCED")
+    sp.add_argument("--preferred-structure", default="NONE")
+    sp.add_argument("--environment", default="AQUEOUS")
+    sp.add_argument("--peptide-class", default="")
+    sp.add_argument("--output-json", default="")
+    sp.set_defaults(func=cmd_simulation_protocol)
+
+    sp = sub.add_parser("compare-structures")
+    sp.add_argument("--reference", required=True)
+    sp.add_argument("--comparison", required=True)
+    sp.add_argument("--output-dir", required=True)
+    sp.add_argument("--name", default="structure_consensus")
+    sp.set_defaults(func=cmd_compare_structures)
 
     sp = sub.add_parser("compare-runs")
     sp.add_argument("--old-project", required=True)

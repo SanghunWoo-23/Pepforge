@@ -25,3 +25,17 @@ def test_common_chemical_abbreviations_are_case_tolerant():
 def test_explicit_residue_separators_remove_modifier_ambiguity():
     assert expand_and_tokenize("A-C-NH2")[:2] == ["A", "C"]
     assert expand_and_tokenize("P-A-L-NH2")[:3] == ["P", "A", "L"]
+
+
+def test_pseudo_bridge_does_not_strip_ac_from_plain_acde():
+    from peptiforg_core.peptide_target_complex_builder import _clean_sequence
+    assert _clean_sequence("ACDE-NH2") == "ACDE"
+
+
+def test_pseudo_bridge_rejects_explicit_d_or_internal_modified_chemistry():
+    from peptiforg_core.peptide_target_complex_builder import _clean_sequence
+    import pytest
+    with pytest.raises(ValueError):
+        _clean_sequence("Pal-dG-dH-dK-NH2")
+    with pytest.raises(ValueError):
+        _clean_sequence("Ac-AEEA-GHK-NH2")

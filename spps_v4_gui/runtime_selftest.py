@@ -44,7 +44,7 @@ def run() -> dict[str, Any]:
         if str(row["component"]) != "Total cocktail"
     }
     checks = {
-        "version": VERSION_NUMBER == "4.0.0",
+        "version": VERSION_NUMBER == "5.0.0",
         "protected_aa_catalog": catalogs.UNIT_VALUES[1] == "Fmoc-Ala-OH",
         "parser_tokens": parsed.core_tokens == ["FITC", "A", "C", "D", "PEG4"],
         "chemical_tag_linker_parser": parsed.core_tokens == ["FITC", "A", "C", "D", "PEG4"],
@@ -74,7 +74,7 @@ def run() -> dict[str, Any]:
         }),
     }
     return {
-        "app_version": "V4.0.0",
+        "app_version": "V5.0.0",
         "build_revision": BUILD_REVISION,
         "checks": checks,
         "ok": all(checks.values()),

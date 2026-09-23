@@ -1,4 +1,4 @@
-"""Direct project/session persistence for SPPS Planner V4.0.0."""
+"""Direct project/session persistence for SPPS Planner V5.0.0."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,7 +13,7 @@ from spps_v4_gui.modules.release_ui import _normalize_resin
 from spps_v4_gui.session_state import DEFAULT_STATE_FIELDS
 
 
-VERSION = "V4.0.0"
+VERSION = "V5.0.0"
 EXTRA_DEFAULT_FIELDS = (
     "solvent_volume_mode",
     "amide_ml_per_mmol",
@@ -40,7 +40,8 @@ def session_path(gui: Any) -> Path:
     try:
         path = Path(gui._state_file_path())
     except Exception:
-        path = Path.home() / ".spps_planner" / "spps_planner_session_v1.json"
+        from spps_planner.build_profile import FALLBACK_DOT_DIR
+        path = Path.home() / FALLBACK_DOT_DIR / "spps_planner_session_v1.json"
     gui.state_file = path
     return path
 

@@ -1,4 +1,4 @@
-"""Append-only synthesis execution records for SPPS Planner V4.0.0.
+"""Append-only synthesis execution records for SPPS Planner V5.0.0.
 
 The module is intentionally UI-independent.  An execution history lives inside
 one peptide item and can therefore travel with project JSON, autosave JSON and

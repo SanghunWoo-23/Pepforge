@@ -1,4 +1,4 @@
-"""Direct custom-material database workflow for SPPS Planner V4.0.0."""
+"""Direct custom-material database workflow for SPPS Planner V5.0.0."""
 from __future__ import annotations
 
 import re

@@ -32,7 +32,7 @@ except Exception:  # pragma: no cover
 from pepforge_structure_tool.pepforge_core import build_structure, describe_parse, VERSION as STRUCTURE_TOOL_VERSION
 from pepforge_structure_tool.pymol_script import make_pymol_pml
 
-BRIDGE_VERSION = "2.1.0"
+from peptiforg_core.component_versions import LOW_SPEC_VALIDATION_BRIDGE_VERSION as BRIDGE_VERSION
 
 PARAMETER_CLASSES = {
     "std_aa": ("standard amino acid", "usually covered by standard protein force fields after residue/protonation review"),
@@ -383,7 +383,7 @@ def export_low_spec_validation_bridge(
         "5. MD Result Import: 외부에서 돌린 MD 결과를 다시 Pepforge로 가져오기 위한 import template 생성\n\n"
         "주의\n"
         "Pal, Myr, FITC, FAM, TAMRA, Biotin, AEEA, Ahx, PEG, dK/dH/dG 같은 token은 표준 PDB residue가 아니다.\n"
-        "따라서 PyMOL에서는 UNL/HETATM처럼 보일 수 있고, all-atom MD에는 별도 parameter/charge 검토가 필요하다.\n\n"
+        "PyMOL review PDB에는 가능한 범위에서 residue 이름/번호를 표시하지만, modified/non-natural chemistry는 HETATM/custom residue로 남을 수 있으며 all-atom MD에는 별도 parameter/charge 검토가 필요하다.\n\n"
         "분석 오류 발견됨이 뜨면 bridge_diagnostics 또는 *_diagnostic 파일을 확인한다. 출력 일부는 만들어졌을 수 있다.\n",
         encoding="utf-8",
     )

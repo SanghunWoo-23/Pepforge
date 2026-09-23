@@ -11,8 +11,8 @@ import tkinter as tk
 from tkinter import ttk
 from spps_v4_gui import catalogs
 
-APP_VERSION = "V4.0.0"
-VERSION_LABEL = "SPPS Planner V4.0.0"
+APP_VERSION = "V5.0.0"
+VERSION_LABEL = "SPPS Planner V5.0.0"
 
 def _walk(widget):
     try:
@@ -93,7 +93,7 @@ def _ensure_loading_tab(gui):
     frame = ttk.Frame(target, padding=6)
     target.insert(0, frame, text="Loading")
     if not hasattr(gui, "apply_loading_calc"):
-        gui.apply_loading_calc = tk.BooleanVar(value=False)
+        gui.apply_loading_calc = tk.BooleanVar(value=True)
     if not hasattr(gui, "loading_aa_eq"):
         gui.loading_aa_eq = tk.StringVar(value="2")
     if not hasattr(gui, "loading_diea_eq"):

@@ -1,4 +1,4 @@
-"""Direct calculation lookups used by the V3.0.0 desktop workflows."""
+"""Direct calculation lookups used by the Pepforge V4.0.0 embedded SPPS workflow."""
 from __future__ import annotations
 
 import re
@@ -60,27 +60,75 @@ def canonical(value: Any) -> str:
         "dipea": "DIEA",
         "ac2o": "Acetic anhydride (Ac2O)",
         "aceticanhydride": "Acetic anhydride (Ac2O)",
+        "aceticanhydrideac2o": "Acetic anhydride (Ac2O)",
+        "aceticanhydrideac2ofornterminalacetylation": "Acetic anhydride (Ac2O)",
+        "aceticanhydrideac2oforac": "Acetic anhydride (Ac2O)",
+        "aceticacidroutefornterminalacetylation": "Acetic acid",
+        "palmiticacidpalmitoylcoupling": "Palmitic acid",
+        "myristicacidmyristoylcoupling": "Myristic acid",
+        "stearicacidstearoylcoupling": "Stearic acid",
+        "oleicacidoleoylcoupling": "Oleic acid",
+        "nicotinicacidnicotinoylcoupling": "Nicotinic acid",
+        "caffeicacidcaffeoylcoupling": "Caffeic acid",
+        "gallicacidgalloylcoupling": "Gallic acid",
+        "benzoicacidbenzoylcoupling": "Benzoic acid",
+        "succinicanhydrideroutesuccinylcap": "Succinic anhydride",
+        "biotinaciddefaultbiotinylationacidform": "Biotin acid",
+        "biotinacidbiotinylationacidform": "Biotin acid",
+        "azidoaceticacidazidoacetylcoupling": "Azidoacetic acid",
+        "propiolicacidpropioloylcoupling": "Propiolic acid",
+        "cholesterylhemisuccinatechems": "Cholesteryl hemisuccinate",
     }
-    return aliases.get(key, raw)
+    if key in aliases:
+        return aliases[key]
+    # Legacy project/custom rows sometimes stored purpose prose as part of the
+    # reagent identity.  Keep old files readable but never expose a
+    # "for N-terminal ..." suffix as the operator-facing material name.
+    cleaned = re.sub(r"\s+(?:route\s+)?for\s+N[- ]terminal\b.*$", "", raw, flags=re.IGNORECASE).strip()
+    return cleaned or raw
 
 
 def material_lookup(name: Any) -> tuple[float, float]:
-    raw = str(name or "").strip()
-    key = normalized(raw)
-    if not key:
-        return 0.0, 0.0
-    if key in _database_records():
-        return _database_records()[key]
-    mw = 0.0
-    for candidate, value in catalogs.MW_FALLBACK.items():
-        if normalized(candidate) == key:
-            mw = float(value)
-            break
-    density = 0.0
-    for candidate, value in catalogs.LIQUID_DENSITY.items():
-        if normalized(candidate) == key:
-            density = float(value)
-            break
+    original = str(name or "").strip()
+    canonical_name = canonical(original)
+    # Try the canonical display name, the original saved name, and a version
+    # without a parenthetical shorthand such as "(Ac2O)".  This keeps exact
+    # reagent lookup compatible with both the reagent library ("Acetic
+    # anhydride") and the operator-facing canonical name
+    # ("Acetic anhydride (Ac2O)").
+    candidates = []
+    for candidate in (
+        canonical_name,
+        original,
+        re.sub(r"\s*\([^)]*\)\s*", " ", canonical_name).strip(),
+    ):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    best_mw = 0.0
+    best_density = 0.0
+    for candidate in candidates:
+        key = normalized(candidate)
+        if not key or key not in _database_records():
+            continue
+        found_mw, found_density = _database_records()[key]
+        if found_mw and not best_mw:
+            best_mw = float(found_mw)
+        if found_density:
+            return float(found_mw or best_mw), float(found_density)
+    mw = best_mw
+    density = best_density
+    for candidate in candidates:
+        key = normalized(candidate)
+        if not mw:
+            for fallback_name, value in catalogs.MW_FALLBACK.items():
+                if normalized(fallback_name) == key:
+                    mw = float(value)
+                    break
+        if not density:
+            for fallback_name, value in catalogs.LIQUID_DENSITY.items():
+                if normalized(fallback_name) == key:
+                    density = float(value)
+                    break
     return mw, density
 
 

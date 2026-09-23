@@ -54,11 +54,26 @@ def _centroid(atoms: list[dict[str, Any]]) -> tuple[float,float,float]:
     return (sum(a['x'] for a in atoms)/len(atoms), sum(a['y'] for a in atoms)/len(atoms), sum(a['z'] for a in atoms)/len(atoms))
 
 def _clean_sequence(seq: str) -> str:
-    s=str(seq or '')
-    # keep one-letter amino acids; remove common caps/modifiers as pseudo-builder cannot model them atomically.
-    s=re.sub(r'Ac|NH2|FITC|FAM|TAMRA|Biotin|Ahx|AEEA|Pal|Myr|Cha','',s,flags=re.I)
-    letters=''.join(ch.upper() for ch in s if ch.upper() in AA1)
-    if not letters:
+    """Return a canonical L-residue sequence for the temporary CA-trace bridge.
+
+    Terminal caps may be ignored for this coarse bridge, but internal linkers,
+    non-natural residues, unknown chemistry, and explicit D-residues are not
+    silently converted.  Those constructs must use a PSB/exported peptide PDB.
+    """
+    from peptiforg_core.peptide_tokens import parse_peptide_notation
+
+    text = str(seq or '').strip()
+    parsed = parse_peptide_notation(text)
+    explicit_d = bool(re.search(r'(?i)(?:^|[-\[,(;])d[ACDEFGHIKLMNPQRSTVWY](?:$|[-\]),;])', text))
+    unsupported = list(parsed.linker_tokens) + list(parsed.aa_like_tokens) + list(parsed.unknown_tokens)
+    if explicit_d or unsupported:
+        detail = ', '.join(str(x) for x in unsupported) or 'explicit D-residue'
+        raise ValueError(
+            'Temporary pseudo-backbone generation supports canonical L-residues only; '
+            f'unsupported construct chemistry: {detail}. Provide a PSB/exported peptide PDB instead.'
+        )
+    letters = str(parsed.core_sequence or '').upper()
+    if not letters or any(ch not in AA1 for ch in letters):
         raise ValueError('No supported canonical peptide residues were parsed. Provide an explicit peptide PDB for modified/non-canonical chemistry.')
     return letters
 
@@ -122,7 +137,7 @@ def export_complex_builder_package(
     target_pdb: str | Path,
     output_dir: str | Path,
     peptide_pdb: str | Path | None = None,
-    peptide_sequence: str = 'Ac-EEMQRR-NH2',
+    peptide_sequence: str = '',
     target_chains: Optional[Iterable[str]] = None,
     peptide_chain_id: str = 'P',
     placement_offset_A: float = 8.0,
@@ -136,6 +151,9 @@ def export_complex_builder_package(
     if peptide_pdb and Path(peptide_pdb).exists():
         pep_text=Path(peptide_pdb).read_text(encoding='utf-8', errors='ignore')
     else:
+        peptide_sequence = str(peptide_sequence or '').strip()
+        if not peptide_sequence:
+            raise ValueError('Provide a peptide PDB or a non-empty peptide sequence; Pepforge does not inject a default peptide.')
         pep_text=build_pseudo_peptide_pdb(peptide_sequence, center, placement_offset_A, peptide_chain_id)
     pep_lines, next_serial=_renumber_as_chain(pep_text, peptide_chain_id, serial)
     complex_pdb=pkg/'initial_complex_candidate.pdb'

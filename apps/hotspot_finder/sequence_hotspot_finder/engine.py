@@ -7,6 +7,7 @@ from .io_utils import read_fasta_or_sequence, load_json, save_json, load_optiona
 from .validation import validate_token_db, validate_sidechain_mod_db, validate_config, validate_domain_csv, validate_position_csv
 from .parser import parse_sequence
 from .scoring import add_rule_features, merge_external_features, compute_final_score
+from .ranking import rank_hotspot_regions
 
 
 def load_config(config_path: str | Path | None = None, config: dict | None = None) -> dict:
@@ -20,7 +21,7 @@ def load_config(config_path: str | Path | None = None, config: dict | None = Non
         "use_esm": False, "esm_model": "esm2_t6_8M_UR50D", "device": "auto",
         "window_size": 900, "overlap": 150, "safe_window_limit": 1000, "clamp_window_size": True,
         "batch_size": 4, "use_masked_marginal": True, "use_mutation_sensitivity": True,
-        "max_mutation_scan_length": 2500, "top_n": 30, "merge_position_mode": "model_position",
+        "max_mutation_scan_length": 2500, "top_n": 30, "ranking_window_size": 15, "ranking_overlap": 5, "ranking_min_score": 0.0, "merge_position_mode": "model_position",
         "weights": {"rule_score":0.42, "esm_embedding_score":0.12, "esm_unpredictability_score":0.18,
                     "esm_mutation_sensitivity":0.18, "conservation_score":0.05, "structure_score":0.05,
                     "supervised_score":0.0},
@@ -93,8 +94,16 @@ def analyze_input(user_input: str, config_path: str | Path | None = None, token_
     records = read_fasta_or_sequence(user_input)
     full_df, top_df, logs = analyze_records(records, cfg, token_db, sidechain_df, domains_df, structure_df, conservation_df, supervised_df)
     ts = timestamp()
+    ranked_regions_df = rank_hotspot_regions(
+        full_df,
+        top_n=int(cfg.get("top_n", 30)),
+        window_size=int(cfg.get("ranking_window_size", 15)),
+        min_score=float(cfg.get("ranking_min_score", 0.0)),
+        overlap=int(cfg.get("ranking_overlap", 5)),
+    )
     full_csv = outdir / f"hotspot_full_{ts}.csv"
     top_csv = outdir / f"hotspot_top_{ts}.csv"
+    ranked_regions_csv = outdir / f"hotspot_ranked_regions_{ts}.csv"
     config_json = outdir / f"analysis_config_{ts}.json"
     input_used = outdir / f"input_used_{ts}.fasta"
     token_used = outdir / f"token_db_used_{ts}.csv"
@@ -102,6 +111,7 @@ def analyze_input(user_input: str, config_path: str | Path | None = None, token_
     summary_txt = outdir / f"run_summary_{ts}.txt"
     full_df.to_csv(full_csv, index=False, encoding="utf-8-sig")
     top_df.to_csv(top_csv, index=False, encoding="utf-8-sig")
+    ranked_regions_df.to_csv(ranked_regions_csv, index=False, encoding="utf-8-sig")
     save_json(cfg, config_json)
     write_text(input_used, user_input)
     shutil.copy(token_db_path, token_used)
@@ -112,11 +122,13 @@ def analyze_input(user_input: str, config_path: str | Path | None = None, token_
     summary = {
         "timestamp": ts, "records": len(records), "use_esm": cfg.get("use_esm"), "esm_model": cfg.get("esm_model"),
         "window_size": cfg.get("window_size"), "overlap": cfg.get("overlap"), "batch_size": cfg.get("batch_size"),
+        "ranking_window_size": cfg.get("ranking_window_size"), "ranking_overlap": cfg.get("ranking_overlap"),
+        "ranking_min_score": cfg.get("ranking_min_score"),
         "merge_position_mode": cfg.get("merge_position_mode"), "warnings": " | ".join(logs.get("warnings", [])) or "none"
     }
     write_run_summary(summary_txt, summary)
     files = {
-        Path(full_csv).name: full_csv, Path(top_csv).name: top_csv, Path(config_json).name: config_json,
+        Path(full_csv).name: full_csv, Path(top_csv).name: top_csv, Path(ranked_regions_csv).name: ranked_regions_csv, Path(config_json).name: config_json,
         Path(input_used).name: input_used, Path(token_used).name: token_used,
         "run_summary.txt": summary_txt,
     }
@@ -125,4 +137,14 @@ def analyze_input(user_input: str, config_path: str | Path | None = None, token_
         if p and Path(p).exists(): files[label] = p
     zip_path = outdir / f"hotspot_result_package_{ts}.zip"
     package_outputs(zip_path, files)
-    return {"full_df": full_df, "top_df": top_df, "logs": logs, "full_csv": str(full_csv), "top_csv": str(top_csv), "config_json": str(config_json), "zip_path": str(zip_path)}
+    return {
+        "full_df": full_df,
+        "top_df": top_df,
+        "ranked_regions_df": ranked_regions_df,
+        "logs": logs,
+        "full_csv": str(full_csv),
+        "top_csv": str(top_csv),
+        "ranked_regions_csv": str(ranked_regions_csv),
+        "config_json": str(config_json),
+        "zip_path": str(zip_path),
+    }

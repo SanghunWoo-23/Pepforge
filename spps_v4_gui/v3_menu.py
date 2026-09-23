@@ -4,6 +4,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any, Callable
+from spps_v4_gui import ui_system
 
 
 def _command(gui: Any, name: str, fallback: Callable[[], Any] | None = None):
@@ -15,7 +16,7 @@ def _about(gui: Any) -> None:
     from spps_v4_gui.runtime_selftest import BUILD_REVISION
     messagebox.showinfo(
         "About SPPS Planner",
-        "SPPS Planner V4.0.0\n\n"
+        "SPPS Planner V5.0.0\n\n"
         f"Build revision: {BUILD_REVISION}\n"
         "Modern/Classic hybrid workspace\n"
         "V3 planning workflow preserved + V4 Experimental Data / ML Advisors",
@@ -64,7 +65,7 @@ def _open_recent(gui: Any) -> None:
     rows = list(gui.recent_projects())
     window = tk.Toplevel(gui)
     window.title("Recent Projects")
-    window.geometry("760x320")
+    ui_system.apply_theme(window)
     frame = ttk.Frame(window, padding=10); frame.pack(fill="both", expand=True)
     tree = ttk.Treeview(frame, columns=("path", "opened_at", "exists", "recovered"), show="headings")
     for column in tree["columns"]:
@@ -87,6 +88,7 @@ def _open_recent(gui: Any) -> None:
 
     tree.bind("<Double-1>", open_selected)
     ttk.Button(frame, text="Open Selected", command=open_selected).pack(anchor="e", pady=(7, 0))
+    ui_system.fit_window_to_content(window, preferred_width=1050, preferred_height=520, minimum_width=900, minimum_height=420)
 
 
 def install_menu(gui: Any) -> tk.Menu:
@@ -106,7 +108,7 @@ def install_menu(gui: Any) -> tk.Menu:
     file_menu.add_command(label="Export Current Work", accelerator="Ctrl+E", command=_command(gui, "export_outputs"))
     file_menu.add_command(label="Export Batch Tables", command=_command(gui, "export_batch_tables"))
     file_menu.add_separator()
-    file_menu.add_command(label="Exit", command=_command(gui, "destroy"))
+    file_menu.add_command(label="Exit", command=_command(gui, "on_close"))
     menu.add_cascade(label="File", menu=file_menu)
 
     edit_menu = tk.Menu(menu, tearoff=False)
@@ -141,7 +143,6 @@ def install_menu(gui: Any) -> tk.Menu:
     view_menu = tk.Menu(menu, tearoff=False)
     view_menu.add_command(label="Show / Hide Setup", command=_command(gui, "toggle_setup_panel"))
     density_menu = tk.Menu(view_menu, tearoff=False)
-    from spps_v4_gui import ui_system
     for density in ("Compact", "Standard", "Comfortable"):
         density_menu.add_command(label=density, command=lambda value=density: ui_system.set_density(gui, value))
     view_menu.add_cascade(label="Display Density", menu=density_menu)
@@ -175,7 +176,7 @@ def install_menu(gui: Any) -> tk.Menu:
     menu.add_cascade(label="Data / ML", menu=data_menu)
 
     help_menu = tk.Menu(menu, tearoff=False)
-    help_menu.add_command(label="User Manual (한국어)", command=lambda: _open_manual(gui, "USER_MANUAL_KO.md"))
+    help_menu.add_command(label="User Manual (Korean)", command=lambda: _open_manual(gui, "USER_MANUAL_KO.md"))
     help_menu.add_command(label="User Manual (English)", command=lambda: _open_manual(gui, "USER_MANUAL_EN.md"))
     help_menu.add_command(label="Keyboard Shortcuts", command=lambda: _shortcuts(gui))
     help_menu.add_separator()

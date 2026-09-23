@@ -6,11 +6,29 @@
 # =========================================================
 from __future__ import annotations
 
-import os, json, math, random, datetime, zipfile, csv, re
+import os, json, math, random, datetime, zipfile, csv, re, hashlib
 from pathlib import Path
 from collections import Counter, defaultdict
-import numpy as np
 import sys
+
+from pde_option_catalog import (
+    PDE_BASE_CHEM_TYPES, PDE_LABEL_TYPES, PDE_LINKER_TYPES, PDE_TAG_TYPES,
+)
+
+_NUMPY = None
+
+def _np():
+    """Load NumPy only when a numerical PDE path is actually used.
+
+    Keeping NumPy out of module import makes the Desktop GUI visible sooner
+    while preserving the same engine calculations once generation/analysis
+    begins.
+    """
+    global _NUMPY
+    if _NUMPY is None:
+        import numpy as numpy_module
+        _NUMPY = numpy_module
+    return _NUMPY
 
 # -------------------------
 # Core data
@@ -94,11 +112,11 @@ CONFIG = {
     "USE_NON_NAT": True,
     "NON_NAT_TYPES": NON_NAT.copy(),
     "USE_TAG": True,
-    "TAG_TYPES": ["His6","His8","His10","FLAG","HA","Myc","StrepII","TwinStrep","V5","T7","ALFA","AviTag","SpyTag"],
+    "TAG_TYPES": PDE_TAG_TYPES.copy(),
     "USE_BASE_CHEM": True,
-    "BASE_CHEM_TYPES": ["Pal","Myr","Stear","Ole","Chol","Nic","Caf","Gal","Ac","Bz","Fmoc","Boc","Succinyl","Maleimide","Azide","Alkyne","DBCO","TCO","Tetrazine","BiotinCap"],
+    "BASE_CHEM_TYPES": PDE_BASE_CHEM_TYPES.copy(),
     "USE_LABEL": True,
-    "LABEL_TYPES": ["NONE","BIOTIN","Desthiobiotin","FITC","FAM","TAMRA","ROX","CY3","CY5","CY5_5","CY7","Alexa488","Alexa555","Alexa647","DOTA","NOTA","DFO","NBD","Dansyl","BODIPY","EDANS","Dabcyl","BHQ1","BHQ2"],
+    "LABEL_TYPES": PDE_LABEL_TYPES.copy(),
     "USE_CTERM_NH2": True,
     "ENRICH_SELECTED_CHEMISTRY": False,  # optional soft enrichment, not hard forcing
     "CHEMISTRY_BONUS_WEIGHT": 0.35,
@@ -113,7 +131,7 @@ CONFIG = {
     "USE_LINKER": True,
     "LINKER_MODE": "MIX",  # FIX / MIX / AUTO
     "FIX_LINKER_TYPE": "PEG4",
-    "LINKER_TYPES": ["Gly","GG","GGG","GS","GSG","G4S","G4Sx2","Ahx","AEEA","PEG1","PEG2","PEG3","PEG4","PEG6","PEG8","PEG12","PEG24","Sar","Pro","PipLink","LysLink","CysLink","SS","Triazole","Click","DSS","SMCC","SulfoSMCC","EDC","Hydrazone","Oxime"],
+    "LINKER_TYPES": PDE_LINKER_TYPES.copy(),
     "LINKER_POS": [2,4],
     "MAX_LINKERS": 2,
     "USE_AA_LINKER_LIBRARY": True,
@@ -151,7 +169,18 @@ CONFIG = {
     "ELITE_KEEP": 20,
     "FINAL_TOPK": 10,
     "FINAL_MIN_SEQUENCE_DISTANCE": 0.20,
-    "BINDER_MODE": "BALANCED",
+    "BINDER_MODE": "BALANCED",  # legacy export field; PDE_OBJECTIVE_MODE controls active objective selection
+
+    # Scientific-context design objective. Structure preference is an ordinal
+    # design bias, never a claimed folded-state probability.
+    "PDE_OBJECTIVE_MODE": "BALANCED",  # INTERACTION_ONLY / INTERACTION_FIRST / BALANCED / STRUCTURE_GUIDED / STRUCTURE_EXPLORATION
+    "PREFERRED_STRUCTURE": "NONE",  # NONE / ALPHA_HELIX / AMPHIPATHIC_ALPHA / HELIX_310 / BETA_HAIRPIN / BETA_STRAND / PPII_EXTENDED / TURN_RICH / COILED_COIL
+    "STRUCTURE_BIAS": "BALANCED",  # MILD / BALANCED / STRONG
+    "STRUCTURE_ENVIRONMENT": "AQUEOUS",  # AQUEOUS / MEMBRANE_INTERFACE / TRANSMEMBRANE / LOW_DIELECTRIC / UNSPECIFIED
+    "CONFORMATIONAL_STRATEGY": "PREORGANIZED",  # PREORGANIZED / ADAPTIVE / FLEXIBLE; changes optimization pressure, not a folded-state probability
+    "INTERACTION_ONLY_PENALIZE_SPPS": False,
+    "INTERACTION_ONLY_PENALIZE_AGGREGATION": False,
+    "INTERACTION_ONLY_PENALIZE_SOLUBILITY": False,
     "DOCKING_STAGE": "FINAL_TOP_ONLY",  # OFF / FINAL_TOP_ONLY / EVERY_N_GENERATIONS
     "DOCKING_ENGINE": "NONE",
     "USE_REAL_DOCKING": False,
@@ -181,6 +210,8 @@ CONFIG = {
     "HOTSPOT_REPLACE_TARGETS": True,
     "HOTSPOT_MIN_EXPOSURE": 0.35,
     "HOTSPOT_BINDING_WEIGHT": 0.8,
+    "HOTSPOT_COMPLEMENTARITY_MODE": "REPORT_ONLY",  # OFF / REPORT_ONLY / EVIDENCE_AND_SELECTION
+    "HOTSPOT_COMPLEMENTARITY_WEIGHT": 0.65,
     "HOTSPOT_DEBUG_MODE": False,
     "HOTSPOT_DEBUG_FORCE_TOPK": 5,
     "CHEMISTRY_LONG_TARGET_BALANCE": True,
@@ -221,7 +252,7 @@ TERMINAL_TAG_SEQUENCE = {
 
 def set_global_seed(seed=42):
     random.seed(int(seed))
-    np.random.seed(int(seed))
+    _np().random.seed(int(seed))
 
 
 def normalize_length_config():
@@ -366,7 +397,7 @@ def _statistical_ml_prior_score(clean):
                 vals.append(sc * sum(1 for x in c if x in NEGATIVE) / n)
     if not vals:
         return 0.0
-    return float(np.tanh(np.mean(vals)))
+    return float(_np().tanh(_np().mean(vals)))
 
 
 def ml_prior_score(seq):
@@ -851,7 +882,7 @@ def parse_pdb_ca_atoms(pdb_text, chain_filter=""):
             continue
         try:
             resi = int(line[22:26])
-            coord = np.array([float(line[30:38]), float(line[38:46]), float(line[46:54])], dtype=float)
+            coord = _np().array([float(line[30:38]), float(line[38:46]), float(line[46:54])], dtype=float)
         except Exception:
             continue
         key = (chain, resi)
@@ -864,11 +895,11 @@ def parse_pdb_ca_atoms(pdb_text, chain_filter=""):
 def assign_surface_proxy(records, radius=10.0):
     if not records:
         return records
-    coords = np.array([r["coord"] for r in records], dtype=float)
+    coords = _np().array([r["coord"] for r in records], dtype=float)
     counts = []
     for i in range(len(records)):
-        d = np.linalg.norm(coords - coords[i], axis=1)
-        counts.append(int(np.sum((d < radius) & (d > 0.01))))
+        d = _np().linalg.norm(coords - coords[i], axis=1)
+        counts.append(int(_np().sum((d < radius) & (d > 0.01))))
     mx = max(1, max(counts))
     for r, c in zip(records, counts):
         r["neighbor_count"] = c
@@ -890,7 +921,7 @@ def extract_hotspots_from_pdb(pdb_text, window=None, top_k=None, chain=None):
         if any(chunk[j+1]["resi"] - chunk[j]["resi"] != 1 for j in range(len(chunk)-1)):
             continue
         frag = "".join(r["aa"] for r in chunk)
-        exposure = float(np.mean([r.get("surface_proxy", 0.0) for r in chunk]))
+        exposure = float(_np().mean([r.get("surface_proxy", 0.0) for r in chunk]))
         if exposure < float(CONFIG.get("HOTSPOT_MIN_EXPOSURE", 0.35)):
             continue
         scored.append({"motif": frag, "score": hotspot_fragment_score(frag, exposure), "start": chunk[0]["resi"], "end": chunk[-1]["resi"], "chain": chunk[0]["chain"], "source": "PDB_SURFACE_PROXY", "exposure": exposure})
@@ -1590,7 +1621,7 @@ def charge_balance_score(seq):
 def dock_proxy_score(seq):
     hot = sum(1 for x in clean_bases(seq) if x in ANCHOR)
     clash = 0.5 * max(0, len(linker_tokens_in_sequence(seq)) - int(CONFIG.get("MAX_LINKERS", 2)))
-    return np.tanh((0.25 * hot + linker_score(seq) - clash) / 3.0) + 1.0
+    return _np().tanh((0.25 * hot + linker_score(seq) - clash) / 3.0) + 1.0
 
 def binder_success_score(seq):
     anchors = sum(1 for x in clean_bases(seq) if x in ANCHOR)
@@ -1795,7 +1826,614 @@ def design_developability_score(seq):
     return float(design_developability_report(seq)["developability_score"])
 
 
+def _canonical_l_context(seq):
+    """Return canonical-L core and coverage without substituting D/non-natural residues.
+
+    Structure-guidance scoring is intentionally limited to explicit one-letter L amino
+    acids. D/non-natural residues are retained in the construct but never silently
+    mapped to canonical surrogates for structural evidence.
+    """
+    canonical = []
+    residue_like = 0
+    unsupported = []
+    for token in list(seq or []):
+        if token == "NH2" or is_terminal_chem_token(token) or is_linker_token(token):
+            continue
+        residue_like += 1
+        if isinstance(token, str) and len(token) == 1 and token in AA:
+            canonical.append(token)
+        else:
+            unsupported.append(str(token))
+    coverage = len(canonical) / max(1, residue_like)
+    return "".join(canonical), float(coverage), unsupported
+
+
+def _clamp01(value):
+    return float(max(0.0, min(1.0, value)))
+
+
+def _hydrophobic_moment(sequence, degrees_per_residue=100.0):
+    """Bounded hydrophobic-face descriptor, not an experimental membrane metric."""
+    if not sequence:
+        return 0.0
+    hydro = set("AILMFWVY")
+    x = y = 0.0
+    for i, aa in enumerate(sequence):
+        magnitude = 1.0 if aa in hydro else -0.35 if aa in set("DEKRQN") else 0.0
+        theta = math.radians(float(degrees_per_residue) * i)
+        x += magnitude * math.cos(theta)
+        y += magnitude * math.sin(theta)
+    return _clamp01(math.sqrt(x*x + y*y) / max(1.0, len(sequence)))
+
+
+def _alternating_face_score(sequence):
+    if len(sequence) < 4:
+        return 0.0
+    hydro = set("AILMFWVY")
+    polar = set("DERKQNSTH")
+    matches = 0
+    total = 0
+    for i in range(len(sequence)-1):
+        a, b = sequence[i], sequence[i+1]
+        if (a in hydro and b in polar) or (a in polar and b in hydro):
+            matches += 1
+        total += 1
+    return matches / max(1, total)
+
+
+def sequence_structure_context_report(seq):
+    """Transparent evidence-driven ordinal structure-context screen.
+
+    Canonical-L numerical evidence is used only where a cited scale exists.
+    D/non-natural residues are never converted to L surrogates. Explicit motifs
+    with independent literature support (for example Aib or dPro-Gly) are
+    tracked in their own evidence channel. Returned scores are internal ranking
+    descriptors, not probabilities, free energies, or solution-state fractions.
+    """
+    s, coverage, unsupported = _canonical_l_context(seq)
+    raw_tokens = list(seq or [])
+    residue_tokens = [
+        token for token in raw_tokens
+        if token != "NH2" and not is_terminal_chem_token(token) and not is_linker_token(token)
+    ]
+    residue_n = max(1, len(residue_tokens))
+    n = len(s)
+    family_names = ["ALPHA_HELIX","AMPHIPATHIC_ALPHA","HELIX_310","BETA_HAIRPIN","BETA_STRAND","PPII_EXTENDED","TURN_RICH","COILED_COIL"]
+    if not residue_tokens:
+        return {
+            "status": "unavailable", "canonical_L_coverage": coverage,
+            "unsupported_structure_tokens": ";".join(unsupported),
+            "claim_guard": "No structure score was fabricated for an empty/unsupported peptide core.",
+            "scores": {k: 0.0 for k in family_names},
+        }
+
+    # --- Alpha: Pace-Scholtz intrinsic evidence + positional context ---
+    pace_values = [PACE_SCHOLTZ_HELIX_DDG_KCAL_MOL[a] for a in s if a in PACE_SCHOLTZ_HELIX_DDG_KCAL_MOL]
+    pace_mean = (sum(pace_values) / len(pace_values)) if pace_values else None
+    # Internal monotonic normalization only. The raw experimental mean is also
+    # exported, and this normalized value is not presented as an experimental scale.
+    pace_ordinal = _clamp01(1.0 - float(pace_mean or 1.0)) if pace_values else 0.0
+    central_idx = list(range(max(0, n//4), min(n, n - n//4))) if n else []
+    central_p = sum(1 for i in central_idx if s[i] == "P") / max(1, len(central_idx))
+    central_g = sum(1 for i in central_idx if s[i] == "G") / max(1, len(central_idx))
+    terminal_pg = sum(1 for i, aa in enumerate(s) if aa in "PG" and (i < 2 or i >= n-2)) / max(1, n)
+
+    nterm_acetyl = any(str(token) == "Ac" for token in raw_tokens)
+    first = s[0] if s else ""
+    if nterm_acetyl:
+        ncap_class, ncap_term = "acetylated_N_cap_effect_cancelled", 1.0
+    elif first == "N":
+        ncap_class, ncap_term = "Asn_favorable", 1.0
+    elif first == "G":
+        ncap_class, ncap_term = "Gly_favorable", 0.70
+    elif first == "Q":
+        ncap_class, ncap_term = "Gln_unfavorable", -0.60
+    else:
+        ncap_class, ncap_term = "not_specifically_ranked_here", 0.0
+
+    opposite = like = 0
+    for i, aa in enumerate(s):
+        for spacing in (3, 4):
+            j = i + spacing
+            if j >= n:
+                continue
+            bb = s[j]
+            if (aa in "KR" and bb in "DE") or (aa in "DE" and bb in "KR"):
+                opposite += 1
+            elif (aa in "KR" and bb in "KR") or (aa in "DE" and bb in "DE"):
+                like += 1
+    pair_term = _clamp01((opposite - 0.5 * like) / max(1.0, n / 4.0)) if n else 0.0
+    alpha = _clamp01(
+        0.72 * pace_ordinal + 0.10 * max(0.0, ncap_term) + 0.14 * pair_term
+        - 0.52 * central_p - 0.18 * central_g - 0.04 * terminal_pg
+        + (0.04 * min(0.0, ncap_term))
+    )
+    amph = _clamp01(0.68 * alpha + 0.32 * _hydrophobic_moment(s, 100.0)) if s else 0.0
+
+    # Aib is not replaced by Ala. It contributes only through an explicit Aib
+    # evidence channel; canonical-L Pace values never cover it.
+    aib_count = sum(str(token) == "Aib" for token in residue_tokens)
+    aib_fraction = aib_count / residue_n
+    h310 = _clamp01(0.72 * pace_ordinal + 0.34 * aib_fraction - 0.42 * central_p - 0.12 * central_g)
+
+    # --- Beta: intrinsic strand tendency separated from amphipathic face pattern ---
+    beta_favored = set("VIFYWTL")
+    beta_intrinsic = (sum(1.0 if aa in beta_favored else 0.40 if aa != "P" else 0.05 for aa in s) / max(1, n)) if s else 0.0
+    alternation = _alternating_face_score(s) if s else 0.0
+    pro_frac = s.count("P") / max(1, n)
+    beta = _clamp01(0.78 * beta_intrinsic - 0.28 * pro_frac)
+
+    # Hairpin: turn nucleation + strand-compatible flanks. dPro-Gly (type II')
+    # and Aib-Gly (type I') are explicit motif evidence, not canonical surrogates.
+    turn_favored = set("GPNDST")
+    center_start = max(0, n//2 - 2)
+    center = s[center_start:center_start+4]
+    turn_center = sum(aa in turn_favored for aa in center) / max(1, len(center)) if center else 0.0
+    left = s[max(0, center_start-3):center_start]
+    right = s[center_start+len(center):center_start+len(center)+3]
+    flank = sum(aa in beta_favored for aa in left + right) / max(1, len(left + right)) if (left + right) else 0.0
+    dpg_positions = []
+    aibg_positions = []
+    for i in range(max(0, len(residue_tokens)-1)):
+        a, b = str(residue_tokens[i]), str(residue_tokens[i+1])
+        if a.lower() == "dp" and b == "G":
+            dpg_positions.append([i+1, i+2])
+        if a == "Aib" and b == "G":
+            aibg_positions.append([i+1, i+2])
+    explicit_turn_bonus = 0.26 if dpg_positions else 0.18 if aibg_positions else 0.0
+    hairpin = _clamp01(0.40 * beta_intrinsic + 0.22 * turn_center + 0.18 * flank + explicit_turn_bonus)
+
+    # --- PPII: residue/context evidence instead of Pro fraction alone ---
+    ppii_base = sum(PPII_ORDINAL_CLASS.get(aa, 0.40) for aa in s) / max(1, n) if s else 0.0
+    pro_aromatic_adj = sum(
+        1 for i in range(max(0, n-1))
+        if (s[i] == "P" and s[i+1] in "FYW") or (s[i+1] == "P" and s[i] in "FYW")
+    )
+    ppii_cis_trans_risk = _clamp01(pro_aromatic_adj / max(1.0, n / 4.0))
+    ppii = _clamp01(ppii_base - 0.38 * ppii_cis_trans_risk)
+    turn = _clamp01((sum(aa in turn_favored for aa in s) / max(1, n)) * 0.70 + turn_center * 0.30) if s else 0.0
+
+    # --- Coiled-coil: heptad compatibility only, not oligomer prediction ---
+    best_cc = 0.0
+    best_cc_offset = None
+    best_cc_details = {}
+    for offset in range(min(7, max(1, n))):
+        core_total = edge_total = core_hyd = edge_charge = 0
+        leu_d = ile_a = buried_polar = 0
+        for i, aa in enumerate(s):
+            pos = (i - offset) % 7
+            if pos in (0, 3):
+                core_total += 1
+                if aa in set("LIVMFA"):
+                    core_hyd += 1
+                if pos == 3 and aa == "L":
+                    leu_d += 1
+                if pos == 0 and aa == "I":
+                    ile_a += 1
+                if aa in set("DENQKRHST"):
+                    buried_polar += 1
+            elif pos in (4, 6):
+                edge_total += 1
+                if aa in set("DEKR"):
+                    edge_charge += 1
+        core_score = core_hyd / max(1, core_total)
+        edge_score = edge_charge / max(1, edge_total)
+        score = 0.72 * core_score + 0.28 * edge_score
+        if score > best_cc:
+            best_cc = score
+            best_cc_offset = offset
+            best_cc_details = {
+                "heptad_offset": offset, "a_d_hydrophobic_fraction": round(core_score, 4),
+                "e_g_charged_fraction": round(edge_score, 4), "Leu_at_d_count": leu_d,
+                "Ile_at_a_count": ile_a, "buried_polar_core_count": buried_polar,
+            }
+    coiled = _clamp01(0.68 * best_cc + 0.32 * alpha)
+
+    raw_scores = {
+        "ALPHA_HELIX": alpha, "AMPHIPATHIC_ALPHA": amph, "HELIX_310": h310,
+        "BETA_HAIRPIN": hairpin, "BETA_STRAND": beta, "PPII_EXTENDED": ppii,
+        "TURN_RICH": turn, "COILED_COIL": coiled,
+    }
+    family_coverage = {k: coverage for k in raw_scores}
+    if aib_count:
+        family_coverage["HELIX_310"] = max(coverage, (len(s) + aib_count) / residue_n)
+    if dpg_positions or aibg_positions:
+        explicit_count = 2 * len(dpg_positions or aibg_positions)
+        family_coverage["BETA_HAIRPIN"] = max(coverage, min(1.0, (len(s) + explicit_count) / residue_n))
+    scores = {k: round(_clamp01(v) * _clamp01(family_coverage[k]), 6) for k, v in raw_scores.items()}
+
+    return {
+        "status": "ok" if coverage == 1.0 and not unsupported else "partial_evidence_coverage",
+        "canonical_L_sequence": s,
+        "canonical_L_coverage": round(coverage, 4),
+        "unsupported_structure_tokens": ";".join(unsupported),
+        "pace_scholtz_mean_ddg_kcal_mol": None if pace_mean is None else round(float(pace_mean), 4),
+        "pace_scholtz_supported_residue_count": len(pace_values),
+        "pace_scholtz_ordinal_descriptor": round(pace_ordinal, 4),
+        "ncap_context": ncap_class,
+        "nterm_acetylated": bool(nterm_acetyl),
+        "ccap_identity_weighted": False,
+        "central_pro_fraction": round(central_p, 4),
+        "central_gly_fraction": round(central_g, 4),
+        "opposite_charge_i3_i4_pairs": opposite,
+        "like_charge_i3_i4_pairs": like,
+        "hydrophobic_moment_alpha_descriptor": round(_hydrophobic_moment(s, 100.0), 4) if s else 0.0,
+        "beta_intrinsic_descriptor": round(beta_intrinsic, 4),
+        "beta_amphipathic_alternation_descriptor": round(alternation, 4),
+        "d_pro_gly_type_II_prime_turn_candidates": dpg_positions,
+        "aib_gly_type_I_prime_turn_candidates": aibg_positions,
+        "explicit_Aib_count": aib_count,
+        "ppii_ordinal_descriptor": round(ppii_base, 4),
+        "ppii_pro_aromatic_adjacency_count": pro_aromatic_adj,
+        "ppii_cis_trans_risk_descriptor": round(ppii_cis_trans_risk, 4),
+        "coiled_coil_heptad_evidence": best_cc_details,
+        "family_evidence_coverage": {k: round(v, 4) for k, v in family_coverage.items()},
+        "scores": scores,
+        "claim_guard": "Evidence-driven ordinal design descriptors only; not structure populations, affinities, experimental secondary-structure measurements, or native-state probabilities.",
+    }
+
+def environment_compatibility_report(seq):
+    s, coverage, unsupported = _canonical_l_context(seq)
+    n=max(1,len(s))
+    hyd=sum(aa in set("AILMFWVY") for aa in s)/n if s else 0.0
+    charge=abs(sum(aa in set("KR") for aa in s)-sum(aa in set("DE") for aa in s))/n if s else 0.0
+    moment=_hydrophobic_moment(s,100.0)
+    env=str(CONFIG.get("STRUCTURE_ENVIRONMENT","AQUEOUS") or "AQUEOUS").upper()
+    if env == "MEMBRANE_INTERFACE": score=_clamp01(0.45*moment + 0.35*hyd + 0.20*(1.0-min(1.0,charge)))
+    elif env == "TRANSMEMBRANE": score=_clamp01(0.70*hyd + 0.20*(1.0-min(1.0,charge)) + 0.10*moment)
+    elif env == "LOW_DIELECTRIC": score=_clamp01(0.55*hyd + 0.25*(1.0-min(1.0,charge)) + 0.20*moment)
+    elif env == "UNSPECIFIED": score=0.5
+    else: # aqueous
+        score=_clamp01(0.55*(1.0-max(0.0,hyd-0.55)/0.45) + 0.25*(1.0-min(1.0,charge)) + 0.20*(1.0-max(0.0,moment-0.75)))
+    return {
+        "environment": env, "environment_compatibility": round(score*coverage,6),
+        "canonical_L_coverage": round(coverage,4), "unsupported_structure_tokens": ";".join(unsupported),
+        "claim_guard": "Environment compatibility is an ordinal sequence descriptor, not permeability, hemolysis, partition free energy, or membrane insertion proof.",
+    }
+
+
+
+# Pace & Scholtz (Biophys J. 1998;75:422-427) canonical-L intrinsic
+# alpha-helix relative free-energy scale, kcal/mol, Ala = 0. Pro is deliberately
+# absent: Pepforge treats Pro as a positional helix breaker rather than inventing
+# a Pace-Scholtz value.
+PACE_SCHOLTZ_HELIX_DDG_KCAL_MOL = {
+    "A": 0.00, "L": 0.21, "R": 0.21, "M": 0.24, "K": 0.26,
+    "Q": 0.39, "E": 0.40, "I": 0.41, "W": 0.49, "S": 0.50,
+    "Y": 0.53, "F": 0.54, "V": 0.61, "H": 0.61, "N": 0.65,
+    "T": 0.66, "C": 0.68, "D": 0.69, "G": 1.00,
+}
+
+# Brown & Zondlo 2012 report P > Leu > Ala/linear-side-chain residues, with
+# beta-branched, short polar, and aromatic residues lower in their Pro-rich
+# host-guest system. These are intentionally coarse *ordinal design classes*,
+# not the paper's experimental propensity numbers.
+PPII_ORDINAL_CLASS = {
+    "P": 1.00, "L": 0.82, "A": 0.72,
+    "M": 0.62, "K": 0.62, "R": 0.62, "Q": 0.62, "E": 0.62,
+    "D": 0.40, "N": 0.40, "S": 0.40, "C": 0.40, "H": 0.45, "G": 0.35,
+    "T": 0.25, "V": 0.25, "I": 0.25,
+    "F": 0.12, "Y": 0.12, "W": 0.12,
+}
+
+
+WIMLEY_WHITE_INTERFACE_DG = {
+    "A": 0.17, "R": 0.81, "N": 0.42, "D": 1.23, "C": -0.24,
+    "Q": 0.58, "E": 2.02, "G": 0.01, "H": 0.17, "I": -0.31,
+    "L": -0.56, "K": 0.99, "M": -0.23, "F": -1.13, "P": 0.45,
+    "S": 0.13, "T": 0.14, "W": -1.85, "Y": -0.94, "V": 0.07,
+}
+
+
+def structure_literature_detail_report(seq):
+    """Additional literature-grounded descriptors kept separate from fit probability."""
+    s, coverage, unsupported = _canonical_l_context(seq)
+    n = len(s)
+    ww = sum(WIMLEY_WHITE_INTERFACE_DG.get(a, 0.0) for a in s) if s else None
+    cross_aromatic = []
+    cross_charge = []
+    cross_cation_aromatic = []
+    edge = []
+    if n >= 6:
+        for i in range(n // 2):
+            j = n - 1 - i
+            if j - i < 3:
+                continue
+            a, b = s[i], s[j]
+            row = {"positions": [i+1, j+1], "residues": a+b}
+            if a in "FWY" and b in "FWY":
+                cross_aromatic.append({**row, "trp_pair": a == "W" and b == "W"})
+            if (a in "KR" and b in "DE") or (a in "DE" and b in "KR"):
+                cross_charge.append(row)
+            if (a in "KR" and b in "FWY") or (b in "KR" and a in "FWY"):
+                cross_cation_aromatic.append(row)
+        for pos in list(range(min(2, n))) + list(range(max(0, n-2), n)):
+            aa = s[pos]
+            if aa in "PDEKR":
+                edge.append({"position": pos+1, "residue": aa})
+    pro_aromatic_adj = [
+        {"positions": [i+1, i+2], "residues": s[i:i+2]}
+        for i in range(max(0, n-1))
+        if (s[i] == "P" and s[i+1] in "FYW") or (s[i+1] == "P" and s[i] in "FYW")
+    ]
+    return {
+        "wimley_white_interface_deltaG_sum_kcal_mol": None if ww is None else round(float(ww), 4),
+        "wimley_white_canonical_residue_count": n,
+        "cross_strand_aromatic_pair_candidates": cross_aromatic,
+        "cross_strand_trp_pair_candidates": sum(bool(x.get("trp_pair")) for x in cross_aromatic),
+        "cross_strand_opposite_charge_pair_candidates": cross_charge,
+        "cross_strand_cation_aromatic_pair_candidates": cross_cation_aromatic,
+        "beta_edge_negative_design_residues": edge,
+        "ppii_pro_aromatic_adjacency_candidates": pro_aromatic_adj,
+        "canonical_L_coverage": round(coverage, 4),
+        "unsupported_tokens": ";".join(unsupported),
+        "claim_guard": "Sequence-level structural design evidence only. Cross-strand pairs are candidate registers, not a predicted hairpin; beta-edge labels are negative-design evidence, not aggregation probabilities; Wimley-White values are transfer free-energy descriptors, not permeability probabilities.",
+    }
+
+def simulation_readiness_report(seq):
+    """Plan downstream simulation validation without inventing stability results."""
+    contract=design_objective_contract()
+    mode=contract.get("mode","BALANCED")
+    preferred=contract.get("preferred_structure","NONE")
+    env=contract.get("environment","AQUEOUS")
+    classes=[token_class(x) for x in list(seq or [])]
+    modified=any(c in {"D_AA","NON_NAT","LINKER","CHEM","NTERM_CHEM","TAG","LABEL","UNKNOWN"} for c in classes)
+    if mode != "INTERACTION_ONLY" and preferred != "NONE":
+        starts="requested_structure_psb;alternate_psb_same_basin;extended_or_independent_challenge"
+    else:
+        starts="best_clash_free_psb;alternate_clash_free_psb;extended_or_independent_challenge"
+    ff=(
+        "Amber19SB+OPC;Amber19SB+TIP3P;a99SB-disp+a99SB-disp-water;CHARMM36m+TIP3P"
+        if not modified else
+        "parameterization-review-required;compare at least two compatible validated parameter sets after explicit topology/charge review"
+    )
+    enhanced="OPES_multiT_optional_for_flexible_or_disordered;temperature_REMD_or_REST_family_optional_if_start_state_dependence_persists"
+    return {
+        "simulation_parameterization_readiness": "review_required" if modified else "canonical_linear_candidate",
+        "simulation_minimum_independent_replicates": 3,
+        "simulation_initial_state_plan": starts,
+        "simulation_force_field_sensitivity_candidates": ff,
+        "simulation_enhanced_sampling_escalation": enhanced,
+        "simulation_environment": env,
+        "simulation_claim_guard": "Planning metadata only. No MD stability, convergence, binding, or free-energy result is inferred at the PDE stage; nominal simulation time alone is not a quality grade.",
+    }
+
+
+def structure_preference_score(seq):
+    preferred=str(CONFIG.get("PREFERRED_STRUCTURE","NONE") or "NONE").upper()
+    if preferred == "NONE": return 0.0
+    report=sequence_structure_context_report(seq)
+    return float((report.get("scores") or {}).get(preferred,0.0))
+
+
+def interaction_evidence_score_from_fitness(f):
+    keys = ["fit_target","fit_motif","fit_hotspot_match","fit_bridge","fit_dock_proxy","fit_binder_success"]
+    if str(CONFIG.get("HOTSPOT_COMPLEMENTARITY_MODE", "REPORT_ONLY")).upper() == "EVIDENCE_AND_SELECTION":
+        keys.append("fit_hotspot_complementarity")
+    vals = [float(f.get(k, 0.0)) for k in keys]
+    return float(sum(vals) / max(1, len(vals)))
+
+def design_objective_contract():
+    mode = str(CONFIG.get("PDE_OBJECTIVE_MODE", "BALANCED") or "BALANCED").upper()
+    preferred = str(CONFIG.get("PREFERRED_STRUCTURE", "NONE") or "NONE").upper()
+    bias = str(CONFIG.get("STRUCTURE_BIAS", "BALANCED") or "BALANCED").upper()
+    strategy = str(CONFIG.get("CONFORMATIONAL_STRATEGY", "PREORGANIZED") or "PREORGANIZED").upper()
+    allowed_modes = {"INTERACTION_ONLY","INTERACTION_FIRST","BALANCED","STRUCTURE_GUIDED","STRUCTURE_EXPLORATION"}
+    allowed_structures = {"NONE","ALPHA_HELIX","AMPHIPATHIC_ALPHA","HELIX_310","BETA_HAIRPIN","BETA_STRAND","PPII_EXTENDED","TURN_RICH","COILED_COIL"}
+    if mode not in allowed_modes:
+        raise ValueError(f"Unsupported PDE_OBJECTIVE_MODE: {mode}")
+    if preferred not in allowed_structures:
+        raise ValueError(f"Unsupported PREFERRED_STRUCTURE: {preferred}")
+    if bias not in {"MILD","BALANCED","STRONG"}:
+        raise ValueError(f"Unsupported STRUCTURE_BIAS: {bias}")
+    if strategy not in {"PREORGANIZED","ADAPTIVE","FLEXIBLE"}:
+        raise ValueError(f"Unsupported CONFORMATIONAL_STRATEGY: {strategy}")
+    if mode in {"STRUCTURE_GUIDED","STRUCTURE_EXPLORATION"} and preferred == "NONE":
+        raise ValueError(f"{mode} requires an explicit PREFERRED_STRUCTURE; Pepforge will not invent one.")
+    if mode == "INTERACTION_ONLY":
+        preferred = "NONE"
+    return {
+        "mode": mode, "preferred_structure": preferred, "structure_bias": bias,
+        "conformational_strategy": strategy,
+        "environment": str(CONFIG.get("STRUCTURE_ENVIRONMENT", "AQUEOUS")).upper(),
+        "strategy_claim_guard": "Conformational Strategy changes design optimization pressure only; it is not a free-state folded fraction or a binding-mechanism assignment.",
+    }
+
+def interaction_only_hard_validity_report(seq):
+    """Minimal hard validity for structure-agnostic interaction exploration.
+
+    It blocks malformed/unknown chemistry and impossible terminal topology, but it
+    deliberately does not reject candidates merely for SPPS difficulty, aggregation,
+    solubility, D/non-natural ratio, or preferred secondary structure.
+    """
+    issues=[]
+    if not length_ok(seq): issues.append("length_out_of_range")
+    if len(clean_bases(seq)) < 1: issues.append("no_residue_core")
+    if any(token_class(x)=="UNKNOWN" for x in seq): issues.append("unknown_token")
+    if CONFIG.get("DISALLOW_NTERM_LINKER",True) and has_nterm_linker(seq): issues.append("nterm_linker_disallowed")
+    terminal=[x for x in seq if is_terminal_chem_token(x)]
+    if len(terminal)>1 and not CONFIG.get("ALLOW_MULTIPLE_NTERM_MODIFIERS",False): issues.append("multiple_nterm_modifiers_blocked")
+    caps=[x for x in terminal if is_nterm_cap_token_v65(x) or is_nterm_label_token_v65(x)]
+    tags=[x for x in terminal if is_nterm_tag_token_v65(x)]
+    if caps and tags: issues.append("tag_plus_nterm_cap_collision")
+    return {"valid":not issues,"issues":issues,"policy":"chemistry_and_topology_only"}
+
+
+def spps_positional_risk_report(seq):
+    """Position-resolved synthesis/handling warning map; no outcome probability."""
+    raw=list(seq or [])
+    residues=[]
+    for token in raw:
+        if isinstance(token,str) and len(token)==1 and token in AA:
+            residues.append(token)
+        elif isinstance(token,str) and len(token)==2 and token.startswith('d') and token[1] in AA:
+            residues.append(token[1])
+        elif token in NON_NAT:
+            residues.append(None)  # keep position but do not infer canonical side chemistry
+    flags=[]
+    # residue positions are peptide-residue positions, not raw token indices.
+    for i, aa in enumerate(residues):
+        pos=i+1
+        if aa == 'D' and i+1 < len(residues) and residues[i+1] in {'G','N','S'}:
+            flags.append({"category":"assembly_aspartimide","positions":f"{pos}-{pos+1}","detail":f"D{residues[i+1]} context; condition-dependent risk"})
+        if aa == 'M': flags.append({"category":"cleavage_oxidation","positions":str(pos),"detail":"Met oxidation/S-chemistry review"})
+        if aa == 'C': flags.append({"category":"cys_topology","positions":str(pos),"detail":"Cys oxidation/disulfide/connectivity review"})
+        if aa == 'Q' and pos == 1: flags.append({"category":"chemical_liability","positions":"1","detail":"N-terminal Gln pyroglutamate possibility"})
+    # contiguous canonical hydrophobic/aromatic warnings.
+    hydro=set('LIVFWMY'); arom=set('FWY')
+    i=0
+    while i<len(residues):
+        if residues[i] in hydro:
+            j=i
+            while j<len(residues) and residues[j] in hydro: j+=1
+            if j-i>=4: flags.append({"category":"assembly_or_solution_aggregation","positions":f"{i+1}-{j}","detail":"hydrophobic stretch; resin-bound and solution risks must be interpreted separately"})
+            i=j
+        else: i+=1
+    for i in range(max(0,len(residues)-2)):
+        window=residues[i:i+3]
+        if all(x in {'V','I','T'} for x in window):
+            flags.append({"category":"resin_bound_difficult_sequence","positions":f"{i+1}-{i+3}","detail":"V/I/T cluster descriptor"})
+        if all(x in arom for x in window):
+            flags.append({"category":"solution_self_association","positions":f"{i+1}-{i+3}","detail":"aromatic cluster descriptor"})
+    cats={}
+    for item in flags: cats.setdefault(item['category'],[]).append(item['positions'])
+    return {
+        "flag_count":len(flags),
+        "flags":flags,
+        "assembly_risk_positions":";".join(cats.get('assembly_aspartimide',[])+cats.get('resin_bound_difficult_sequence',[])),
+        "cleavage_risk_positions":";".join(cats.get('cleavage_oxidation',[])+cats.get('cys_topology',[])),
+        "aggregation_risk_positions":";".join(cats.get('assembly_or_solution_aggregation',[])+cats.get('solution_self_association',[])),
+        "claim_guard":"Position-resolved warning map only; not predicted crude purity, yield, solubility, or reaction probability.",
+    }
+
+
+
+def _external_hotspot_chemistry_profile():
+    """Load an optional Workflow Mode hotspot-chemistry profile.
+
+    The profile is a sequence-composition evidence hand-off. It is never treated
+    as a 3D contact map or docking result. Desktop can receive the path through
+    PEPFORGE_HOTSPOT_PROFILE; Colab/CLI can set HOTSPOT_CHEMISTRY_PROFILE_PATH.
+    """
+    payload = CONFIG.get("_HOTSPOT_CHEMISTRY_PROFILE")
+    if isinstance(payload, dict) and isinstance(payload.get("chemistry_fractions"), dict):
+        return payload
+    path = str(CONFIG.get("HOTSPOT_CHEMISTRY_PROFILE_PATH", "") or os.environ.get("PEPFORGE_HOTSPOT_PROFILE", "") or "").strip()
+    if not path:
+        return None
+    try:
+        obj = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    fractions = obj.get("chemistry_fractions") if isinstance(obj, dict) else None
+    if not isinstance(fractions, dict):
+        return None
+    clean = {}
+    for key in ("acidic", "basic", "hydrophobic", "aromatic", "polar_hbond_capable", "polar"):
+        if key not in fractions:
+            continue
+        try:
+            clean[key] = _clamp01(float(fractions[key]))
+        except Exception:
+            pass
+    if not clean:
+        return None
+    obj = dict(obj); obj["chemistry_fractions"] = clean; obj["source_path"] = path
+    opportunities = obj.get("structure_opportunities") if isinstance(obj.get("structure_opportunities"), dict) else {}
+    if opportunities:
+        # V4 keeps beta-edge opportunity metadata report-only.  It must not be
+        # silently converted into a binding score or structure-selection bonus.
+        opportunities = dict(opportunities); opportunities["selection_active"] = False
+        obj["structure_opportunities"] = opportunities
+    CONFIG["_HOTSPOT_CHEMISTRY_PROFILE"] = obj
+    return obj
+
+
+def hotspot_chemistry_complementarity_report(seq):
+    """Coarse target-hotspot chemistry complementarity without geometry claims.
+
+    The target signal can come from extracted/manual hotspot motifs or from the
+    Workflow Mode weighted hotspot-chemistry profile. No contact map, docking
+    pose, affinity, or atom-pair interaction is inferred. ``REPORT_ONLY``
+    exports evidence without affecting PDE selection; ``EVIDENCE_AND_SELECTION``
+    allows the descriptor to enter the interaction-evidence objective.
+    """
+    mode = str(CONFIG.get("HOTSPOT_COMPLEMENTARITY_MODE", "REPORT_ONLY") or "REPORT_ONLY").upper()
+    if mode not in {"OFF", "REPORT_ONLY", "EVIDENCE_AND_SELECTION"}:
+        mode = "REPORT_ONLY"
+    peptide = "".join(clean_bases(seq))
+    if mode == "OFF" or not peptide:
+        return {"mode": mode, "status": "off" if mode == "OFF" else "unavailable", "score": 0.0, "dimensions": [],
+                "claim_guard": "No target-hotspot chemistry complementarity was used."}
+
+    acidic, basic = set("DE"), set("KR")
+    hydro, aromatic, polar = set("AILMFWVY"), set("FWY"), set("NQSTHDEKR")
+    p_n = max(1, len(peptide))
+    pfrac = {
+        "acidic": sum(a in acidic for a in peptide)/p_n,
+        "basic": sum(a in basic for a in peptide)/p_n,
+        "hydrophobic": sum(a in hydro for a in peptide)/p_n,
+        "aromatic": sum(a in aromatic for a in peptide)/p_n,
+        "polar": sum(a in polar for a in peptide)/p_n,
+    }
+
+    target_fraction_rows = []
+    external = _external_hotspot_chemistry_profile()
+    if external is not None:
+        f = dict(external.get("chemistry_fractions") or {})
+        target_fraction_rows.append({
+            "source": "workflow_weighted_hotspot_profile",
+            "target_sequence": "weighted_selected_hotspots",
+            "acidic": float(f.get("acidic", 0.0) or 0.0),
+            "basic": float(f.get("basic", 0.0) or 0.0),
+            "hydrophobic": float(f.get("hydrophobic", 0.0) or 0.0),
+            "aromatic": float(f.get("aromatic", 0.0) or 0.0),
+            "polar": float(f.get("polar_hbond_capable", f.get("polar", 0.0)) or 0.0),
+        })
+    else:
+        for target in [str(x or "") for x in active_target_hotspot_sequences() if str(x or "")]:
+            t = "".join(a for a in target if a in AA)
+            if not t:
+                continue
+            tn = max(1, len(t))
+            target_fraction_rows.append({
+                "source": "extracted_or_manual_hotspot_sequence", "target_sequence": t,
+                "acidic": sum(a in acidic for a in t)/tn, "basic": sum(a in basic for a in t)/tn,
+                "hydrophobic": sum(a in hydro for a in t)/tn, "aromatic": sum(a in aromatic for a in t)/tn,
+                "polar": sum(a in polar for a in t)/tn,
+            })
+    if not target_fraction_rows:
+        return {"mode": mode, "status": "unavailable", "score": 0.0, "dimensions": [],
+                "claim_guard": "No target-hotspot chemistry complementarity was used."}
+
+    rows = []
+    for tfrac in target_fraction_rows:
+        dims = []
+        if tfrac["acidic"] > 0: dims.append(("acidic_target__basic_peptide", tfrac["acidic"], pfrac["basic"]))
+        if tfrac["basic"] > 0: dims.append(("basic_target__acidic_peptide", tfrac["basic"], pfrac["acidic"]))
+        if tfrac["hydrophobic"] > 0: dims.append(("hydrophobic_target__hydrophobic_peptide", tfrac["hydrophobic"], pfrac["hydrophobic"]))
+        if tfrac["aromatic"] > 0: dims.append(("aromatic_target__aromatic_or_basic_peptide", tfrac["aromatic"], max(pfrac["aromatic"], pfrac["basic"])))
+        if tfrac["polar"] > 0: dims.append(("polar_target__polar_peptide", tfrac["polar"], pfrac["polar"]))
+        if not dims:
+            continue
+        weighted = sum(w * _clamp01(v / 0.35) for _, w, v in dims) / max(1e-9, sum(w for _, w, _ in dims))
+        rows.append({
+            "source": tfrac.get("source", ""), "target_sequence": tfrac.get("target_sequence", ""),
+            "score": round(_clamp01(weighted), 6),
+            "dimensions": [{"name": name, "target_fraction": round(w,4), "peptide_fraction": round(v,4)} for name, w, v in dims],
+        })
+    score = max((float(r["score"]) for r in rows), default=0.0)
+    return {
+        "mode": mode, "status": "available" if rows else "unavailable", "score": round(score, 6),
+        "target_reports": rows, "profile_source": "workflow_weighted_hotspot_profile" if external is not None else "extracted_or_manual_hotspot_sequence",
+        "structure_opportunities": dict((external or {}).get("structure_opportunities") or {}),
+        "selection_active": mode == "EVIDENCE_AND_SELECTION",
+        "claim_guard": "Coarse sequence-chemistry complementarity evidence only; not a contact map, salt bridge/pi interaction assignment, docking score, binding free energy, or affinity prediction.",
+    }
+
 def raw_fitness(seq, pop_sample=None):
+    complement = hotspot_chemistry_complementarity_report(seq)
+    complement_fit = float(complement.get("score", 0.0)) if complement.get("selection_active") else 0.0
     return {
         "fit_target": target_similarity(seq),
         "fit_motif": motif_score(seq),
@@ -1810,11 +2448,13 @@ def raw_fitness(seq, pop_sample=None):
         "fit_docking_ready": docking_readiness_score(seq),
         "fit_chemistry_presence": chemistry_presence_score(seq),
         "fit_hotspot_match": hotspot_match_score(seq),
+        "fit_hotspot_complementarity": complement_fit,
         "fit_ml_prior": ml_prior_score(seq),
         "fit_developability": design_developability_score(seq),
+        "fit_structure_preference": structure_preference_score(seq),
+        "fit_environment_compatibility": float(environment_compatibility_report(seq).get("environment_compatibility", 0.0)),
         "fit_diversity": diversity_score(seq, pop_sample),
     }
-
 
 def effective_chemistry_bonus_weight():
     base_w = float(CONFIG.get("CHEMISTRY_BONUS_WEIGHT", 0.35))
@@ -1839,11 +2479,13 @@ def weights():
         "fit_docking_ready": float(CONFIG.get("DOCKING_READY_BONUS_WEIGHT", 1.0)),
         "fit_chemistry_presence": effective_chemistry_bonus_weight(),
         "fit_hotspot_match": float(CONFIG.get("HOTSPOT_BINDING_WEIGHT", 0.8)),
+        "fit_hotspot_complementarity": float(CONFIG.get("HOTSPOT_COMPLEMENTARITY_WEIGHT", 0.65)),
         "fit_ml_prior": float(CONFIG.get("ML_PRIOR_WEIGHT", 0.45)),
         "fit_developability": float(CONFIG.get("DESIGN_DEVELOPABILITY_WEIGHT", 0.75)),
+        "fit_structure_preference": {"MILD":0.35,"BALANCED":0.85,"STRONG":1.50}.get(str(CONFIG.get("STRUCTURE_BIAS","BALANCED")).upper(),0.85),
+        "fit_environment_compatibility": 0.45,
         "fit_diversity": 0.8,
     }
-
 
 def chemistry_presence_score(seq):
     """Soft enrichment score for user-selected chemistry/linker/tag/label.
@@ -1868,8 +2510,8 @@ def total_score(seq, pop_sample=None):
 
 def deterministic_embedding(seq):
     c = clean_bases(seq)
-    counts = np.array([c.count(a) / max(1, len(c)) for a in AA], dtype=float)
-    feats = np.array([
+    counts = _np().array([c.count(a) / max(1, len(c)) for a in AA], dtype=float)
+    feats = _np().array([
         sequence_length(seq) / 50.0,
         hydrophobic_ratio(seq),
         charge_score(seq) / 10.0,
@@ -1878,21 +2520,195 @@ def deterministic_embedding(seq):
         motif_score(seq),
         linker_score(seq),
     ], dtype=float)
-    return np.concatenate([counts, feats])
+    return _np().concatenate([counts, feats])
+
+def _deterministic_population_reference(pop_sample, limit=20):
+    """Return a stable comparison subset for diversity fitness.
+
+    Diversity evaluation must not consume the global RNG: otherwise the same
+    locked seed can drift merely because fitness was evaluated in a different
+    order.  Sorting by the public construct notation keeps this deterministic.
+    """
+    rows = list(pop_sample or [])
+    rows.sort(key=lambda item: seq_to_string(item))
+    if len(rows) <= int(limit):
+        return rows
+    # Evenly spaced coverage avoids a first-N bias without adding randomness.
+    idx = _np().linspace(0, len(rows) - 1, num=int(limit), dtype=int)
+    return [rows[int(i)] for i in idx]
+
 
 def diversity_score(seq, pop_sample=None):
     if not pop_sample:
         return 0.0
     emb = deterministic_embedding(seq)
-    others = random.sample(pop_sample, min(20, len(pop_sample))) if len(pop_sample) > 1 else pop_sample
     dists = []
-    for s in others:
-        if s is seq:
+    self_key = tuple(seq)
+    skipped_self = False
+    for other in _deterministic_population_reference(pop_sample, 20):
+        if not skipped_self and tuple(other) == self_key:
+            skipped_self = True
             continue
-        dists.append(float(np.linalg.norm(emb - deterministic_embedding(s))))
+        dists.append(float(_np().linalg.norm(emb - deterministic_embedding(other))))
     if not dists:
         return 0.0
-    return float(np.tanh(np.mean(dists)))
+    return float(_np().tanh(_np().mean(dists)))
+
+
+def nsga_objectives(seq, pop_sample=None):
+    """Return mode/strategy-specific transparent maximization objectives.
+
+    Interaction Only removes structure objectives entirely. For a requested fold,
+    PREORGANIZED retains a standalone structure objective; ADAPTIVE treats the fold
+    as an accessible design basin inside a blended objective; FLEXIBLE keeps only a
+    weak structure-accessibility guard. These are optimizer policies, not claims of
+    conformational selection, induced fit, or solution-state populations.
+    """
+    contract = design_objective_contract()
+    mode = contract["mode"]
+    strategy = contract["conformational_strategy"]
+    f = raw_fitness(seq, pop_sample)
+    mean = lambda keys: float(sum(float(f.get(k,0.0)) for k in keys) / max(1, len(keys)))
+    interaction = interaction_evidence_score_from_fitness(f)
+    feasibility = mean(["fit_validation","fit_length","fit_developability","fit_charge","fit_hydro"])
+    chemistry = mean(["fit_linker","fit_chemistry_presence","fit_docking_ready"])
+    structure = float(f.get("fit_structure_preference", 0.0))
+    environment = float(f.get("fit_environment_compatibility", 0.0))
+    diversity = float(f.get("fit_diversity", 0.0))
+    bias = {"MILD":0.25,"BALANCED":0.50,"STRONG":0.75}.get(contract["structure_bias"], 0.50)
+    requested = contract["preferred_structure"] != "NONE"
+
+    if mode == "INTERACTION_ONLY":
+        return {"objective_interaction": interaction}
+    if mode == "INTERACTION_FIRST":
+        out = {"objective_interaction":interaction,"objective_feasibility":feasibility,"objective_diversity":diversity}
+        if requested:
+            guard_fraction = {"PREORGANIZED":0.35,"ADAPTIVE":0.22,"FLEXIBLE":0.10}[strategy]
+            out["objective_interaction_structure_guard"] = (1.0-bias*guard_fraction)*interaction + (bias*guard_fraction)*structure
+        return out
+    if mode == "STRUCTURE_GUIDED":
+        out = {
+            "objective_interaction": interaction,
+            "objective_environment_context": environment,
+            "objective_feasibility": feasibility,
+            "objective_diversity": diversity,
+        }
+        if strategy == "PREORGANIZED":
+            out["objective_structure_preference"] = structure
+            out["objective_interaction_structure_balance"] = (1.0-bias)*interaction + bias*structure
+        elif strategy == "ADAPTIVE":
+            local_bias = min(0.55, bias * 0.70)
+            out["objective_accessible_requested_basin"] = (1.0-local_bias)*interaction + local_bias*structure
+        else:  # FLEXIBLE
+            local_bias = min(0.25, bias * 0.35)
+            out["objective_flexible_structure_guard"] = (1.0-local_bias)*interaction + local_bias*structure
+        return out
+    if mode == "STRUCTURE_EXPLORATION":
+        if strategy == "PREORGANIZED":
+            lead = {"objective_structure_preference": structure, "objective_structure_led_balance":0.75*structure+0.25*interaction}
+        elif strategy == "ADAPTIVE":
+            lead = {"objective_structure_accessibility":0.55*structure+0.45*interaction}
+        else:
+            lead = {"objective_flexible_basin_exploration":0.35*structure+0.65*interaction}
+        return {**lead, "objective_environment_context":environment, "objective_feasibility":feasibility, "objective_diversity":diversity}
+    out = {
+        "objective_interaction":interaction, "objective_feasibility":feasibility,
+        "objective_chemistry_route":chemistry, "objective_environment_context":environment,
+        "objective_diversity":diversity,
+    }
+    if requested:
+        if strategy == "PREORGANIZED":
+            out["objective_structure_preference"] = structure
+        elif strategy == "ADAPTIVE":
+            out["objective_structure_accessibility"] = 0.60*interaction + 0.40*structure
+        else:
+            out["objective_flexible_structure_guard"] = 0.82*interaction + 0.18*structure
+    return out
+
+def _dominates(left, right):
+    """True when maximization vector ``left`` Pareto-dominates ``right``."""
+    return all(a >= b for a, b in zip(left, right)) and any(a > b for a, b in zip(left, right))
+
+
+def nsga_rank_and_crowding(pop, pop_sample=None):
+    """Compute NSGA-II non-dominated rank and crowding distance."""
+    rows = list(pop or [])
+    if not rows:
+        return [], [], [], []
+    reference = list(pop_sample or rows)
+    objective_dicts = [nsga_objectives(seq, reference) for seq in rows]
+    names = list(objective_dicts[0])
+    vectors = [tuple(float(d[name]) for name in names) for d in objective_dicts]
+    dominates_set = [set() for _ in rows]
+    dominated_count = [0 for _ in rows]
+    fronts = [[]]
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            if _dominates(vectors[i], vectors[j]):
+                dominates_set[i].add(j); dominated_count[j] += 1
+            elif _dominates(vectors[j], vectors[i]):
+                dominates_set[j].add(i); dominated_count[i] += 1
+    for i, count in enumerate(dominated_count):
+        if count == 0:
+            fronts[0].append(i)
+    cursor = 0
+    while cursor < len(fronts) and fronts[cursor]:
+        nxt = []
+        for i in fronts[cursor]:
+            for j in dominates_set[i]:
+                dominated_count[j] -= 1
+                if dominated_count[j] == 0:
+                    nxt.append(j)
+        if nxt:
+            fronts.append(nxt)
+        cursor += 1
+    rank = [len(rows) + 1 for _ in rows]
+    crowding = [0.0 for _ in rows]
+    for front_index, front in enumerate(fronts):
+        if not front:
+            continue
+        for i in front:
+            rank[i] = front_index + 1
+        if len(front) <= 2:
+            for i in front:
+                crowding[i] = float("inf")
+            continue
+        for objective_index in range(len(names)):
+            ordered = sorted(front, key=lambda i: vectors[i][objective_index])
+            crowding[ordered[0]] = crowding[ordered[-1]] = float("inf")
+            low, high = vectors[ordered[0]][objective_index], vectors[ordered[-1]][objective_index]
+            span = high - low
+            if span <= 1e-12:
+                continue
+            for pos in range(1, len(ordered) - 1):
+                idx = ordered[pos]
+                if math.isinf(crowding[idx]):
+                    continue
+                crowding[idx] += (vectors[ordered[pos + 1]][objective_index] - vectors[ordered[pos - 1]][objective_index]) / span
+    return rank, crowding, objective_dicts, fronts
+
+
+def _nsga_tournament(pop, ranks, crowding):
+    if len(pop) == 1:
+        return pop[0]
+    a, b = random.sample(range(len(pop)), 2)
+    ka = (int(ranks[a]), -float(crowding[a]))
+    kb = (int(ranks[b]), -float(crowding[b]))
+    if ka < kb:
+        return pop[a]
+    if kb < ka:
+        return pop[b]
+    return pop[a] if random.random() < 0.5 else pop[b]
+
+
+def _nsga_environmental_select(pop, target_size):
+    ranks, crowding, _objective_dicts, _fronts = nsga_rank_and_crowding(pop, pop)
+    weighted = [total_score(seq, pop) for seq in pop]
+    order = sorted(
+        range(len(pop)),
+        key=lambda i: (int(ranks[i]), -float(crowding[i]), -float(weighted[i]), seq_to_string(pop[i])),
+    )
+    return [pop[i] for i in order[:max(1, int(target_size))]]
 
 # -------------------------
 # Evolution
@@ -1946,35 +2762,54 @@ def evolve(config=None, verbose=True):
     update_config(config or {})
     set_global_seed(CONFIG.get("SEED", 42))
     pop = init_population()
+    pop_size = max(2, int(CONFIG.get("POP", 200)))
     progress = []
     for g in range(int(CONFIG.get("GEN", 20))):
-        scores = np.array([total_score(s, pop) for s in pop], dtype=float)
-        best_idx = int(np.argmax(scores))
-        valid_ratio = np.mean([validation_report(s)["valid"] for s in pop])
+        scores = _np().array([total_score(seq, pop) for seq in pop], dtype=float)
+        best_idx = int(_np().argmax(scores))
+        valid_ratio = _np().mean([validation_report(seq)["valid"] for seq in pop])
+        ranks, crowding, _objectives, fronts = nsga_rank_and_crowding(pop, pop) if str(CONFIG.get("ENGINE_MODE", "NSGA2")).upper() == "NSGA2" else ([], [], [], [])
         progress.append({
             "generation": g,
             "best_score": float(scores[best_idx]),
-            "mean_score": float(np.mean(scores)),
+            "mean_score": float(_np().mean(scores)),
             "valid_ratio": float(valid_ratio),
             "best_sequence": seq_to_string(pop[best_idx]),
+            "pareto_front_size": len(fronts[0]) if fronts else 0,
+            "engine_mode": str(CONFIG.get("ENGINE_MODE", "NSGA2")),
         })
         if verbose:
-            print(f"[Gen {g:03d}] best={scores[best_idx]:.3f} mean={np.mean(scores):.3f} valid={valid_ratio:.2f}")
-        ranked = [x for _, x in sorted(zip(scores, pop), key=lambda z: z[0], reverse=True)]
-        elite_n = max(2, min(int(CONFIG.get("ELITE_KEEP", 20)), max(2, len(ranked)//5)))
-        elites = ranked[:elite_n]
-        children = elites.copy()
-        while len(children) < int(CONFIG.get("POP", 200)):
-            if CONFIG.get("ENGINE_MODE", "NSGA2") == "NSGA2" and len(elites) >= 2 and random.random() < 0.65:
-                a, b = random.sample(elites, 2)
-                child = crossover(a, b)
-            else:
-                child = generate()
-            mode = "explore" if random.random() < 0.45 else "exploit"
-            children.append(mutate(child, mode))
-        pop = deduplicate(children)
-        while len(pop) < int(CONFIG.get("POP", 200)):
-            pop.append(generate())
+            extra = f" pareto_front={len(fronts[0])}" if fronts else ""
+            print(f"[Gen {g:03d}] best={scores[best_idx]:.3f} mean={_np().mean(scores):.3f} valid={valid_ratio:.2f}{extra}")
+
+        if str(CONFIG.get("ENGINE_MODE", "NSGA2")).upper() == "NSGA2":
+            # Standard NSGA-II pattern: binary tournament from the current
+            # population, variation, then parent+offspring environmental selection.
+            offspring = []
+            while len(offspring) < pop_size:
+                parent_a = _nsga_tournament(pop, ranks, crowding)
+                parent_b = _nsga_tournament(pop, ranks, crowding)
+                child = crossover(parent_a, parent_b) if random.random() < 0.80 else list(parent_a)
+                mode = "explore" if random.random() < 0.45 else "exploit"
+                offspring.append(mutate(child, mode))
+            combined = deduplicate(list(pop) + offspring)
+            while len(combined) < pop_size:
+                combined.append(generate())
+                combined = deduplicate(combined)
+            pop = _nsga_environmental_select(combined, pop_size)
+        else:
+            # Backward-compatible weighted GA mode for explicit comparison.
+            ranked = [x for _, x in sorted(zip(scores, pop), key=lambda z: z[0], reverse=True)]
+            elite_n = max(2, min(int(CONFIG.get("ELITE_KEEP", 20)), max(2, len(ranked)//5)))
+            elites = ranked[:elite_n]
+            children = elites.copy()
+            while len(children) < pop_size:
+                child = crossover(*random.sample(elites, 2)) if len(elites) >= 2 and random.random() < 0.65 else generate()
+                mode = "explore" if random.random() < 0.45 else "exploit"
+                children.append(mutate(child, mode))
+            pop = deduplicate(children)
+            while len(pop) < pop_size:
+                pop.append(generate())
     return pop, progress
 
 
@@ -2248,12 +3083,29 @@ def peptide_target_hotspot_relation(seq):
     clean = "".join(clean_bases(seq))
     return f"{motif}:{hotspot_match_label(motif, clean)}"
 
+def candidate_construct_key(seq):
+    """Canonical construct key used for cross-module candidate identity."""
+    return "|".join(str(token).strip() for token in list(seq or []))
+
+
+def stable_candidate_id(seq):
+    key = candidate_construct_key(seq)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12].upper()
+    return f"PF-CAND-{digest}"
+
+
+def _candidate_chemistry_tokens_from_signature(signature):
+    tokens = [token for token in str(signature or "").split("|") if token]
+    return [token for token in tokens if not (len(token) == 1 and token in AA)]
+
 def candidate_row(seq, rank=1, pop_sample=None):
     fit = raw_fitness(seq, pop_sample)
     rep = validation_report(seq)
     policy = candidate_modeling_policy(seq)
     row = {
         "rank": rank,
+        "candidate_id": stable_candidate_id(seq),
+        "construct_tokens": candidate_construct_key(seq),
         "sequence": seq_to_string(seq),
         "clean_sequence": to_esm_seq(seq),
         "binding_target_hotspot": selected_binding_hotspot_for_seq(seq).get("motif", ""),
@@ -2310,15 +3162,74 @@ def candidate_row(seq, rank=1, pop_sample=None):
         "motif_placement_mode": CONFIG.get("MOTIF_PLACEMENT_MODE", "OFF"),
         "motif_placement_specs": CONFIG.get("MOTIF_PLACEMENT_SPECS", ""),
         "hotspot_peptide_map": hotspot_peptide_map_string(seq),
+        "pde_objective_mode": design_objective_contract().get("mode"),
+        "preferred_structure": design_objective_contract().get("preferred_structure"),
+        "structure_direction_active": design_objective_contract().get("mode") != "INTERACTION_ONLY" and design_objective_contract().get("preferred_structure") != "NONE",
+        "structure_bias": str(CONFIG.get("STRUCTURE_BIAS", "BALANCED")),
+        "structure_environment": str(CONFIG.get("STRUCTURE_ENVIRONMENT", "AQUEOUS")),
+        "conformational_strategy": design_objective_contract().get("conformational_strategy"),
+        "conformational_strategy_claim_guard": design_objective_contract().get("strategy_claim_guard"),
+        "hotspot_complementarity_mode": str(CONFIG.get("HOTSPOT_COMPLEMENTARITY_MODE", "REPORT_ONLY")),
     }
+    structure_context = sequence_structure_context_report(seq)
+    environment_context = environment_compatibility_report(seq)
+    literature_detail = structure_literature_detail_report(seq)
+    simulation_plan = simulation_readiness_report(seq)
+    hotspot_complement = hotspot_chemistry_complementarity_report(seq)
+    row.update({
+        "structure_context_status": structure_context.get("status", ""),
+        "structure_context_canonical_L_coverage": structure_context.get("canonical_L_coverage", 0.0),
+        "structure_context_unsupported_tokens": structure_context.get("unsupported_structure_tokens", ""),
+        "structure_preference_score": structure_preference_score(seq),
+        "environment_compatibility_score": environment_context.get("environment_compatibility", 0.0),
+        "structure_claim_guard": structure_context.get("claim_guard", ""),
+        "wimley_white_interface_deltaG_sum_kcal_mol": literature_detail.get("wimley_white_interface_deltaG_sum_kcal_mol"),
+        "cross_strand_aromatic_pair_candidate_count": len(literature_detail.get("cross_strand_aromatic_pair_candidates") or []),
+        "cross_strand_trp_pair_candidate_count": literature_detail.get("cross_strand_trp_pair_candidates", 0),
+        "beta_edge_negative_design_residue_count": len(literature_detail.get("beta_edge_negative_design_residues") or []),
+        "structure_literature_detail_claim_guard": literature_detail.get("claim_guard", ""),
+        "cross_strand_opposite_charge_pair_candidate_count": len(literature_detail.get("cross_strand_opposite_charge_pair_candidates") or []),
+        "cross_strand_cation_aromatic_pair_candidate_count": len(literature_detail.get("cross_strand_cation_aromatic_pair_candidates") or []),
+        "ppii_pro_aromatic_adjacency_candidate_count": len(literature_detail.get("ppii_pro_aromatic_adjacency_candidates") or []),
+        "hotspot_chemistry_complementarity_score": hotspot_complement.get("score", 0.0),
+        "hotspot_chemistry_complementarity_status": hotspot_complement.get("status", ""),
+        "hotspot_chemistry_complementarity_selection_active": hotspot_complement.get("selection_active", False),
+        "hotspot_chemistry_complementarity_claim_guard": hotspot_complement.get("claim_guard", ""),
+        "target_beta_edge_candidate_count": int((hotspot_complement.get("structure_opportunities") or {}).get("beta_edge_candidate_count", 0) or 0),
+        "target_beta_edge_evidence_selection_active": False,
+        "target_beta_edge_claim_guard": (hotspot_complement.get("structure_opportunities") or {}).get("claim_guard", ""),
+    })
+    row.update(simulation_plan)
+    for family, value in (structure_context.get("scores") or {}).items():
+        row["structure_evidence_" + family.lower()] = value
+    risk_map = spps_positional_risk_report(seq)
+    row.update({
+        "spps_positional_risk_count": risk_map.get("flag_count", 0),
+        "spps_assembly_risk_positions": risk_map.get("assembly_risk_positions", ""),
+        "spps_cleavage_risk_positions": risk_map.get("cleavage_risk_positions", ""),
+        "aggregation_risk_positions": risk_map.get("aggregation_risk_positions", ""),
+        "spps_risk_claim_guard": risk_map.get("claim_guard", ""),
+        "interaction_only_hard_valid": interaction_only_hard_validity_report(seq).get("valid"),
+        "interaction_only_hard_validity_issues": ";".join(interaction_only_hard_validity_report(seq).get("issues", [])),
+    })
+    row.update(nsga_objectives(seq, pop_sample))
     row.update(spps_compatibility_report(seq))
     row.update(policy)
     row.update(fit)
     return row
 
 def population_rows(pop):
-    ranked = sorted(pop, key=lambda s: total_score(s, pop), reverse=True)
-    rows = [candidate_row(s, i+1, pop) for i, s in enumerate(ranked)]
+    ranks, crowding, _objectives, _fronts = nsga_rank_and_crowding(pop, pop)
+    metadata = {}
+    for i, seq in enumerate(pop):
+        metadata[candidate_construct_key(seq)] = {
+            "pareto_rank": int(ranks[i]) if ranks else "",
+            "crowding_distance": "inf" if ranks and math.isinf(float(crowding[i])) else (round(float(crowding[i]), 6) if ranks else ""),
+        }
+    ranked = sorted(pop, key=lambda seq: (metadata.get(candidate_construct_key(seq), {}).get("pareto_rank", 999999), -total_score(seq, pop), seq_to_string(seq))) if str(CONFIG.get("ENGINE_MODE", "NSGA2")).upper() == "NSGA2" else sorted(pop, key=lambda seq: total_score(seq, pop), reverse=True)
+    rows = [candidate_row(seq, i + 1, pop) for i, seq in enumerate(ranked)]
+    for row in rows:
+        row.update(metadata.get(str(row.get("construct_tokens", "")), {}))
     return diversify_final_ranking(
         rows,
         top_n=int(CONFIG.get("FINAL_TOPK", 10)),
@@ -2327,7 +3238,7 @@ def population_rows(pop):
 
 
 def _normalized_sequence_distance(left, right):
-    """Levenshtein distance normalized by the longer clean sequence."""
+    """Levenshtein distance normalized by the longer sequence."""
     a, b = str(left or ""), str(right or "")
     if a == b:
         return 0.0
@@ -2342,23 +3253,67 @@ def _normalized_sequence_distance(left, right):
     return float(previous[-1]) / max(len(a), len(b), 1)
 
 
+def _normalized_token_distance(left, right):
+    a = [x for x in str(left or "").split("|") if x]
+    b = [x for x in str(right or "").split("|") if x]
+    if a == b:
+        return 0.0
+    if not a or not b:
+        return 1.0
+    previous = list(range(len(b) + 1))
+    for i, token_a in enumerate(a, 1):
+        current = [i]
+        for j, token_b in enumerate(b, 1):
+            current.append(min(current[-1] + 1, previous[j] + 1, previous[j - 1] + (token_a != token_b)))
+        previous = current
+    return float(previous[-1]) / max(len(a), len(b), 1)
+
+
+def _chemistry_set_distance(left_signature, right_signature):
+    left = set(_candidate_chemistry_tokens_from_signature(left_signature))
+    right = set(_candidate_chemistry_tokens_from_signature(right_signature))
+    if not left and not right:
+        return 0.0
+    return 1.0 - (len(left & right) / max(1, len(left | right)))
+
+
+def _property_distance(left, right):
+    # Small bounded tie-breaker; never treated as a physical distance metric.
+    hydro = abs(float(left.get("clean_hydrophobic_ratio", 0.0)) - float(right.get("clean_hydrophobic_ratio", 0.0)))
+    charge = min(1.0, abs(float(left.get("clean_charge", 0.0)) - float(right.get("clean_charge", 0.0))) / 8.0)
+    arom = abs(float(left.get("aromatic_ratio", 0.0)) - float(right.get("aromatic_ratio", 0.0)))
+    return min(1.0, (hydro + charge + arom) / 3.0)
+
+
+def candidate_diversity_distance(left, right):
+    """Composite final-ranking diversity including explicit chemistry.
+
+    The score is only a ranking distance.  It is not a structural RMSD,
+    pharmacological similarity, or activity-distance estimate.
+    """
+    core = _normalized_sequence_distance(left.get("clean_sequence"), right.get("clean_sequence"))
+    token = _normalized_token_distance(left.get("construct_tokens"), right.get("construct_tokens"))
+    chemistry = _chemistry_set_distance(left.get("construct_tokens"), right.get("construct_tokens"))
+    props = _property_distance(left, right)
+    return float(min(1.0, 0.45 * core + 0.35 * token + 0.15 * chemistry + 0.05 * props))
+
+
 def diversify_final_ranking(rows, top_n=None, minimum_distance=0.20):
-    """Keep score order while enforcing explicit diversity in the visible Top K."""
+    """Preserve Pareto/score order while enforcing chemistry-aware Top-K diversity."""
     ordered = [dict(row) for row in rows]
     target = max(1, min(int(top_n or CONFIG.get("FINAL_TOPK", 10)), len(ordered))) if ordered else 0
     selected, deferred = [], []
     for row in ordered:
-        clean = str(row.get("clean_sequence") or "")
-        distances = [_normalized_sequence_distance(clean, old.get("clean_sequence")) for old in selected]
+        distances = [candidate_diversity_distance(row, old) for old in selected]
         if len(selected) < target and (not distances or min(distances) >= float(minimum_distance)):
             row["final_diversity_distance"] = round(min(distances), 4) if distances else 1.0
-            row["final_diversity_status"] = "distance_pass"
+            row["final_diversity_status"] = "chemistry_aware_distance_pass"
             selected.append(row)
         else:
             deferred.append(row)
     while len(selected) < target and deferred:
         row = deferred.pop(0)
-        distances = [_normalized_sequence_distance(row.get("clean_sequence"), old.get("clean_sequence")) for old in selected]
+        distances = [candidate_diversity_distance(row, old) for old in selected]
         row["final_diversity_distance"] = round(min(distances), 4) if distances else 1.0
         row["final_diversity_status"] = "threshold_relaxed_to_fill_top_k"
         selected.append(row)
@@ -2366,6 +3321,7 @@ def diversify_final_ranking(rows, top_n=None, minimum_distance=0.20):
     for rank, row in enumerate(result, 1):
         row["rank"] = rank
         row["final_diversity_threshold"] = float(minimum_distance)
+        row["final_diversity_metric"] = "0.45 core edit + 0.35 construct-token edit + 0.15 chemistry-set + 0.05 bounded property difference"
     return result
 
 
@@ -2431,6 +3387,10 @@ def write_report(path, rows, progress):
         f"- Length range: {length_bounds()}",
         f"- Length count mode: {CONFIG.get('LENGTH_COUNT_MODE')}",
         f"- Design mode: {CONFIG.get('DESIGN_MODE')}",
+        f"- PDE objective mode: {CONFIG.get('PDE_OBJECTIVE_MODE')}",
+        f"- Preferred structure: {CONFIG.get('PREFERRED_STRUCTURE')}",
+        f"- Structure bias: {CONFIG.get('STRUCTURE_BIAS')}",
+        f"- Structure environment: {CONFIG.get('STRUCTURE_ENVIRONMENT')}",
         f"- Docking stage: {CONFIG.get('DOCKING_STAGE')}",
         "",
         "## Top candidates",
@@ -2464,15 +3424,83 @@ def save_outputs(pop, progress, outdir=None, top_n=None):
     out.mkdir(parents=True, exist_ok=True)
     rows_all = population_rows(pop)
     rejected_rows = [r for r in rows_all if r.get("SPPS_status") != "PASS"]
-    rows = [r for r in rows_all if r.get("SPPS_status") == "PASS"] if CONFIG.get("SPPS_ONLY_OUTPUT", True) else rows_all
+    objective_mode = design_objective_contract().get("mode")
+    if objective_mode == "INTERACTION_ONLY":
+        rows = [r for r in rows_all if bool(r.get("interaction_only_hard_valid", False))]
+    else:
+        rows = [r for r in rows_all if r.get("SPPS_status") == "PASS"] if CONFIG.get("SPPS_ONLY_OUTPUT", True) else rows_all
     if not rows:
         rows = rows_all[:]
     top_n = int(top_n or CONFIG.get("FINAL_TOPK", 10))
     top_rows = rows[:top_n]
 
+    manifest_dir = out / "candidate_manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_index = []
+    for row in top_rows:
+        manifest = {
+            "schema": "pepforge_candidate_manifest_v1",
+            "candidate_id": row.get("candidate_id"),
+            "rank": row.get("rank"),
+            "sequence": row.get("sequence"),
+            "construct_tokens": str(row.get("construct_tokens", "")).split("|") if row.get("construct_tokens") else [],
+            "clean_sequence": row.get("clean_sequence"),
+            "pareto_rank": row.get("pareto_rank"),
+            "crowding_distance": row.get("crowding_distance"),
+            "objectives": {k: row.get(k) for k in row if str(k).startswith("objective_")},
+            "design_intent": {
+                "pde_objective_mode": row.get("pde_objective_mode"),
+                "preferred_structure": row.get("preferred_structure"),
+                "structure_direction_active": row.get("structure_direction_active"),
+                "structure_bias": row.get("structure_bias"),
+                "environment": row.get("structure_environment"),
+                "conformational_strategy": row.get("conformational_strategy"),
+                "hotspot_complementarity_mode": row.get("hotspot_complementarity_mode"),
+            },
+            "sequence_context": {
+                "structure_preference_score": row.get("structure_preference_score"),
+                "hotspot_chemistry_complementarity_score": row.get("hotspot_chemistry_complementarity_score"),
+                "hotspot_chemistry_complementarity_status": row.get("hotspot_chemistry_complementarity_status"),
+                "hotspot_chemistry_complementarity_selection_active": row.get("hotspot_chemistry_complementarity_selection_active"),
+                "canonical_L_coverage": row.get("structure_context_canonical_L_coverage"),
+                "unsupported_structure_tokens": row.get("structure_context_unsupported_tokens"),
+                "spps_positional_risk_count": row.get("spps_positional_risk_count"),
+                "assembly_risk_positions": row.get("spps_assembly_risk_positions"),
+                "cleavage_risk_positions": row.get("spps_cleavage_risk_positions"),
+                "aggregation_risk_positions": row.get("aggregation_risk_positions"),
+            },
+            "legacy_total_score": row.get("total_score"),
+            "final_diversity": {
+                "distance": row.get("final_diversity_distance"),
+                "status": row.get("final_diversity_status"),
+                "metric": row.get("final_diversity_metric"),
+            },
+            "artifacts": {},
+            "claim_boundary": "Candidate manifest is an audit/transfer record; scores are design-ranking signals, not measured activity or affinity.",
+        }
+        path = manifest_dir / f"{row.get('candidate_id', 'candidate')}.json"
+        path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        manifest_index.append({"candidate_id": row.get("candidate_id"), "rank": row.get("rank"), "sequence": row.get("sequence"), "manifest": str(path.relative_to(out))})
+    write_csv(out / "candidate_manifest_index.csv", manifest_index)
+
     write_csv(out / "results_full.csv", rows)
     write_csv(out / "results_top.csv", top_rows)
     write_csv(out / "results_rejected_spps.csv", rejected_rows or [{"message":"no rejected candidates", "SPPS_status":"PASS"}])
+    positional_risk_rows = []
+    for candidate in top_rows:
+        tokens = [x for x in str(candidate.get("construct_tokens", "")).split("|") if x]
+        risk = spps_positional_risk_report(tokens)
+        for item in risk.get("flags", []):
+            positional_risk_rows.append({
+                "candidate_id": candidate.get("candidate_id", ""),
+                "rank": candidate.get("rank", ""),
+                "sequence": candidate.get("sequence", ""),
+                "category": item.get("category", ""),
+                "positions": item.get("positions", ""),
+                "detail": item.get("detail", ""),
+                "claim_guard": risk.get("claim_guard", ""),
+            })
+    write_csv(out / "spps_positional_risk_map.csv", positional_risk_rows or [{"message":"no positional risk flags in selected candidates", "claim_guard":"Warning map only; absence of a flag is not experimental proof of easy synthesis."}])
     write_csv(out / "hotspot_peptide_pairs.csv", hotspot_peptide_pair_rows(top_rows) or [{"message": "no hotspots extracted or AUTO_HOTSPOT is off", "hotspot_status": CONFIG.get("_HOTSPOT_STATUS", "")}])
     write_csv(out / "hotspot_debug_visualization.csv", hotspot_visualization_rows() or [{"message": "no hotspots extracted", "hotspot_status": CONFIG.get("_HOTSPOT_STATUS", "")}])
 
@@ -2549,17 +3577,19 @@ Recommended interpretation:
     write_report(out / "research_report.md", rows, progress)
     write_csv(out / "extracted_hotspots.csv", CONFIG.get("_EXTRACTED_HOTSPOTS", []) or [{"motif":"none","score":0,"source":"none"}])
 
-    zip_path = out.with_suffix(".zip")
+    zip_path = out / "PDE_Result_Package.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for p in out.rglob("*"):
-            if p.is_file():
+            if p.is_file() and p.resolve() != zip_path.resolve():
                 z.write(p, p.relative_to(out))
     return {
         "output_dir": str(out),
         "full_csv": str(out / "results_full.csv"),
         "top_csv": str(out / "results_top.csv"),
+        "candidate_manifest_index": str(out / "candidate_manifest_index.csv"),
+        "candidate_manifest_dir": str(out / "candidate_manifests"),
         "final_csv": str(out / "final_cluster_representatives.csv"),
         "validation_plan": str(out / "posthoc_validation_plan.csv"),
         "rescore_plan": str(out / "posthoc_rescore_plan.csv"),
@@ -2624,12 +3654,12 @@ def export_optional_ml_outputs(output_dir, rows):
 def rebuild_output_zip(output_dir):
     """Rebuild output ZIP after late optional exports are added."""
     out = Path(output_dir)
-    zip_path = out.with_suffix(".zip")
+    zip_path = out / "PDE_Result_Package.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for p in out.rglob("*"):
-            if p.is_file():
+            if p.is_file() and p.resolve() != zip_path.resolve():
                 z.write(p, p.relative_to(out))
     return str(zip_path)
 
@@ -2659,6 +3689,7 @@ def export_pseudodocking_colab_inputs(output_dir, rows):
 
 def run(config=None, verbose=True, outdir=None):
     update_config(config or {})
+    design_objective_contract()
     rows, progress, paths = _run_core(CONFIG, verbose=verbose, outdir=outdir)
     try:
         ml_path = export_optional_ml_outputs(paths["output_dir"], rows)

@@ -7,7 +7,7 @@ from peptiforg_core.runtime_validation import run_runtime_validation, RUNTIME_VA
 
 def test_runtime_validation_runs(tmp_path):
     paths = run_runtime_validation(tmp_path)
-    assert RUNTIME_VALIDATION_VERSION == "2.0.0"
+    assert RUNTIME_VALIDATION_VERSION == "4.0.0"
     assert Path(paths["runtime_validation_summary"]).exists()
     assert Path(paths["runtime_validation_report"]).exists()
 

@@ -1,68 +1,64 @@
-# Python cache
+# Python caches / test caches
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
 
-# Environments
+# Local environments
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 env/
+.build_venv/
 
-# Build outputs
+# Build and binary outputs
 build/
 dist/
+installer/output/
+*.exe
 *.spec
+!installer/Pepforge.spec
 
-# Runtime outputs
-outputs/
+# Runtime outputs / local workspaces
+workspace/
+outputs/*
+!outputs/.gitkeep
 results/
 logs/
 projects/*
 !projects/.gitkeep
+sessions/
+runtime_data/
 
-# Models / local binaries
-models/*.joblib
-*.exe
-
-# OS / IDE
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# PeptiForg local/private files
-projects/*
-!projects/.gitkeep
+# Private / local research data
 private_data/
 user_data/
 experimental_data/
 lab_data/
 local_data/
-sessions/
-runtime_data/
+models/*.joblib
+*.joblib
+*.pkl
+*.pickle
 *.sqlite
 *.sqlite3
 *.db
 *.db-wal
 *.db-shm
-*.joblib
-*.pkl
-*.pickle
+
+# Credentials / licenses / local configuration
+credentials*.json
+secrets*.json
+token*.json
 *.key
 *.lic
 *.pack
 admin_hash.json
 
-# Credentials and local configuration
-.env.*
-!.env.example
-credentials*.json
-secrets*.json
-token*.json
-
-# Experimental/instrument exports
+# Experimental / instrument exports
 *.raw
 *.wiff
 *.d/
@@ -71,16 +67,11 @@ token*.json
 *.cdf
 *.ab1
 
-# Release binaries and local build artifacts
-*.exe
-dist/
-build/
-__pycache__/
-*.pyc
-.pytest_cache/
-outputs/*
-!outputs/.gitkeep
-projects/*
-!projects/.gitkeep
-installer/output/
-.build_venv/
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Release-audit output
+qa_output/

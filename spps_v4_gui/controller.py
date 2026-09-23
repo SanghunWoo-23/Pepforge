@@ -1,4 +1,4 @@
-"""Direct SPPS V4 controller embedded in Pepforge V3.0.0.
+"""Direct SPPS V5.0.0 controller embedded in Pepforge V4.0.0.
 
 Every operator-facing route is a normal class method. The controller composes
 an explicit base class and named workflow services; it does not install or
@@ -9,28 +9,28 @@ from __future__ import annotations
 from typing import Any
 import tkinter as tk
 
+from peptiforg_core.lazy_imports import lazy_module
 from spps_v4_gui.classic_base import ClassicControllerBase
-from spps_v4_gui import (
-    chemistry_workflow,
-    custom_db_workflow,
-    data_workflow,
-    export_workflow,
-    execution_workflow,
-    experimental_workflow,
-    ml_workflow,
-    persistence_workflow,
-    project_workflow,
-    risk_workflow,
-    synthesis_workflow,
-)
 from spps_v4_gui.ui_build import build_ui
+
+chemistry_workflow = lazy_module("spps_v4_gui.chemistry_workflow")
+custom_db_workflow = lazy_module("spps_v4_gui.custom_db_workflow")
+data_workflow = lazy_module("spps_v4_gui.data_workflow")
+export_workflow = lazy_module("spps_v4_gui.export_workflow")
+execution_workflow = lazy_module("spps_v4_gui.execution_workflow")
+experimental_workflow = lazy_module("spps_v4_gui.experimental_workflow")
+ml_workflow = lazy_module("spps_v4_gui.ml_workflow")
+persistence_workflow = lazy_module("spps_v4_gui.persistence_workflow")
+project_workflow = lazy_module("spps_v4_gui.project_workflow")
+risk_workflow = lazy_module("spps_v4_gui.risk_workflow")
+synthesis_workflow = lazy_module("spps_v4_gui.synthesis_workflow")
 from spps_v4_gui.modules.release_ui import ACTIVE_RESINS
 
 
 class SPPSGui(ClassicControllerBase):
-    """Canonical SPPS Planner V4 controller with a static method surface."""
+    """Canonical SPPS Planner V5.0.0 controller with a static method surface."""
 
-    TITLE = "SPPS Planner V4.0.0"
+    TITLE = "SPPS Planner V5.0.0"
     RESIN_VALUES = list(ACTIVE_RESINS)
 
     def _build(self) -> Any:
@@ -224,6 +224,74 @@ class SPPSGui(ClassicControllerBase):
 
     def detect_ml_anomalies(self) -> Any:
         return ml_workflow.detect_anomalies(self)
+
+
+    def open_msds_lookup(self) -> Any:
+        """Open a Google-linked SDS/MSDS lookup using the active SPPS context."""
+        from peptiforg_core.msds_lookup import show_msds_lookup, terms_from_text, unique_terms
+
+        terms: list[str] = []
+
+        def selected_row_terms(tree: Any, preferred_columns: tuple[str, ...]) -> None:
+            if tree is None or not hasattr(tree, "selection"):
+                return
+            try:
+                selection = list(tree.selection())
+                columns = list(tree.cget("columns"))
+            except Exception:
+                return
+            for iid in selection[:4]:
+                try:
+                    values = list(tree.item(iid, "values"))
+                except Exception:
+                    continue
+                row = dict(zip(columns, values))
+                for column in preferred_columns:
+                    for term in terms_from_text(row.get(column, "")):
+                        terms.append(term)
+
+        # Prefer what the operator has selected in Materials/Plan/Cleavage.
+        selected_row_terms(
+            getattr(self, "pm_selected_material_tree", None),
+            ("material", "Material", "name", "component"),
+        )
+        selected_row_terms(
+            getattr(self, "pm_selected_plan_tree", None),
+            (
+                "Unit name", "Coupling reagent 1", "Coupling reagent 2 / catalyst",
+                "Coupling base", "Coupling cocktail solvent", "Deprotection base",
+                "Solvent 1", "Solvent 2",
+            ),
+        )
+        selected_row_terms(
+            getattr(self, "pm_cleavage_tree", None),
+            ("component",),
+        )
+
+        # With no selected row, seed the dialog from the visible synthesis setup.
+        if not terms:
+            for attr in (
+                "pm_resin", "default_reagent", "default_catalyst", "default_base",
+                "default_depro", "default_coupling_solution_solvent",
+                "default_solvent1", "default_solvent2",
+                "default_loading_dissolve_solvent",
+            ):
+                value = getattr(self, attr, None)
+                try:
+                    value = value.get() if hasattr(value, "get") else value
+                except Exception:
+                    value = ""
+                terms.extend(terms_from_text(value))
+
+        return show_msds_lookup(
+            self,
+            unique_terms(terms),
+            title="SPPS Planner — MSDS / SDS lookup",
+            note=(
+                "Selected Materials/Plan/Cleavage rows are preferred. For exact lab use, "
+                "verify the SDS against the supplier and product actually used."
+            ),
+        )
 
     def open_experimental_data(self) -> Any:
         return experimental_workflow.open_window(self)

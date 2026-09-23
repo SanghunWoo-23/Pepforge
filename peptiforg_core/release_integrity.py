@@ -1,12 +1,14 @@
 
 from __future__ import annotations
+
+from peptiforg_core.version import PEPFORGE_VERSION
 import logging
 LOGGER = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Any
 import csv, json, hashlib, subprocess, sys
 
-RELEASE_INTEGRITY_VERSION = "3.0.0"
+RELEASE_INTEGRITY_VERSION = PEPFORGE_VERSION
 
 def _sha256(path: Path) -> str:
     h=hashlib.sha256()

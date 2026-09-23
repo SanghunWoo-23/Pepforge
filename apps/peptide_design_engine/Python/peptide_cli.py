@@ -12,7 +12,6 @@ import argparse
 import csv
 import json
 import sys
-import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -119,6 +118,12 @@ def main() -> None:
                    help="Shortcut mapped to SINGLE_TARGET / MULTI_TARGET_BINDER / BRIDGE_LINKER.")
     p.add_argument("--design-mode", choices=["SINGLE_TARGET", "MULTI_TARGET_BINDER", "BRIDGE_LINKER"], default=None)
     p.add_argument("--binder-mode", choices=["BALANCED", "AFFINITY_FIRST", "DEVELOPABILITY", "DUAL_BINDER", "CYCLIC_PEPTIDE"], default=None)
+    p.add_argument("--pde-objective-mode", choices=["INTERACTION_ONLY", "INTERACTION_FIRST", "BALANCED", "STRUCTURE_GUIDED", "STRUCTURE_EXPLORATION"], default=None)
+    p.add_argument("--preferred-structure", choices=["NONE", "ALPHA_HELIX", "AMPHIPATHIC_ALPHA", "HELIX_310", "BETA_HAIRPIN", "BETA_STRAND", "PPII_EXTENDED", "TURN_RICH", "COILED_COIL"], default=None)
+    p.add_argument("--structure-bias", choices=["MILD", "BALANCED", "STRONG"], default=None)
+    p.add_argument("--structure-environment", choices=["AQUEOUS", "MEMBRANE_INTERFACE", "TRANSMEMBRANE", "LOW_DIELECTRIC", "UNSPECIFIED"], default=None)
+    p.add_argument("--conformational-strategy", choices=["PREORGANIZED", "ADAPTIVE", "FLEXIBLE"], default=None)
+    p.add_argument("--hotspot-complementarity-mode", choices=["OFF", "REPORT_ONLY", "EVIDENCE_AND_SELECTION"], default=None)
     p.add_argument("--docking-stage", choices=["OFF", "FINAL_TOP_ONLY", "EVERY_N_GENERATIONS"], default=None)
     p.add_argument("--docking-engine", choices=["NONE", "CUSTOM", "ROSETTA", "VINA", "DIFFDOCK"], default=None)
     p.add_argument("--seed", type=int, default=None)
@@ -224,6 +229,18 @@ def main() -> None:
         cfg["TRIM_TO_LENGTH"] = args.trim_to_length
     if args.binder_mode:
         cfg["BINDER_MODE"] = args.binder_mode
+    if args.pde_objective_mode:
+        cfg["PDE_OBJECTIVE_MODE"] = args.pde_objective_mode
+    if args.preferred_structure:
+        cfg["PREFERRED_STRUCTURE"] = args.preferred_structure
+    if args.structure_bias:
+        cfg["STRUCTURE_BIAS"] = args.structure_bias
+    if args.structure_environment:
+        cfg["STRUCTURE_ENVIRONMENT"] = args.structure_environment
+    if getattr(args, "conformational_strategy", None):
+        cfg["CONFORMATIONAL_STRATEGY"] = args.conformational_strategy
+    if getattr(args, "hotspot_complementarity_mode", None):
+        cfg["HOTSPOT_COMPLEMENTARITY_MODE"] = args.hotspot_complementarity_mode
     if args.docking_stage:
         cfg["DOCKING_STAGE"] = args.docking_stage
     if args.docking_engine:
@@ -295,16 +312,9 @@ def main() -> None:
         rerank_path = Path(paths["output_dir"]) / "trained_ml_reranked_candidates.csv"
         write_rows(rerank_path, reranked[:int(cfg.get("FINAL_TOPK", 10))])
         paths["trained_ml_reranked_csv"] = str(rerank_path)
-        # Rebuild output ZIP so trained-model reranking CSV is included.
+        # Rebuild the package inside the result bundle so every user artifact stays together.
         out_dir = Path(paths["output_dir"])
-        zip_path = out_dir.with_suffix(".zip")
-        if zip_path.exists():
-            zip_path.unlink()
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-            for pp in out_dir.rglob("*"):
-                if pp.is_file():
-                    z.write(pp, pp.relative_to(out_dir))
-        paths["zip"] = str(zip_path)
+        paths["zip"] = str(eng.rebuild_output_zip(out_dir))
         rows = reranked
 
     print("\n[OK] DONE")

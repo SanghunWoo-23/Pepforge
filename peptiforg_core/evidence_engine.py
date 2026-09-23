@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-"""Pepforge Evidence Engine v3.0.0.
+from peptiforg_core.version import PEPFORGE_VERSION
+
+"""Pepforge Evidence Engine v4.0.0.
 
 This module aggregates Pepforge-generated screening, structure, SPPS, docking,
 target-quality, calibration, external-validation, and publication-report evidence
@@ -22,7 +24,7 @@ import csv
 import json
 import re
 
-EVIDENCE_ENGINE_VERSION = "3.0.0"
+EVIDENCE_ENGINE_VERSION = PEPFORGE_VERSION
 
 
 def _write_text(path: Path, text: str) -> str:
@@ -225,8 +227,19 @@ def build_evidence_components(
 
     md = _read_json(external_md_summary_json)
     if md:
-        grade = str(md.get("validation_grade", "D")).upper()
-        comps.append(score_component("external_md_evidence", True, grade, 2, f"External MD validation grade={grade}."))
+        validation_grade = str(md.get("validation_grade", "UNSCORED")).upper()
+        convergence_status = str(md.get("convergence_status", "not_assessed")).strip() or "not_assessed"
+        # Imported MD summaries are evidence that an external run was reported, not
+        # a force-field correctness or convergence grade. Actual trajectory-level
+        # MD trajectory convergence diagnostics are reserved for the V5 simulation workflow.
+        comps.append(score_component(
+            "external_md_evidence",
+            True,
+            "unknown",
+            2,
+            f"External MD metadata present; validation_grade={validation_grade}; convergence_status={convergence_status}. "
+            "No A/B/C/D evidence grade is inferred from nominal duration or a single summary metric.",
+        ))
     else:
         comps.append(score_component("external_md_evidence", False, "missing", 2, "No external MD validation summary."))
 

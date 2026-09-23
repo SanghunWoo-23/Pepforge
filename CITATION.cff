@@ -8,8 +8,8 @@ authors:
     email: "poowsh1407@tukorea.ac.kr"
 repository-code: "https://github.com/poowsh1407/Pepforge"
 url: "https://github.com/poowsh1407/Pepforge"
-version: "3.0.0"
-date-released: "2026-08-13"
+version: "4.0.0"
+date-released: "2026-09-22"
 abstract: "Pepforge is a Windows-first peptide research workbench integrating hotspot analysis, modified-peptide design, conformational ensemble generation, SPPS planning, docking-oriented screening, and external validation preparation."
 keywords:
   - peptide design
@@ -26,7 +26,7 @@ preferred-citation:
   authors:
     - family-names: "Woo"
       given-names: "Sanghun"
-  version: "3.0.0"
+  version: "4.0.0"
   year: 2026
   repository-code: "https://github.com/poowsh1407/Pepforge"
   url: "https://github.com/poowsh1407/Pepforge"

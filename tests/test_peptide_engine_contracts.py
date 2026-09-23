@@ -5,6 +5,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "peptide_design_engine" / "Python"))
 import peptide_engine as pe
 
+import copy
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_pde_config():
+    baseline = copy.deepcopy(pe.CONFIG)
+    try:
+        yield
+    finally:
+        pe.CONFIG.clear()
+        pe.CONFIG.update(baseline)
+
+
 def _small_config(**overrides):
     cfg = {
         "POP": 20, "GEN": 1, "FINAL_TOPK": 5, "SEED": 123,

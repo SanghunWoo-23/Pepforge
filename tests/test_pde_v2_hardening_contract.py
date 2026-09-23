@@ -12,6 +12,20 @@ sys.path.insert(0, str(PDE))
 import ml_trainer
 import peptide_engine as pe
 
+import copy
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_pde_config():
+    baseline = copy.deepcopy(pe.CONFIG)
+    try:
+        yield
+    finally:
+        pe.CONFIG.clear()
+        pe.CONFIG.update(baseline)
+
+
 
 def test_modified_candidate_never_gets_canonical_surrogate():
     report = pe.docking_readiness_report(["FITC", "Cha", "AEEA", "dK", "NH2"])

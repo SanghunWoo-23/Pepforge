@@ -53,6 +53,25 @@ These values are intended for candidate screening and ranking. Experimental Kd, 
 Docking Workbench reports **estimated_ΔG** in **kcal/mol** and **estimated_Kd** in **one representative concentration unit**. Kd is converted from ΔG using `Kd = exp(ΔG / RT)` at 298.15 K. These values are calibrated contact-based screening estimates for relative candidate ranking and are kept in a practical protein-peptide affinity range. They are not measured binding constants and should be validated externally before quantitative claims.
 
 
-## Interaction distance criteria
+## Interaction distance / geometry criteria
 
-Pepforge reports explicit distance criteria in the Affinity report so the docking result is easier to interpret. Hydrogen-bond contacts use a donor-acceptor heavy-atom proxy cutoff of **3.9 Angstrom** because many imported PDB/mmCIF files do not include explicit hydrogen atoms or reliable bond-angle information. Hydrophobic contacts use a **5.0 Angstrom** contact cutoff for hydrophobic residue/atom pairs. These cutoffs are intended for screening and interface triage; final quantitative claims should still be checked with external all-atom MD or experimental binding data.
+Docking Workbench now uses the conservative PyMOL manual-screening profile supplied for this project as its specific-interaction review layer. The measurement point is interaction-specific rather than a generic residue-centroid distance.
+
+| Interaction | Conservative criterion | Geometry / interpretation |
+|---|---:|---|
+| Hydrogen bond | donor heavy atom–acceptor heavy atom <= 3.5 A | D-H...A >=120 deg recommended when explicit H exists |
+| Hydrophobic | nonpolar atom–nonpolar atom 3.3–5.0 A | no fixed angle; verify the contacting atoms are actually nonpolar |
+| Salt bridge | opposite charged group/center <=4.0 A | no separate angle requirement |
+| pi-pi | ring centroid <=5.0 A | plane 0–30 deg or 60–90 deg; offset <=2 A |
+| Cation-pi | cation center–ring centroid <=5.0 A | cation must approach the ring face; offset <=2 A |
+| van der Waals | near the sum of the two vdW radii | packing/contact descriptor, not a specific bond |
+| Serious clash | vdW overlap >=0.4 A | structure warning, not a favorable interaction |
+| Disulfide | Cys SG–SG ~2.0–2.1 A | covalent geometry/connectivity review remains required |
+| Water bridge | 2.5–3.5 A on each water leg | explicit water plus H-bond geometry required |
+| Metal coordination | metal–coordinating atom <=3.0 A | metal-specific coordination geometry required |
+| Halogen bond | X–acceptor <=3.5 A | C-X...A about >=150 deg recommended |
+| Aromatic-S | S–aromatic system <=5.0 A | secondary interaction; inspect ring placement |
+| Weak C-H...O/N | C–O/N <=3.5 A screen | C-H...A >=120 deg recommended; secondary without explicit H |
+| NH-pi | donor–aromatic system <=3.9 A screen | secondary; donor-H / aromatic-plane direction must be reviewed |
+
+The Contacts page includes a dedicated **Specific interactions — conservative PyMOL criteria** table. A more specific interaction represents the same residue pair where appropriate (for example, salt bridge over duplicate H-bond character, or pi-pi over a generic hydrophobic contact), while clash remains an independent structure warning. Distance-only candidates remain explicitly labelled when the coordinate file does not contain enough geometry to confirm the interaction.

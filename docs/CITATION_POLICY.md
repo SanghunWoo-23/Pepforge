@@ -1,29 +1,25 @@
 # Citation Policy
 
-If you use Pepforge in academic work, publications, theses, reports, posters, presentations, grant documents, or research-derived software, cite this repository and the corresponding release DOI when available.
+If Pepforge or Pepforge-generated workflows materially contribute to academic work, publications, theses, reports, posters, presentations, grant documents, or research-derived software, cite the repository and the exact release used.
 
 ## Recommended citation
 
-Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. GitHub repository, Version 2.0.0. https://github.com/poowsh1407/Pepforge
+Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. Version 4.0.0, 2026. https://github.com/poowsh1407/Pepforge
 
 ## BibTeX
 
 ```bibtex
 @software{woo_pepforge_2026,
-  author = {Woo, Sanghun},
-  title = {Pepforge: An Integrated Peptide Research Workbench},
-  year = {2026},
-  version = {4.2.0},
-  url = {https://github.com/poowsh1407/Pepforge}
+  author  = {Woo, Sanghun},
+  title   = {Pepforge: An Integrated Peptide Research Workbench},
+  year    = {2026},
+  version = {4.0.0},
+  url     = {https://github.com/poowsh1407/Pepforge}
 }
 ```
 
-After GitHub-Zenodo DOI registration, cite the DOI-linked release where possible.
-
-## Why this is required
-
-Pepforge is released as a public portfolio and research-support software package. Citation preserves attribution for the design, implementation, SPPS-aware workflow, docking/contact reporting, and validation-bridge logic.
+If a DOI-backed release is registered later, prefer the DOI-linked citation for that exact release.
 
 ## Scientific scope
 
-Pepforge screening outputs support candidate prioritization. Quantitative binding claims require external all-atom validation and/or experimental assays.
+Citation does not change the evidence boundary of the software. Pepforge screening outputs support candidate prioritization, structure/synthesis preparation, and interaction review; quantitative binding claims require appropriate external and/or experimental validation.

@@ -56,14 +56,24 @@ def test_process_times_do_not_change_stoichiometry():
     assert "time=4 h" in str(b["note"])
 
 
-def test_confirmed_ac_eemqrr_contract_and_literature_guidance_remain_active():
+def test_latest_public_generic_cleavage_and_literature_guidance_remain_active(tmp_path):
     plan_input = PlanInput(sequence="Ac-EEMQRR-NH2", scale_mmol=0.5)
     cocktail = generate_cleavage_cocktail(plan_input)
-    rows = cocktail[cocktail["component"].isin(["TFA", "DW / water"])]
-    assert dict(zip(rows["component"], rows["volume_mL"])) == {"TFA": 14.25, "DW / water": 0.75}
-    assert "TIS" not in set(cocktail["component"])
+    rows = {str(row.component): row for _, row in cocktail.iterrows()}
+    assert float(rows["TFA"]["percent"]) == 95.0
+    assert float(rows["TIS"]["percent"]) == 2.5
+    assert float(rows["DW / water"]["percent"]) == 2.5
     guidance = validate_plan(plan_input)
     assert any(str(value).startswith("literature/") for value in guidance["area"])
+
+    # Exact 95/5 conditions are historical evidence, not hard-coded sequence rules.
+    db = tmp_path / "experimental.sqlite"
+    _cleavage_record(db, sequence="Ac-EEMQRR-NH2", product="AHP-3")
+    result = ml_advisor_v4.cleavage_advice(
+        product="Different label", sequence="Ac-EEMQRR-NH2",
+        resin="Rink Amide", scale_mmol=0.5, db_path=db,
+    )
+    assert result["recommended_condition"]["composition_pct"] == {"TFA": 95.0, "Water": 5.0}
 
 
 def test_parser_keeps_chemistry_tags_linkers_and_case_tolerant_terminal_aliases():
@@ -102,16 +112,17 @@ def test_cleavage_is_sequence_first_and_empty_sequence_blocks_apply(tmp_path):
     assert condition["condition_source"] == "exact_lab_record"
     assert condition["composition_pct"] == {"TFA": 95.0, "Water": 5.0}
     missing = ml_advisor_v4.cleavage_advice(
-        product="Demo", sequence="", resin="Rink Amide", scale_mmol=1, db_path=db,
+        product="Unrelated product", sequence="", resin="Rink Amide", scale_mmol=1, db_path=db,
     )
     assert missing["recommended_condition"] is None
 
 
 def test_unknown_recorded_cocktail_component_blocks_exact_record_apply(tmp_path):
     db = tmp_path / "experimental.sqlite"
-    _cleavage_record(db, sequence="Ac-GGGGGG-NH2", product="Blocked", other='{"Unknown scavenger": 1}')
+    _cleavage_record(db, sequence="Ac-GGGGGG-NH2", product="Blocked", other='{"Unknown scavenger": "1 mL"}')
     result = ml_advisor_v4.cleavage_advice(
         product="Blocked", sequence="Ac-GGGGGG-NH2",
         resin="Rink Amide", scale_mmol=1, db_path=db,
     )
     assert result["recommended_condition"].get("condition_source") != "exact_lab_record"
+    assert result["recommended_condition"].get("apply_allowed") is False

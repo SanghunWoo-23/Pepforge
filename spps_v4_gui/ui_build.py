@@ -1,4 +1,4 @@
-"""Explicit SPPS V4 UI construction pipeline for Pepforge V3.0.0.
+"""Explicit SPPS V5.0.0 UI construction pipeline for Pepforge V4.0.0.
 
 The accepted interface used to be assembled by nested ``_build`` wrappers.
 This module preserves the same order as ordinary function calls.  Nothing in
@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from spps_v4_gui import calculation_context, custom_db_workflow, experimental_workflow
+from peptiforg_core.lazy_imports import lazy_module
+from spps_v4_gui import calculation_context
+
+custom_db_workflow = lazy_module("spps_v4_gui.custom_db_workflow")
+experimental_workflow = lazy_module("spps_v4_gui.experimental_workflow")
 from spps_v4_gui.v3_menu import install_menu
 from spps_v4_gui import ui_system
 from spps_v4_gui.classic_base import ClassicControllerBase
@@ -24,7 +28,7 @@ from spps_v4_gui.modules import (
 )
 
 
-TITLE = "SPPS Planner V4.0.0"
+TITLE = "SPPS Planner V5.0.0"
 
 
 def build_base_interface(gui: Any) -> None:
@@ -72,7 +76,7 @@ def apply_operator_workspace(gui: Any) -> None:
 
 
 def apply_final_release_ui(gui: Any) -> None:
-    """Apply the fixed SPPS V4 identity, resin list, and cleavage controls."""
+    """Apply the fixed SPPS V5.0.0 identity, resin list, and cleavage controls."""
     release_ui.apply_post_build(gui, calculation_context.namespace())
 
 
@@ -150,12 +154,30 @@ def bind_direct_workspace_actions(gui: Any) -> None:
 
 
 def initialize_experimental_data(gui: Any) -> None:
-    """Create/open the V4 experimental DB without altering planner/project state."""
+    """Create/open the V5 experimental DB after the visible-shell milestone."""
+    trace = getattr(gui, "_startup_trace", None)
+    if trace is not None:
+        trace.mark("backend_load_start", backend="experimental_data")
+        trace.write()
     try:
         experimental_workflow.initialize(gui)
+        try:
+            gui._experimental_db_init_error = None
+        except Exception:
+            pass
+        if trace is not None:
+            trace.mark("backend_ready", backend="experimental_data")
+            trace.write()
     except Exception as exc:
         try:
-            gui._log(f"Experimental DB initialization warning: {exc}\n")
+            gui._experimental_db_init_error = exc
+        except Exception:
+            pass
+        if trace is not None:
+            trace.mark("backend_unavailable", backend="experimental_data", error=type(exc).__name__)
+            trace.write()
+        try:
+            gui._log(f"Experimental DB initialization error: {exc}\n")
         except Exception:
             pass
 
@@ -168,14 +190,18 @@ def build_ui(gui: Any) -> None:
     apply_custom_database_ui(gui)
     bind_direct_workspace_actions(gui)
     initialize_experimental_data(gui)
-    # Startup policy: keep saved Project Manager entries available, but do not
-    # paint a previous project's Plan/Materials/Checklist/Cleavage into a new
-    # session before the operator explicitly restores that item.
+    # Restore the last selected saved peptide immediately.  A fresh planner
+    # still starts blank, but an existing session must not lose the Sequence
+    # field (or the matching resin/loading/scale) merely because the app was
+    # closed and reopened.
     try:
-        plan_workflow._clear_editor_and_outputs(gui)
+        if bool(getattr(gui, "_startup_loaded_session", False)):
+            index = int(getattr(gui, "_startup_restore_index", 0) or 0)
+            plan_workflow._restore_item(gui, index, getattr(gui, "_v229_ns", {}))
+        else:
+            plan_workflow._clear_editor_and_outputs(gui)
     except Exception:
         # Non-GUI pipeline contract tests may pass an inert sentinel object.
-        # A real SPPSGui has already constructed the editor/output widgets here.
         pass
     ui_system.apply_theme(gui, "Standard")
     ui_system.fit_window(gui)

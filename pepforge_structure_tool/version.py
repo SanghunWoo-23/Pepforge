@@ -1,0 +1,6 @@
+from __future__ import annotations
+
+STRUCTURE_TOOL_VERSION = "1.5.0"
+VERSION = STRUCTURE_TOOL_VERSION
+
+__all__ = ["STRUCTURE_TOOL_VERSION", "VERSION"]

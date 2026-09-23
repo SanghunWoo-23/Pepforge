@@ -29,7 +29,7 @@ def test_psb_presets_are_real_bounded_worker_settings():
 def test_launcher_exposes_one_docking_workbench_and_v3_worker_route():
     source = (ROOT / "main_launcher.py").read_text(encoding="utf-8")
     assert source.count('"Docking Workbench"') == 1
-    assert 'APP_VERSION = "3.0.0"' in source
+    assert 'APP_VERSION = PEPFORGE_VERSION' in source
     assert '"--structure-worker"' in source
 
 

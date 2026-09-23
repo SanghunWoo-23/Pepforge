@@ -1,4 +1,4 @@
-"""Project Manager controller for SPPS Planner V4.0.0.
+"""Project Manager controller for SPPS Planner V5.0.0.
 
 This module centralizes Project Manager actions behind an explicit controller
 object so GUI buttons call one stable, testable route.
@@ -12,6 +12,7 @@ from . import gui_common as state
 from . import peptide_items
 from . import export_panel
 from . import cleavage_panel
+from spps_v4_gui.error_policy import log_nonfatal
 
 
 @dataclass
@@ -27,27 +28,22 @@ class ProjectManagerController:
         self.bind_action_buttons()
         try:
             cleavage_panel.refresh_cleavage_panel(self.gui)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_nonfatal(self.gui, "Project Manager cleavage refresh", exc)
 
     def bind_action_buttons(self) -> None:
-        for widget in state.walk_widgets(self.gui):
-            try:
-                if widget.winfo_class() not in ("TButton", "Button"):
-                    continue
-                label = str(widget.cget("text") or "").strip()
-                if label == "Duplicate":
-                    widget.configure(command=self.duplicate_selected)
-                elif label == "Delete":
-                    widget.configure(command=self.delete_selected)
-                elif label in {"Export", "Save"}:
-                    widget.configure(command=self.export_outputs)
-                elif label.startswith("Generate / Update"):
-                    widget.configure(command=self.generate_update)
-                elif label == "Apply cleavage":
-                    widget.configure(command=self.apply_cleavage)
-            except Exception:
-                continue
+        """Bind known Project Manager controls by stable object reference only."""
+        bindings = {
+            "pm_duplicate_button": self.duplicate_selected,
+            "pm_delete_button": self.delete_selected,
+            "pm_export_button": self.export_outputs,
+            "pm_generate_button": self.generate_update,
+            "pm_apply_button": self.apply_change,
+        }
+        for attr, command in bindings.items():
+            widget = getattr(self.gui, attr, None)
+            if widget is not None:
+                widget.configure(command=command)
 
     def duplicate_selected(self):
         return peptide_items.duplicate_selected(self.gui)
@@ -60,6 +56,12 @@ class ProjectManagerController:
 
     def generate_update(self):
         return export_panel.generate_update(self.gui)
+
+    def apply_change(self):
+        callback = getattr(self.gui, "apply_change", None)
+        if not callable(callback):
+            raise AttributeError("Project Manager Apply Change route is unavailable.")
+        return callback()
 
     def apply_cleavage(self):
         # Cleavage controls are part of the same PlanInput snapshot, so updating

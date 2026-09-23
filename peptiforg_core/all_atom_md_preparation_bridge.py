@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""All-atom refinement / MD preparation bridge utilities for Pepforge v2.3.0.
+"""All-atom refinement / MD preparation bridge utilities for Pepforge V4.0.0.
 
 This module does not execute OpenMM, GROMACS, AMBER, NAMD, or any final MD
 engine. It prepares traceable folders, templates, checklists, result-import
@@ -15,8 +15,10 @@ import json
 import re
 
 from peptiforg_core.external_docking_runner_bridge import export_external_docking_runner_bridge
+from peptiforg_core.simulation_protocol import build_simulation_protocol
+from peptiforg_core.modified_peptide_support import export_support_matrix
 
-MD_PREP_BRIDGE_VERSION = "2.3.0"
+from peptiforg_core.component_versions import MD_PREP_BRIDGE_VERSION
 
 
 def _safe_name(name: str) -> str:
@@ -56,7 +58,7 @@ def export_all_atom_md_preparation_bridge(
     size: tuple[float, float, float] = (22.0, 22.0, 22.0),
     low_spec_num_confs: int = 8,
 ) -> Dict[str, str]:
-    """Create a Pepforge v2.3.0 all-atom refinement / MD preparation package."""
+    """Create a Pepforge V4.0.0 external all-atom refinement / MD preparation package."""
     out = Path(output_dir)
     safe = _safe_name(name)
     out.mkdir(parents=True, exist_ok=True)
@@ -74,8 +76,13 @@ def export_all_atom_md_preparation_bridge(
     bridge_dir = out / "all_atom_refinement_md_preparation_bridge"
     bridge_dir.mkdir(parents=True, exist_ok=True)
 
+    simulation_protocol = build_simulation_protocol(sequence)
+    protocol_path = bridge_dir / "simulation_protocol_plan.json"
+    _write_json(protocol_path, simulation_protocol)
+    support_paths = export_support_matrix(sequence, bridge_dir)
+
     openmm_template = bridge_dir / "openmm_minimization_refinement_template.py"
-    _write_text(openmm_template, '''"""Pepforge v2.3.0 OpenMM refinement template.
+    _write_text(openmm_template, '''"""Pepforge V4.0.0 OpenMM refinement template.
 
 This template is intentionally conservative. It is a starting point for an
 external all-atom workflow and must be reviewed by an experienced user before
@@ -87,7 +94,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parent
 INPUT_COMPLEX = PROJECT / "complex_candidate.pdb"
 
-print("Pepforge v2.3.0 OpenMM template")
+print("Pepforge V4.0.0 OpenMM template")
 print("Input complex:", INPUT_COMPLEX)
 print("This script is an external-tool setup guide, not an MD execution engine.")
 print("Install and configure the external MD tool, then supply reviewed force-field topology files.")
@@ -101,7 +108,7 @@ print("Install and configure the external MD tool, then supply reviewed force-fi
 ''')
 
     gromacs_template = bridge_dir / "gromacs_workflow_template.txt"
-    _write_text(gromacs_template, '''Pepforge v2.3.0 GROMACS workflow template
+    _write_text(gromacs_template, '''Pepforge V4.0.0 GROMACS workflow template
 =========================================
 
 Purpose
@@ -136,7 +143,7 @@ thermostat/barostat, total simulation length, and analysis method.
 ''')
 
     amber_notes = bridge_dir / "ambertools_parameterization_notes.txt"
-    _write_text(amber_notes, '''Pepforge v2.3.0 AmberTools / parameterization notes
+    _write_text(amber_notes, '''Pepforge V4.0.0 AmberTools / parameterization notes
 ===================================================
 
 Modified peptides may contain D-residues, non-natural residues, linkers, dyes,
@@ -194,7 +201,7 @@ force-field readiness internally.
     ])
 
     readme = bridge_dir / "README_ALL_ATOM_MD_PREPARATION_BRIDGE.txt"
-    _write_text(readme, f'''Pepforge v2.3.0 All-Atom Refinement / MD Preparation Bridge
+    _write_text(readme, f'''Pepforge V4.0.0 All-Atom Refinement / MD Preparation Bridge
 ================================================================
 
 Input peptide notation
@@ -209,9 +216,9 @@ cannot comfortably run Vina, OpenMM, GROMACS, AMBER, or similar tools.
 
 What this bridge does
 ---------------------
-- keeps v2.1.0 low-spec peptide simulation outputs,
-- keeps v2.2.0 external docking runner templates,
-- adds all-atom refinement / MD preparation templates,
+- keeps existing Pepforge coordinate/docking preparation outputs,
+- keeps external docking runner templates,
+- adds all-atom refinement / MD preparation templates and protocol planning,
 - records force-field and parameterization requirements,
 - provides an external MD result import schema,
 - blocks unsafe full-MD/final-Kd claims unless external validation is actually completed.
@@ -235,9 +242,13 @@ a stronger machine or collaborator for external validation.
         "input_sequence": sequence,
         "name": safe,
         "purpose": "all-atom refinement and MD preparation bridge; external run required for final MD claims",
-        "claim_boundary": "screening/preparation only unless external engine outputs are imported",
+        "claim_boundary": "screening/preparation only unless actual external engine outputs are imported; no MD completion is inferred from templates",
+        "simulation_protocol": simulation_protocol,
         "upstream_files": upstream,
         "files": {
+            "simulation_protocol_plan": str(protocol_path),
+            "modified_peptide_support_json": support_paths.get("support_json", ""),
+            "modified_peptide_support_csv": support_paths.get("support_csv", ""),
             "openmm_template": str(openmm_template),
             "gromacs_template": str(gromacs_template),
             "ambertools_notes": str(amber_notes),
@@ -261,5 +272,8 @@ a stronger machine or collaborator for external validation.
         "md_claim_guard_table": str(md_claim_guard),
         "all_atom_md_preparation_readme": str(readme),
         "all_atom_md_preparation_manifest": str(manifest_path),
+        "simulation_protocol_plan": str(protocol_path),
+        "modified_peptide_support_json": support_paths.get("support_json", ""),
+        "modified_peptide_support_csv": support_paths.get("support_csv", ""),
     })
     return paths

@@ -1,4 +1,4 @@
-"""Direct project workflow routes for SPPS Planner V4.0.0."""
+"""Direct project workflow routes for SPPS Planner V5.0.0."""
 from __future__ import annotations
 
 from typing import Any

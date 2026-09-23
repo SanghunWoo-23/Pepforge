@@ -420,6 +420,7 @@ Use:
 ```text
 candidate hotspot prioritization
 sequence-only residue ranking
+local-region hotspot prioritization with numbered recommendations
 ESM-2-derived contextual scoring
 mutation sensitivity estimation
 modification-aware annotation

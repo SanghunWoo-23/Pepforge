@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Pepforge V3.0.0 lightweight PyInstaller spec.
+"""Pepforge V4.0.0 lightweight PyInstaller spec.
 
 This spec deliberately packages only the desktop runtime. Research/training
 stacks (xgboost, scikit-learn training modules, torch/ESM, Streamlit, pytest)
@@ -25,6 +25,13 @@ hiddenimports = [
     'spps_v4_gui.experimental_data',
     'spps_v4_gui.condition_optimizer_v4',
     'spps_v4_gui.ml_advisor_v4',
+    'spps_v4_gui.ml_advisor_v5',
+    'spps_v4_gui.decision_support_v5',
+    'spps_v4_gui.empirical_cleavage_v5',
+    'spps_v4_gui.condition_optimizer_v5',
+    'spps_v4_gui.model_registry_v5',
+    'spps_v4_gui.natural_language_issue_v5',
+    'spps_v4_gui.v5_material_usage',
     'suite_gui.docking_workbench_gui',
     'suite_gui.external_tools_guide',
     'suite_gui.pymol_structure_builder_gui',

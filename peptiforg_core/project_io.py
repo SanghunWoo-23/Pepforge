@@ -5,6 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from peptiforg_core.version import PEPFORGE_VERSION
+from peptiforg_core.output_bundle import sanitize_component, unique_directory
+
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS_DIR = ROOT / "projects"
 
@@ -14,14 +17,14 @@ def now_stamp() -> str:
 
 
 def safe_name(name: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in (name or "Pepforge_Project").strip())
-    return cleaned.strip("._-") or "Pepforge_Project"
+    return sanitize_component(name, fallback="Pepforge_Project")
 
 
 def new_project(project_name: str, input_sequence: str = "", base_dir: str | Path | None = None) -> Path:
     base = Path(base_dir) if base_dir else PROJECTS_DIR
-    folder = base / f"{safe_name(project_name)}_{now_stamp()}"
-    for sub in ["input", "hotspot", "design", "spps", "logs", "exports"]:
+    label = safe_name(project_name or input_sequence or "Pepforge_Project")
+    folder = unique_directory(base / f"{datetime.now().strftime('%Y-%m-%d')}_{label}")
+    for sub in ["input", "hotspot", "design", "structure", "spps", "docking", "logs", "exports"]:
         (folder / sub).mkdir(parents=True, exist_ok=True)
     project = default_project(project_name=safe_name(project_name), input_sequence=input_sequence)
     save_project(folder, project)
@@ -35,16 +38,22 @@ def default_project(project_name: str = "Pepforge_Project", input_sequence: str 
         "project_name": project_name,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "software": "Pepforge",
-        "version": "0.2.0-workflow",
-        "usage_modes": ["standalone", "workflow"],
+        "version": PEPFORGE_VERSION,
+        "pepforge_version": PEPFORGE_VERSION,
+        "workflow_schema_version": "1",
+        "usage_modes": ["standalone", "integrated_workflow"],
         "input_sequence": input_sequence,
         "hotspot_results": [],
+        "hotspot_ranked_regions": [],
         "selected_hotspots": [],
         "design_results": [],
         "selected_candidates": [],
+        "candidate_manifests": {},
+        "structure_results": {},
         "spps_settings": {},
+        "docking_results": {},
         "output_files": {},
-        "notes": "Standalone modules remain independent. Workflow mode connects modules through this project.json and CSV files."
+        "notes": "Workflow Mode directly connects Hot Spot ranking, PDE candidate generation, structure building and SPPS planning while keeping project.json and exported artifacts auditable."
     }
 
 

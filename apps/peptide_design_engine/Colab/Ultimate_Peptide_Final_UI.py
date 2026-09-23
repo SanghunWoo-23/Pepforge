@@ -56,7 +56,13 @@ locked_motif_pos = widgets.Text(value="RGD:2;KLVFF:-6", description="MotifPos")
 lock_residues = widgets.Text(value="C,W", description="ProtectAA")
 dual_min_distance = widgets.IntSlider(value=6, min=0, max=30, description="DualDist")
 
-binder_mode = widgets.Dropdown(options=["BALANCED","AFFINITY_FIRST","DEVELOPABILITY","DUAL_BINDER","CYCLIC_PEPTIDE"], value="BALANCED", description="Binder")
+binder_mode = widgets.Dropdown(options=["BALANCED","AFFINITY_FIRST","DEVELOPABILITY","DUAL_BINDER","CYCLIC_PEPTIDE"], value="BALANCED", description="Legacy")
+pde_objective_mode = widgets.Dropdown(options=["INTERACTION_ONLY","INTERACTION_FIRST","BALANCED","STRUCTURE_GUIDED","STRUCTURE_EXPLORATION"], value="BALANCED", description="Objective")
+preferred_structure = widgets.Dropdown(options=["NONE","ALPHA_HELIX","AMPHIPATHIC_ALPHA","HELIX_310","BETA_HAIRPIN","BETA_STRAND","PPII_EXTENDED","TURN_RICH","COILED_COIL"], value="NONE", description="Structure")
+structure_bias = widgets.Dropdown(options=["MILD","BALANCED","STRONG"], value="BALANCED", description="StructBias")
+structure_environment = widgets.Dropdown(options=["AQUEOUS","MEMBRANE_INTERFACE","TRANSMEMBRANE","LOW_DIELECTRIC","UNSPECIFIED"], value="AQUEOUS", description="Environment")
+conformational_strategy = widgets.Dropdown(options=["PREORGANIZED","ADAPTIVE","FLEXIBLE"], value="PREORGANIZED", description="ConfStrategy")
+hotspot_complementarity_mode = widgets.Dropdown(options=["OFF","REPORT_ONLY","EVIDENCE_AND_SELECTION"], value="REPORT_ONLY", description="HotChem")
 clusters = widgets.IntSlider(value=5, min=1, max=20, description="Clusters")
 final_topk = widgets.IntSlider(value=10, min=1, max=100, description="TopK")
 
@@ -422,6 +428,12 @@ def build_config():
         "DUAL_MIN_DISTANCE": dual_min_distance.value,
 
         "BINDER_MODE": binder_mode.value,
+        "PDE_OBJECTIVE_MODE": pde_objective_mode.value,
+        "PREFERRED_STRUCTURE": preferred_structure.value,
+        "STRUCTURE_BIAS": structure_bias.value,
+        "STRUCTURE_ENVIRONMENT": structure_environment.value,
+        "CONFORMATIONAL_STRATEGY": conformational_strategy.value,
+        "HOTSPOT_COMPLEMENTARITY_MODE": hotspot_complementarity_mode.value,
         "CLUSTERS": clusters.value,
         "FINAL_TOPK": final_topk.value,
         "DOCKING_STAGE": docking_stage.value,
@@ -483,6 +495,9 @@ def display_ui():
             widgets.HBox([locked_motif_pos, lock_residues, dual_min_distance]),
         ]),
         widgets.VBox([
+            widgets.HBox([pde_objective_mode, preferred_structure]),
+            widgets.HBox([structure_bias, structure_environment]),
+            widgets.HBox([conformational_strategy, hotspot_complementarity_mode]),
             widgets.HBox([binder_mode, clusters, final_topk]),
             widgets.HBox([docking_stage, docking_engine, use_af, af_lform_only]),
             widgets.HTML("<b>Optional extensions</b>"),

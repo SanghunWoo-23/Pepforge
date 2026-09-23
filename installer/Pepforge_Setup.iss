@@ -1,18 +1,18 @@
 #define MyAppName "Pepforge"
-#define MyAppVersion "3.0.0"
+#define MyAppVersion "4.0.0"
 #define MyAppPublisher "Pepforge Project"
 #define MyAppExeName "Pepforge.exe"
 
 [Setup]
 AppId={{7A8B6BA7-9E5E-4C3B-8B0F-AE10BEE70100}}
 AppName=Pepforge
-AppVersion=3.0.0
+AppVersion=4.0.0
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output
-OutputBaseFilename=Pepforge_Setup_v3.0.0
+OutputBaseFilename=Pepforge_Setup_v4.0.0
 SetupIconFile=..\assets\Pepforge_Icon.ico
 Compression=lzma2
 SolidCompression=yes

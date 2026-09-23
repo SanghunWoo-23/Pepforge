@@ -1,10 +1,12 @@
 
 from __future__ import annotations
+
+from peptiforg_core.version import PEPFORGE_VERSION
 from pathlib import Path
 from typing import Any
 import csv, json, os, subprocess, sys, py_compile
 
-RELEASE_VERIFY_VERSION = "3.0.0"
+RELEASE_VERIFY_VERSION = PEPFORGE_VERSION
 
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames=None) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -46,6 +48,7 @@ def verify_release_matrix(root_dir: str | Path, output_dir: str | Path) -> dict[
         "peptiforg_core/full_package_audit.py",
         "peptiforg_core/regression_audit.py",
         "peptiforg_core/release_integrity.py",
+        "peptiforg_core/design_intent.py", "peptiforg_core/candidate_summary_report.py",
         "docs/PUBLIC_API_CONTRACT.md",
         "docs/PUBLIC_OUTPUT_CONTRACT.md",
     ]
@@ -92,7 +95,20 @@ def verify_release_matrix(root_dir: str | Path, output_dir: str | Path) -> dict[
     except Exception as exc:
         add("cli_init_workflow", False, repr(exc))
 
-    # Packaging artifacts
+    # Packaging artifacts.  Imports/pytest can create Python bytecode while
+    # this verification is running, so remove those transient cache files
+    # before evaluating the distributable tree itself.
+    import shutil
+    for cache_name in ("__pycache__", ".pytest_cache", ".mypy_cache"):
+        for cache_dir in list(root.rglob(cache_name)):
+            if cache_dir.is_dir():
+                shutil.rmtree(cache_dir, ignore_errors=True)
+    for generated in list(root.rglob("*.pyc")) + list(root.rglob("*.pyo")):
+        try:
+            generated.unlink()
+        except OSError:
+            pass
+
     artifact_hits = []
     for p in root.rglob("*"):
         rel = p.relative_to(root).as_posix()

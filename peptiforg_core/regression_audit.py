@@ -1,10 +1,12 @@
 
 from __future__ import annotations
+
+from peptiforg_core.version import PEPFORGE_VERSION
 from pathlib import Path
 from typing import Any
 import csv, json, subprocess, sys
 
-REGRESSION_AUDIT_VERSION = "3.0.0"
+REGRESSION_AUDIT_VERSION = PEPFORGE_VERSION
 
 def _write_json(path: Path, payload: dict[str, Any]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)

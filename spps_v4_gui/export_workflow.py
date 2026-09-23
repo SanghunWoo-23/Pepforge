@@ -1,4 +1,4 @@
-"""Direct export route for the SPPS Planner V4.0.0 visible workspace."""
+"""Direct export route for the SPPS Planner V5.0.0 visible workspace."""
 from __future__ import annotations
 
 from typing import Any

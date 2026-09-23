@@ -15,7 +15,7 @@ import re
 
 from peptiforg_core.all_atom_md_preparation_bridge import export_all_atom_md_preparation_bridge
 
-MD_RESULT_IMPORT_BRIDGE_VERSION = "2.4.0"
+from peptiforg_core.component_versions import EXTERNAL_MD_RESULT_IMPORT_BRIDGE_VERSION as MD_RESULT_IMPORT_BRIDGE_VERSION
 
 
 def _safe_name(name: str) -> str:
@@ -90,28 +90,31 @@ def import_external_md_results(path: str | Path) -> list[dict[str, Any]]:
 
 
 def summarize_external_md_results(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Compute conservative validation summary from imported external results."""
+    """Normalize imported external-MD metadata without duration-based grading.
+
+    Pepforge no longer turns nominal ns, RMSD, contact persistence, or clash
+    thresholds into A/B/C/D evidence grades.  Those values remain descriptive
+    metadata until actual trajectories are analyzed with replicate/convergence
+    diagnostics.
+    """
     rows = list(rows)
     if not rows:
         return {
             "import_status": "empty",
-            "validation_grade": "D",
-            "claim_status": "no external MD result imported",
+            "validation_grade": "UNSCORED",
+            "claim_status": "no_external_md_result_imported",
             "safe_interpretation": "No external MD/minimization evidence was imported.",
             "warnings": ["External result CSV had no rows."],
             "normalized_rows": [],
+            "convergence_status": "not_assessed",
         }
 
     warnings: list[str] = []
-    best_grade = "D"
-    completed_any = False
+    normalized_rows: list[dict[str, Any]] = []
     minimized_any = False
     production_any = False
-    stable_like = False
-    normalized_rows = []
-
-    def grade_rank(g: str) -> int:
-        return {"A": 0, "B": 1, "C": 2, "D": 3}.get(g, 3)
+    equil_any = False
+    metric_fields_present = set()
 
     for i, row in enumerate(rows, start=1):
         prod = row.get("production_time_ns_num")
@@ -121,42 +124,19 @@ def summarize_external_md_results(rows: Iterable[dict[str, Any]]) -> dict[str, A
         minimized = row.get("minimization_completed_bool")
         equil = row.get("equilibration_completed_bool")
         engine = row.get("engine") or "unknown"
-
-        if minimized:
-            minimized_any = True
-        if prod is not None and prod > 0:
-            production_any = True
-        if minimized or (prod is not None and prod > 0):
-            completed_any = True
-
-        row_grade = "D"
-        row_call = "insufficient_external_evidence"
-        if minimized:
-            row_grade = "C"
-            row_call = "external_minimization_imported"
-        if prod is not None and prod >= 1.0:
-            row_grade = "B"
-            row_call = "short_external_md_imported"
-        if prod is not None and prod >= 10.0 and persist is not None and persist >= 0.50 and (clashes is None or clashes <= 5):
-            row_grade = "A"
-            row_call = "external_md_supports_stable_candidate"
-        if rmsd is not None and rmsd > 8.0:
-            warnings.append(f"row {i}: high RMSD ({rmsd} A) may indicate unstable pose or protocol issue.")
-            if row_grade == "A":
-                row_grade = "B"
-        if persist is not None and persist < 0.25:
-            warnings.append(f"row {i}: low contact persistence ({persist}) weakens interaction evidence.")
-            if row_grade in {"A", "B"}:
-                row_grade = "C"
-        if clashes is not None and clashes > 20:
-            warnings.append(f"row {i}: many clashes after refinement ({clashes}) require structure review.")
-            row_grade = "D"
-
-        if row_grade == "A":
-            stable_like = True
-        if grade_rank(row_grade) < grade_rank(best_grade):
-            best_grade = row_grade
-
+        minimized_any = minimized_any or bool(minimized)
+        equil_any = equil_any or bool(equil)
+        production_any = production_any or bool(prod is not None and prod > 0)
+        if prod is not None: metric_fields_present.add("production_time_ns")
+        if rmsd is not None: metric_fields_present.add("rmsd_A")
+        if persist is not None: metric_fields_present.add("contact_persistence_fraction")
+        if clashes is not None: metric_fields_present.add("clash_count_after_refinement")
+        if persist is not None and not (0.0 <= persist <= 1.0):
+            warnings.append(f"row {i}: contact persistence should be a fraction in [0,1]; received {persist}.")
+        if prod is not None and prod < 0:
+            warnings.append(f"row {i}: negative production time is invalid metadata ({prod}).")
+        if clashes is not None and clashes < 0:
+            warnings.append(f"row {i}: negative clash count is invalid metadata ({clashes}).")
         normalized_rows.append({
             "row": i,
             "engine": engine,
@@ -166,38 +146,30 @@ def summarize_external_md_results(rows: Iterable[dict[str, Any]]) -> dict[str, A
             "clash_count_after_refinement": clashes,
             "minimization_completed": minimized,
             "equilibration_completed": equil,
-            "validation_grade": row_grade,
-            "validation_call": row_call,
+            "validation_grade": "UNSCORED",
+            "validation_call": "external_metadata_imported_no_convergence_grade",
         })
-
-    if not completed_any:
-        claim_status = "preparation_only"
-        safe = "External MD/minimization results were not completed or were not clearly marked as completed."
-    elif best_grade == "A":
-        claim_status = "external_validation_supports_candidate"
-        safe = "Imported external MD evidence supports a stable computational candidate, but does not prove experimental binding or final Kd."
-    elif best_grade == "B":
-        claim_status = "external_short_md_supports_review"
-        safe = "Imported external short-MD evidence is supportive for screening, but remains validation-dependent."
-    elif best_grade == "C":
-        claim_status = "external_minimization_or_partial_evidence"
-        safe = "Imported external evidence is partial and should be reported as minimization/limited-validation evidence only."
-    else:
-        claim_status = "weak_or_problematic_external_evidence"
-        safe = "Imported external evidence is weak or problematic; avoid strong binding or stability claims."
 
     return {
         "import_status": "imported",
         "rows_imported": len(rows),
         "minimization_imported": minimized_any,
+        "equilibration_imported": equil_any,
         "production_md_imported": production_any,
-        "stable_like_external_md": stable_like,
-        "validation_grade": best_grade,
-        "claim_status": claim_status,
-        "safe_interpretation": safe,
+        "validation_grade": "UNSCORED",
+        "claim_status": "external_md_metadata_imported_unscored",
+        "convergence_status": "not_assessed_from_summary_table",
+        "metric_fields_present": sorted(metric_fields_present),
+        "safe_interpretation": (
+            "External MD metadata were imported. Nominal duration or a single RMSD/contact/clash value is not a convergence grade. "
+            "Use the V5 simulation workflow or an external trajectory-analysis tool on actual independent-replicate trajectories before making stability/convergence claims."
+        ),
         "warnings": warnings,
         "normalized_rows": normalized_rows,
-        "claim_boundary": "Pepforge imports and summarizes external MD results. It does not replace the external MD engine or prove experimental Kd.",
+        "claim_boundary": (
+            "Pepforge V4 imports external MD summary metadata but does not analyze trajectory files. "
+            "It does not infer experimental Kd, force-field correctness, or convergence from run duration alone."
+        ),
     }
 
 

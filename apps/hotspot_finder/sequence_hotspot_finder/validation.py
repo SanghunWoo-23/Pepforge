@@ -56,6 +56,12 @@ def validate_config(cfg: dict) -> list[str]:
         raise ValueError("batch_size must be positive.")
     if int(cfg.get("top_n", 30)) <= 0:
         raise ValueError("top_n must be positive.")
+    ranking_window = int(cfg.get("ranking_window_size", 15))
+    ranking_overlap = int(cfg.get("ranking_overlap", 5))
+    if ranking_window < 5:
+        raise ValueError("ranking_window_size must be at least 5.")
+    if ranking_overlap < 0 or ranking_overlap >= ranking_window:
+        raise ValueError("ranking_overlap must be >= 0 and smaller than ranking_window_size.")
     weights = cfg.get("weights", {})
     if weights and sum(float(v) for v in weights.values()) <= 0:
         raise ValueError("Sum of weights must be positive.")

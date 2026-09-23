@@ -1,13 +1,18 @@
 # Pepforge 완전 사용자 매뉴얼
 
-**제품 버전:** Pepforge V3.0.0  
-**내장 합성 모듈:** SPPS Planner V4.0.0  
-**문서 기준일:** 2026-08-13  
+**제품 버전:** Pepforge V4.0.0  
+**내장 합성 모듈:** SPPS Planner V5.0.0  
+**문서 기준일:** 2026-09-02  
 **대상:** 처음 설치하는 사용자부터 결과를 검토·내보내는 연구 사용자까지
 
 Pepforge는 peptide sequence 분석, 후보 설계, peptide-only 구조 생성, SPPS 계획, docking-oriented screening, 외부 검증용 파일 준비를 하나의 데스크톱 workflow로 연결합니다. 이 매뉴얼은 버튼을 누르는 순서뿐 아니라 입력 문법, 결과의 의미, 적용하면 안 되는 주장까지 설명합니다.
 
 > Pepforge 결과는 연구 가설과 우선순위 자료입니다. 구조, score, contact, 합성 조건은 실험 측정값이나 임상·의료 판단이 아닙니다.
+
+
+## Evidence Workflow / FAST_OPEN 안내
+
+현재 V4.0.0 개발 기준본은 geometry-aware interaction evidence, Hot Spot chemistry profile -> PDE 연결, 단계별 modified-peptide support, Structure Consensus v2, candidate evidence matrix, V4 docking lineage/PyMOL 검토 준비를 추가합니다. 내장 SPPS Planner V5에는 FAST_OPEN의 DB 초기화/run 연동/UI 개선이 반영됩니다. 실제 docking 실행 backend는 V4에 넣지 않고 향후 V5 범위로 유지합니다.
 
 ## 목차
 
@@ -19,7 +24,7 @@ Pepforge는 peptide sequence 분석, 후보 설계, peptide-only 구조 생성, 
 6. [Hot Spot Finder](#6-hot-spot-finder)
 7. [Peptide Design Engine](#7-peptide-design-engine)
 8. [Peptide Structure Builder](#8-peptide-structure-builder)
-9. [SPPS Planner V4](#9-spps-planner-v4)
+9. [SPPS Planner V5](#9-spps-planner-v4)
 10. [Docking Workbench](#10-docking-workbench)
 11. [External Validation](#11-external-validation)
 12. [결과 폴더와 파일 관리](#12-결과-폴더와-파일-관리)
@@ -34,11 +39,11 @@ Pepforge는 peptide sequence 분석, 후보 설계, peptide-only 구조 생성, 
 
 | 항목 | 표기 | 의미 |
 | --- | --- | --- |
-| 전체 프로그램 | Pepforge V3.0.0 | launcher와 통합 workflow의 배포 버전 |
-| 합성 계획 모듈 | SPPS Planner V4.0.0 | Pepforge 안에 내장된 SPPS component 버전 |
+| 전체 프로그램 | Pepforge V4.0.0 | launcher와 통합 workflow의 배포 버전 |
+| 합성 계획 모듈 | SPPS Planner V5.0.0 | Pepforge 안에 내장된 SPPS component 버전 |
 | 구조 엔진 내부 계보 | 일부 파일에 v1.x/v2.x 표기 가능 | 해당 component의 역사적 구현 계보이며 전체 제품 버전이 아님 |
 
-두 숫자를 합쳐 `Pepforge V4`라고 부르면 안 됩니다. 배포와 인용에는 **Pepforge V3.0.0 with SPPS Planner V4.0.0**을 사용합니다.
+Pepforge와 SPPS Planner는 서로 독립적인 component version을 사용합니다. 배포와 인용에는 **Pepforge V4.0.0 with SPPS Planner V5.0.0**처럼 suite와 embedded component를 구분해 표기합니다.
 
 ### 1.2 모듈별 역할
 
@@ -47,9 +52,9 @@ Pepforge는 peptide sequence 분석, 후보 설계, peptide-only 구조 생성, 
 | 1 | Hot Spot Finder | sequence window의 후보 영역 우선순위화 | 실제 결합부위 증명 |
 | 2 | Peptide Design Engine | canonical/modified peptide 후보 생성과 필터링 | 효능·독성·Kd 보증 |
 | 3 | Peptide Structure Builder | peptide conformer를 생성하고 상위 5개 대표 구조 출력 | 생체 내 단일 native 구조 확정 |
-| 4 | SPPS Planner V4 | 편집 가능한 합성 계획·재료량·checklist·근거 검토 | 검증된 실험실 SOP 자동 확정 |
+| 4 | SPPS Planner V5 | 편집 가능한 합성 계획·재료량·checklist·근거 검토 | 검증된 실험실 SOP 자동 확정 |
 | 5 | Docking Workbench | pose/contact 중심의 내부 screening과 외부 결과 정리 | Vina, MD, affinity assay 대체 |
-| 6 | External Validation | Vina/GROMACS hand-off 폴더 준비 | 외부 프로그램 자체 실행 |
+| 6 | External Validation / Simulation Planning | 외부 MD hand-off 준비와 동일-sequence 정적 구조 비교 | V4에서 production MD/trajectory 분석 실행 |
 
 ### 1.3 공개본의 데이터 원칙
 
@@ -73,7 +78,7 @@ GPU는 기본 desktop workflow에 필수가 아닙니다. 고비용 외부 docki
 
 ### 2.2 ZIP을 받은 경우
 
-1. ZIP을 짧고 쓰기 가능한 경로에 풉니다. 예: `C:\Pepforge_V3.0.0`.
+1. ZIP을 짧고 쓰기 가능한 경로에 풉니다. 예: `C:\Pepforge_V4.0.0`.
 2. OneDrive 동기화 폴더, 읽기 전용 폴더, 한글과 공백이 매우 많은 경로는 처음 확인할 때 피하는 편이 안전합니다.
 3. Windows Terminal 또는 명령 프롬프트를 해당 폴더에서 엽니다.
 
@@ -109,7 +114,7 @@ python -c "import rdkit; print('RDKit OK')"
 python pepforge_cli.py version
 ```
 
-마지막 명령은 `3.0.0`을 출력해야 합니다. SPPS 창 제목에는 `SPPS Planner V4.0.0`이 표시되는 것이 정상입니다.
+마지막 명령은 `4.0.0`을 출력해야 합니다. SPPS 창 제목에는 `SPPS Planner V5.0.0`이 표시되는 것이 정상입니다.
 
 ### 2.5 선택 dependency
 
@@ -188,9 +193,9 @@ python main_launcher.py --tool workflow
 
 1. `Peptide Structure Builder`를 엽니다.
 2. `Peptide sequence`에 후보 하나를 넣습니다.
-3. `Physiological aqueous`와 `Fast Top 5 (recommended)`를 선택합니다.
+3. `Physiological aqueous`와 `Balanced Top 5 (recommended)`를 선택합니다.
 4. `Analyze`로 token 해석표를 확인합니다.
-5. `Build Top 5 Structures`를 누릅니다.
+5. `Build Structure`를 누릅니다.
 6. rank 1만 보지 말고 5개 family와 warning을 함께 봅니다.
 
 ### 4.4 SPPS 계획
@@ -338,7 +343,11 @@ PDE 아래쪽 버튼 순서는 `1. Apply Settings`, `2. Generate Candidates`입�
 | `Preset` | 기본값 묶음 |
 | `Target Mode` | single/multi-target 목적 |
 | `Design Mode` | 설계 전략 |
-| `Binder Mode` | 후보 균형/성향 |
+| `Legacy Binder Profile` | 기존 결과/설정 호환용 profile. 실제 새 설계 방향은 `PDE Objective`가 결정 |
+| `PDE Objective` | `INTERACTION_ONLY`, `INTERACTION_FIRST`, `BALANCED`, `STRUCTURE_GUIDED`, `STRUCTURE_EXPLORATION` |
+| `Preferred Structure` | α-helix, amphipathic α, 3₁₀, β-hairpin, β-strand, PPII, turn-rich, coiled-coil 또는 NONE |
+| `Structure Bias` | Mild/Balanced/Strong. 확률이나 confidence가 아니라 설계 ranking bias |
+| `Environment` | aqueous, membrane interface, transmembrane, low dielectric, unspecified의 해석 context |
 | `Population` | 한 세대 후보 수 |
 | `Generations` | 탐색 반복 수 |
 | `Final Top K` | 최종 저장 후보 수 |
@@ -353,6 +362,18 @@ PDE 아래쪽 버튼 순서는 `1. Apply Settings`, `2. Generate Candidates`입�
 | `Trim to length` | 초과 후보 처리 |
 
 처음에는 작은 Population/Generations로 입력과 출력 계약을 확인한 뒤 확장하십시오.
+
+#### PDE Scientific Design Objective
+
+- `INTERACTION_ONLY`: 특정 구조 방향을 사용하지 않고 target-interaction evidence만 PDE selection에 사용합니다. 구조 objective는 0점 placeholder로 남는 것이 아니라 objective set에서 제거됩니다. SPPS difficulty/aggregation/solubility는 결과 경고로 남지만 selection을 유도하지 않습니다. 알 수 없는 chemistry와 잘못된 topology는 계속 거절합니다.
+- `INTERACTION_FIRST`: interaction을 우선하며 feasibility를 별도 objective로 유지합니다. 구조를 선택했다면 약한 guard로만 사용합니다.
+- `BALANCED`: interaction, feasibility, chemistry route, environment, diversity를 함께 보며 사용자가 구조를 명시한 경우에만 structure objective가 추가됩니다.
+- `STRUCTURE_GUIDED`: explicit preferred structure가 반드시 필요합니다. Interaction과 구조 context를 함께 최적화합니다.
+- `STRUCTURE_EXPLORATION`: 구조 탐색을 우선하되 interaction evidence도 완전히 버리지는 않습니다.
+
+구조 context는 N/C-cap, 중앙 Pro/Gly, i,i+3/i,i+4 charge pair, hydrophobic moment, β alternating face/turn context, PPII, coiled-coil heptad 등을 분리합니다. D/non-natural residue는 canonical-L residue로 몰래 치환하지 않으며 canonical-L coverage와 unsupported token을 출력합니다. 같은 sequence도 aqueous와 membrane context를 같은 scale로 해석하지 않습니다. 이 점수들은 ordinal design evidence이며 구조 population, Kd, permeability, hemolysis 또는 실험 결과가 아닙니다.
+
+PDE의 preferred structure는 **설계 의도**입니다. PSB는 이 의도를 manifest로 전달받아 비교 정보로 기록하지만 Top-5 전체를 해당 family로 강제하지 않습니다. PSB는 계속 독립적인 conformational ensemble을 생성합니다. 자세한 계약은 `docs/PDE_SCIENTIFIC_OBJECTIVE_MODES.md`를 참고하십시오.
 
 ### 7.4 Chemistry / Constraints
 
@@ -384,7 +405,7 @@ Expert JSON은 일반 UI 설정 뒤에 마지막으로 적용됩니다. override
 
 ### 8.1 목적과 입력
 
-PSB는 peptide sequence와 지원 chemistry를 해석하고 다양한 backbone family에서 conformer를 생성합니다. 공개 Top-5 build가 성공하려면 실제 좌표 후보 5개를 생성·순위화·저장해야 하며, 5개를 확보하지 못하면 일부 결과를 완성으로 표시하지 않고 worker 실패와 원인을 보여줍니다. AlphaFold 같은 protein native-structure predictor가 아니며 in-vivo population을 계산하지 않습니다.
+PSB는 peptide sequence와 지원 chemistry를 해석하고 다양한 backbone family에서 conformer를 생성합니다. Top-5 build는 severe clash가 없는 실제 좌표 후보를 최대 5개까지 순위화·저장합니다. PDE에서 지원되는 Preferred Structure가 전달되면 해당 geometry family를 우선하고, 다양성을 맞추기 위해 다른 구조를 억지로 섞지 않습니다. 유효 후보가 5개 미만이면 부족 수와 fallback 여부를 명시합니다. AlphaFold 같은 protein native-structure predictor가 아니며 in-vivo population을 계산하지 않습니다.
 
 입력은 `Peptide sequence`, `Output name`, `Output folder`, pH, temperature, ionic strength, environment, condition preset, build preset입니다. 과거 `Peptide notation` 대신 `Peptide sequence`를 사용합니다.
 
@@ -403,11 +424,11 @@ PSB는 peptide sequence와 지원 chemistry를 해석하고 다양한 backbone f
 
 | preset | 주요 설정 | 사용 시점 |
 | --- | --- | --- |
-| `Fast Top 5 (recommended)` | 초기 conformer 5, 반복 80, adaptive retry 2회, evidence-fast profile | 입력 확인과 일반 시작 |
+| `Balanced Top 5 (recommended)` | 초기 conformer 5, 반복 80, adaptive retry 2회, evidence-fast profile | 입력 확인과 일반 시작 |
 | `Balanced` | 초기 conformer 12, 반복 200, adaptive retry 3회, evidence-balanced profile | family/RMSD 탐색을 넓힐 때 |
 | `Thorough` | 초기 conformer 30, 반복 500, adaptive retry 4회, evidence-thorough profile | 최종 후보를 더 넓게 탐색할 때 |
 
-세 preset 모두 정확히 5개를 출력하는 계약은 같습니다. 실제 sampling 수, retry 예산, RMSD 기준, 논문 근거 기반 family 우선순위가 달라집니다. Thorough가 더 참된 구조를 보장하지 않으며 탐색량만 늘립니다.
+세 preset은 최대 5개의 유효 구조를 목표로 합니다. 실제 sampling 수, retry 예산, RMSD audit 기준, 논문 근거 기반 family 우선순위가 달라지며 severe-clash 구조를 채우기용으로 사용하지 않습니다. Thorough가 더 참된 구조를 보장하지 않으며 탐색량만 늘립니다.
 
 ### 8.4 Analyze와 Build
 
@@ -416,7 +437,7 @@ PSB는 peptide sequence와 지원 chemistry를 해석하고 다양한 backbone f
 3. `Open Token Map`으로 지원 registry를 확인합니다.
 4. unknown/ambiguous/planning-only token을 해결합니다.
 5. output name/folder와 preset을 선택합니다.
-6. `Build Top 5 Structures`를 한 번 누릅니다.
+6. `Build Structure`를 한 번 누릅니다.
 7. 별도 worker 계산을 기다린 뒤 `Open Output`으로 확인합니다.
 
 속도가 느리면 Fast preset, 짧은 canonical sequence, 로컬 쓰기 가능 폴더로 먼저 확인하십시오. antivirus가 worker를 차단하거나 RDKit이 잘못 설치되면 실패할 수 있습니다.
@@ -424,15 +445,24 @@ PSB는 peptide sequence와 지원 chemistry를 해석하고 다양한 backbone f
 ### 8.5 구조 family와 특수 backbone
 
 탐색 후보에는 α-helix, 3₁₀-helix, β-extended/strand-like, β-hairpin-like, PPII, turn-rich, coil/mixed가 포함될 수 있습니다. helix propensity coverage, i/i+3·i/i+4 charge spacing, amphipathic moment, turn-compatible window, β alternation, Pro/PPII context, α/β/γ backbone pattern을 이용해 감사 가능한 family 우선순위를 만들고, 선택한 build preset이 실제 탐색 폭을 결정합니다. 초기 torsion seed는 family를 놓치지 않기 위한 시작점이지 population의 증거가 아닙니다.
+`BETA_HAIRPIN`과 `TURN_RICH`에는 근거 없는 exact torsion template을 만들지 않으며 실제 sampled geometry에서 family가 확인되지 않으면 fallback을 명시합니다. `COILED_COIL`은 monomeric helical preorganization까지만 평가하고 다중체 coiled-coil 형성을 예측한다고 표현하지 않습니다. Pro-rich `PPII_EXTENDED`는 RDKit에서 회전 불가능한 Pro ring torsion 하나 때문에 seed 전체를 폐기하지 않고 설정 가능한 backbone torsion만 적용한 뒤 relaxation 후 실제 φ/ψ로 다시 판정합니다.
 
 BH3 helical domain을 모사하는 α/β/γ-peptide처럼 backbone pattern과 residue substitution이 helicity를 크게 바꾸는 경우를 일반 α-peptide 규칙으로 단순 환산하면 안 됩니다. 지원 pattern은 별도 guidance/limitation을 표시하며, 미지원 unit은 실제 graph와 parameter 없이 3D 확정값으로 대체하지 않습니다. CD, NMR, crystallography, 적합한 force field/MD와 비교하십시오.
 
 ### 8.6 대표 출력
+### 8.5A PDE→PSB intent 및 candidate 추적
+
+Workflow Mode는 PDE의 `pde_objective_mode`를 downstream `mode`로 정규화하고 `preferred_structure`를 유지합니다. 동일 canonical construct에 대해 PDE가 부여한 candidate ID가 하나로 확인되면 PSB와 SPPS도 그 ID를 그대로 사용하므로 중간 단계에서 별도 hash ID로 갈라지지 않습니다. PSB/SPPS 실행 뒤 `exports/<candidate_id>/Summary_Report.json`과 `Summary_Report.txt`를 갱신하며, 실제 존재하는 artifact만 요약합니다. Docking/trajectory/experimental 결과가 없으면 추정값을 만들지 않고 `not_available`로 남깁니다.
+
+R7 Workflow hand-off에서는 Hot Spot 후보를 고르면 해당 sequence가 `PDE target sequence`에 즉시 들어갑니다. PDE 실행 후 후보 목록은 `PDE candidate`뿐 아니라 `Peptide Structure Builder` 아래 `PSB input candidate` 드롭다운에도 동일하게 표시됩니다. 어느 드롭다운에서 후보를 바꿔도 같은 active candidate를 가리키며, `Build Structure` 후에는 별도 `Ranked structure` 드롭다운에서 rank 결과를 선택합니다.
+
+SPPS 영역은 `Resin → Loading mmol/g → Scale mmol` 순서입니다. `Open SPPS Planner`는 Workflow 안에서 보이지 않게 quick-plan을 생성하는 버튼이 아니라 전체 SPPS Planner 창을 띄우는 버튼입니다. 선택 candidate와 resin/loading/scale/project가 새 창에 자동 입력되며, Workflow hand-off 없이 SPPS Planner를 단독 실행하면 기존 계약대로 sequence는 빈칸으로 시작합니다. 하단의 중복 `Evidence / Runtime Status` 텍스트 패널은 제거했고, 진행 bar·각 단계 status·오류 dialog/log는 유지합니다. Candidate Evidence Matrix/Blind Review 버튼은 실제 파일을 만드는 기능이므로 유지합니다.
+
 
 ```text
 *_top5_conformers.sdf
 *_top5_conformers.csv
-*_top5_rank1.pdb ... *_top5_rank5.pdb
+*_rank1.pdb ... *_rank5.pdb
 *_top5_compare.pml
 *_conformer_families.csv
 *_backbone_torsions.csv
@@ -440,11 +470,11 @@ BH3 helical domain을 모사하는 α/β/γ-peptide처럼 backbone pattern과 re
 
 rank는 실행 내부 상대 순위이고 relative energy는 서로 다른 chemistry나 affinity 비교값이 아닙니다. 생성 fraction도 평형 population이 아닙니다. atom/bond, chirality, terminal group을 직접 확인하십시오.
 
-## 9. SPPS Planner V4
+## 9. SPPS Planner V5
 
 ### 9.1 통합 범위와 입력
 
-Pepforge에는 SPPS Planner V4.0.0의 single-plan, material, checklist, cleavage, evidence workflow가 통합되어 있습니다. **LOT Number와 Batch Manager는 active interface에서 제외**되었습니다.
+Pepforge에는 SPPS Planner V5.0.0의 single-plan, material, checklist, cleavage, evidence workflow가 통합되어 있습니다. **LOT Number와 Batch Manager는 active interface에서 제외**되었습니다.
 
 시작 전에 peptide sequence, scale, resin/linker, resin loading, coupling/deprotection chemistry, loading/cleavage time, tag/linker/non-natural building block을 확인합니다. generic 이름만으로 MW와 당량을 확정할 수 없는 물질은 manual-required 상태가 정상입니다.
 
@@ -483,7 +513,7 @@ Pepforge에는 SPPS Planner V4.0.0의 single-plan, material, checklist, cleavage
 - protected/unprotected form과 branch/terminal 위치를 구분합니다.
 - difficult sequence, aggregation, aspartimide, diketopiperazine, oxidation, disulfide/cyclization 위험을 검토합니다.
 
-Regression contract인 `Ac-EEMQRR-NH2`의 30 eq 및 `TFA 95% / water 5% / TIS 없음` 조건은 코드 검증 대상으로 포함되어 있지만 사용자 연구실의 validated SOP를 뜻하지 않습니다.
+정확한 cleavage cocktail은 특정 peptide 이름에 하드코딩하지 않고 evidence-first로 처리합니다. 완전하고 검토된 historical record가 현재 조건과 호환될 때만 하나의 coherent condition 전체를 재현할 수 있으며, 호환 가능한 history가 없으면 generic chemistry guidance는 참고값으로만 제시되고 exact-condition Apply는 비활성화됩니다. Historical record 자체가 사용자 연구실의 validated SOP를 뜻하지는 않습니다.
 
 ### 9.6 Export 전 checklist
 
@@ -538,28 +568,39 @@ Target Prep에서 chain과 water/ion/ligand 유지 여부를 정한 뒤 `Prepare
 4. force field가 modification/D-residue/linker/lipid/tag를 지원하는지 확인합니다.
 5. topology부터 production/analysis까지 GROMACS에서 실행합니다.
 
-hand-off 폴더 생성은 docking이나 MD를 수행했다는 뜻이 아닙니다.
+hand-off 폴더 생성은 docking이나 MD를 수행했다는 뜻이 아닙니다. 실제 trajectory 파일을 넣어 분석한 경우에도 Pepforge가 그 trajectory를 생성했다는 뜻은 아닙니다.
+
+### MD / trajectory 범위
+
+V4에서는 실제 MD 실행과 trajectory 분석을 사용자 기능으로 제공하지 않습니다. 이 기능은 production MD backend와 자동 trajectory 생성·분석을 함께 설계하는 **V5 simulation workflow** 범위입니다.
+
+`Analyze Structures`는 traj 파일 없이 하나 이상의 PDB/SDF를 직접 받아 모델 수, Rg, 호환 가능한 구조 간 RMSD 등 간단한 좌표 진단을 수행합니다. PSB 출력이나 외부 예측 구조를 빠르게 비교할 때 이 경로를 사용합니다. 이 결과는 평형 population이나 MD convergence를 뜻하지 않습니다.
+
+`Compare Structures`는 V4의 정적 구조 검토 기능입니다. 실제 MD 실행 및 trajectory 분석은 V5 simulation workflow 범위로 분리하며 V4 PSB UI에는 노출하지 않습니다.
+
+`Compare Structures`는 동일 sequence PDB끼리 C-alpha/backbone RMSD, Rg, DSSP agreement, steric 정보를 비교합니다. AF3 등 외부 구조와 일치해도 실험적으로 검증된 native structure라는 뜻은 아닙니다.
 
 ## 12. 결과 폴더와 파일 관리
 
-Source 실행은 저장소 또는 선택 output folder를 사용하고 설치형 build는 사용자 쓰기 가능한 app data 위치를 사용할 수 있습니다. `Open project folder`와 `Open runtime logs`로 실제 위치를 확인하십시오.
+사용자가 결과를 생성·저장할 때 선택한 경로는 **base output folder**로 취급합니다. 실제 결과는 그 아래의 하나의 result bundle로 묶입니다.
 
-권장 구조:
+기본 형식:
 
 ```text
-project_name/
-  01_input/
-  02_hotspot/
-  03_design/
-  04_structure/
-  05_spps/
-  06_screening/
-  07_external_validation/
-  08_experimental/
-  config_and_notes/
+2026-08-27_Ac-EEMQRR-NH2/
+  RESULT_BUNDLE.json
+  *.csv
+  *.json
+  *.pdb / *.sdf / *.pml
+  *.xlsx / *.md / *.txt
+  <Module>_Result_Package.zip
 ```
 
-run별로 sequence, target accession, config snapshot, seed, software version, 날짜를 기록합니다. 공개 전에는 실제 연구실 history, 미공개 sequence/structure, credential, local model/training data, 개인정보, 재배포 권한 없는 문서, log의 개인 경로를 제거합니다.
+사용자가 이름을 입력한 기능은 `YYYY-MM-DD_<name>/`, sequence가 기준인 기능은 `YYYY-MM-DD_<sequence>/`를 우선 사용합니다. Windows 금지문자는 자동 정리하고, 너무 긴 sequence는 식별 가능한 hash suffix를 남겨 축약합니다. 같은 날짜·이름의 폴더가 이미 있으면 `_01`, `_02`를 붙여 덮어쓰지 않습니다.
+
+PDE, Hot Spot Finder, PSB, SPPS Planner, Docking Workbench의 사용자 결과는 이 bundle 규칙을 공유합니다. 프로그램이 지속적으로 참조해야 하는 cache, training DB, 설정 파일, 내부 project state는 결과 bundle과 구분하여 안정 경로를 유지할 수 있습니다.
+
+`RESULT_BUNDLE.json`에는 Pepforge version, tool, name/sequence, 생성 시각 및 대표 artifact 경로가 기록됩니다. run별로 target accession, config snapshot, seed 등 해당 모듈이 실제로 생성하는 세부 기록도 함께 보존합니다. 공개 전에는 실제 연구실 history, 미공개 sequence/structure, credential, local model/training data, 개인정보, 재배포 권한 없는 문서, log의 개인 경로를 제거합니다.
 
 ## 13. 과학적 해석과 검증
 
@@ -627,7 +668,7 @@ python pepforge_cli.py release-gate --root-dir . --output-dir qa_output
 
 ## 16. 공개·인용·버그 보고
 
-GitHub 공개 전 `PUBLIC_DATA_POLICY.md`를 읽고 credential/private data를 검색하며 release gate를 통과시킵니다. `VERSION.txt`, `CITATION.cff`, README, release filename은 `3.0.0`으로 맞추고 SPPS component는 `4.0.0`으로 별도 표기합니다. runtime output, cache, backup, local model은 source ZIP에 넣지 않습니다.
+GitHub 공개 전 `PUBLIC_DATA_POLICY.md`를 읽고 credential/private data를 검색하며 release gate를 통과시킵니다. `VERSION.txt`, `CITATION.cff`, README, release filename은 `4.0.0`으로 맞추고 SPPS component는 `4.0.0`으로 별도 표기합니다. runtime output, cache, backup, local model은 source ZIP에 넣지 않습니다.
 
 인용 metadata는 `CITATION.cff`에 있습니다. 이 저장소는 custom **Pepforge Public Academic Citation License**를 사용하며 OSI-approved open-source license로 표시되지 않습니다. 재배포와 상업적 이용 전에 `LICENSE`를 읽으십시오.
 
@@ -643,4 +684,8 @@ GitHub 공개 전 `PUBLIC_DATA_POLICY.md`를 읽고 credential/private data를 �
 - [ ] 실험·구조 검증 계획을 세웠다.
 - [ ] 공개 파일에서 비공개 데이터를 제거했다.
 
-관련 문서: [README_KO.md](README_KO.md), [과학적 범위](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md), [sequence grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md), [SPPS parser contract](docs/SPPS_PARSER_CONTRACT.md), [SPPS V4 evidence workflow](docs/SPPS_V4_EVIDENCE_WORKFLOW.md), [Docking guide](docs/DOCKING_WORKBENCH_USER_GUIDE.md).
+관련 문서: [README_KO.md](README_KO.md), [과학적 범위](docs/SCIENTIFIC_SCOPE_AND_VALIDATION.md), [sequence grammar](docs/TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md), [SPPS parser contract](docs/SPPS_PARSER_CONTRACT.md), [SPPS V5 decision-support workflow](docs/SPPS_V5_INTEGRATION.md), [Docking guide](docs/DOCKING_WORKBENCH_USER_GUIDE.md).
+
+### V4.0.0 디자인/구조 이론 설정
+
+PDE는 5개 Design Objective와 별도로 `PREORGANIZED / ADAPTIVE / FLEXIBLE` Conformational Strategy를 제공합니다. 이 값은 optimizer pressure를 조절하는 정책이며 실제 binding mechanism을 판정하지 않습니다. `Hotspot Complementarity`는 `OFF / REPORT_ONLY / EVIDENCE_AND_SELECTION`의 coarse chemistry evidence로, geometric contact나 affinity로 해석하면 안 됩니다. 명시적 dP-G/Aib-G/Aib search seed도 문서화된 경우에만 사용하며 최종 PSB family 판정은 relaxation 후 measured geometry에 기반합니다. 자세한 내용은 `docs/DESIGN_STRUCTURE_THEORY_V4.md`를 참고하십시오.

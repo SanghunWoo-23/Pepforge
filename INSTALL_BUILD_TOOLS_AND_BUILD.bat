@@ -140,7 +140,7 @@ if errorlevel 1 (
 echo.
 echo ============================================================
 echo DONE
-echo Installer: installer\output\Pepforge_Setup_v3.0.0.exe
+echo Installer: installer\output\Pepforge_Setup_v4.0.0.exe
 echo EXE:       dist\Pepforge\Pepforge.exe
 echo ============================================================
 pause

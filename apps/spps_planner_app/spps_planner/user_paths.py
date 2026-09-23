@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-APP_FOLDER = "SPPS_Planner"
+from .build_profile import APP_FOLDER
 
 
 def user_data_dir() -> Path:

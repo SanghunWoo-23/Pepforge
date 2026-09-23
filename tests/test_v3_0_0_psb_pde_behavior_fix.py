@@ -20,7 +20,7 @@ def _tokens(sequence: str):
     return [{"raw": aa, "kind": "std_aa"} for aa in sequence]
 
 
-def test_psb_presets_control_real_search_profiles_and_exact_top5_contract():
+def test_psb_presets_control_real_search_profiles_and_top5_target():
     assert BUILD_PRESETS["Fast Top 5 (recommended)"]["search_profile"] == "evidence_fast"
     assert BUILD_PRESETS["Balanced Top 5"]["search_profile"] == "evidence_balanced"
     assert BUILD_PRESETS["Thorough Top 5"]["search_profile"] == "evidence_thorough"
@@ -52,13 +52,14 @@ def test_pde_final_ranking_enforces_visible_sequence_diversity_before_relaxing()
     ]
     ranked = pe.diversify_final_ranking(rows, top_n=2, minimum_distance=0.20)
     assert [row["clean_sequence"] for row in ranked[:2]] == ["AAAAAAAA", "RRRRRRRR"]
-    assert all(row["final_diversity_status"] == "distance_pass" for row in ranked[:2])
+    assert all(row["final_diversity_status"] == "chemistry_aware_distance_pass" for row in ranked[:2])
 
 
 def test_psb_export_and_pde_seed_controls_are_static_not_runtime_patches():
     builder = (ROOT / "pepforge_structure_tool" / "pepforge_core.py").read_text(encoding="utf-8")
     desktop = (PDE / "desktop_gui.py").read_text(encoding="utf-8")
     assert "_append_conformers_until" in builder
-    assert "PSB ranked {required_final} structures but exported only" in builder
+    assert "PSB ranked {len(top_conformers)} structures but exported only" in builder
+    assert "will not use severe-clash structures merely to fill Top-5" in builder
     assert "secrets.randbelow" in desktop
     assert "Repeat Last Run" in desktop

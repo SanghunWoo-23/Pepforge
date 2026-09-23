@@ -17,7 +17,7 @@ Pepforge is scientific workflow software, so a change is not considered complete
 
 ## Before changing code
 
-- Start from the current fixed v3.0.0 baseline.
+- Start from the current fixed v4.0.0 baseline.
 - Create a separate working copy/branch.
 - Identify the real callback/dataflow behind the affected UI.
 - Check nearby tests and output contracts.

@@ -1,4 +1,4 @@
-"""Alternate modular Tk GUI components retained for SPPS Planner V4.0.0.
+"""Alternate modular Tk GUI components retained for SPPS Planner V5.0.0.
 
 The canonical release UI is assembled by ``spps_v4_gui.ui_build``. Project
 Manager, advanced settings, DB,
@@ -33,6 +33,7 @@ from spps_v4_gui.modules.db_editor_panel import build_db_editor_tab  # noqa: E40
 from spps_v4_gui.modules.data_log_panel import build_data_log_tab  # noqa: E402
 from spps_v4_gui.modules.ml_lab_panel import build_ml_lab_tab  # noqa: E402
 from spps_v4_gui.modules.windows_selftest_panel import build_selftest_tab  # noqa: E402
+from spps_v4_gui import ui_system  # noqa: E402
 
 
 class SPPSGui(tk.Tk):
@@ -45,10 +46,10 @@ class SPPSGui(tk.Tk):
         "QA": ["Project Manager", "Data Log", "Windows Self-Test"],
     }
     MODE_HELP = {
-        "Essential": "핵심 합성 계산과 작업용 결과만 표시합니다.",
-        "Workbench": "필요할 때만 여는 실무 도구 화면: Advanced와 Data Log를 추가 표시합니다.",
-        "Expert": "전체 기능 표시: DB Editor, ML Lab, QA까지 모두 엽니다.",
-        "QA": "검증용: Project Manager, Data Log, Windows Self-Test만 표시합니다.",
+        "Essential": "Shows the essential synthesis calculations and working results.",
+        "Workbench": "Adds Advanced Settings and Data Log while keeping Batch Manager unexposed in Pepforge.",
+        "Expert": "Shows DB Editor, ML Lab, and QA while preserving the Pepforge integrated-SPPS boundary.",
+        "QA": "Validation view: Project Manager, Data Log, and Windows Self-Test only.",
     }
 
     TITLE = VERSION_NAME
@@ -103,8 +104,7 @@ class SPPSGui(tk.Tk):
         super().__init__()
         self.title(self.TITLE)
         self._set_window_icon()
-        self.geometry("1360x820")
-        self.minsize(1100, 680)
+        ui_system.fit_window(self, preferred_width=1360, preferred_height=820, minimum_width=1100, minimum_height=680)
         self.last_outdir: Path | None = None
         self._autosave_path = user_file("project_manager_autosave.json")
         self._tab_frames_by_title: dict[str, Any] = {}
@@ -197,11 +197,8 @@ class SPPSGui(tk.Tk):
         return f"{project} | {peptide} | {seq} | {status}"
 
     def _log(self, msg: str) -> None:
-        try:
-            self.log_text.insert("end", str(msg))
-            self.log_text.see("end")
-        except Exception:
-            pass
+        from spps_v4_gui.diagnostics import write_log
+        write_log(self, msg)
 
     def pm_update_summary(self) -> None:
         try:
@@ -331,7 +328,7 @@ class SPPSGui(tk.Tk):
             ttk.Entry(self.pm_item_advanced_frame, textvariable=var, width=18).grid(row=r, column=1, sticky="ew", padx=(6, 0), pady=2)
         ttk.Label(
             self.pm_item_advanced_frame,
-            text="고급 조건은 계산/export에 반영됩니다. 평소에는 숨겨서 화면을 단순하게 유지합니다.",
+            text="Advanced conditions are included in calculations and exports, but remain hidden during normal use.",
             foreground="#555",
         ).grid(row=len(advanced_fields), column=0, columnspan=2, sticky="w", pady=(4, 0))
 
@@ -379,6 +376,8 @@ class SPPSGui(tk.Tk):
         log_frame.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         self.log_text = tk.Text(log_frame, height=4, wrap="word")
         self.log_text.pack(fill="both", expand=True)
+        from spps_v4_gui.diagnostics import flush_pending_log
+        flush_pending_log(self)
 
     def _add_tree_tab(self, notebook: ttk.Notebook, title: str):
         frame = ttk.Frame(notebook)

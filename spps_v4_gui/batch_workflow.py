@@ -1,4 +1,4 @@
-"""Direct connected Batch Manager workflow for SPPS Planner V4.0.0."""
+"""Direct connected Batch Manager workflow for SPPS Planner V5.0.0."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -26,7 +26,7 @@ SUMMARY_COLUMNS = [
     "No", "Project", "Peptide name", "LOT No", "Sequence", "Copies",
     "Scale mmol", "Resin", "Loading", "Resin_g", "Chemistry",
 ]
-VERSION = "V4.0.0"
+VERSION = "V5.0.0"
 
 
 def _float(current: Any, default: float = 0.0) -> float:
@@ -102,12 +102,17 @@ def _batch_sequence(row: dict[str, Any]) -> str:
             ):
                 core_tokens.append(linker)
         prefix = []
-        for key in ("N-term", "Tag", "Label"):
+        # Preserve the N-terminal modifier detected from the Project Manager
+        # sequence even when Tag/Label fields are also configured.  The old
+        # fallback only kept Ac when there were no other prefix units.
+        explicit_nterm = str(row.get("N-term", "") or "").strip()
+        nterm_value = explicit_nterm if explicit_nterm.lower() not in {"", "none", "manual", "-"} else detected_nterm
+        if nterm_value:
+            prefix.append(f"[{nterm_value}]")
+        for key in ("Tag", "Label"):
             value_ = str(row.get(key, "") or "").strip()
             if value_ and value_.lower() not in {"none", "manual", "-"}:
                 prefix.append(f"[{value_}]")
-        if not prefix and detected_nterm:
-            prefix.append(f"[{detected_nterm}]")
         cterm = str(row.get("C-term", "") or "").strip() or detected_cterm
         # Keep adjacent natural residues compact.  A dashed ``A-C-...`` can be
         # mistaken for the historical ``Ac-`` N-terminal alias; ``AC...`` is
@@ -253,7 +258,21 @@ def _project_rows(gui: Any) -> list[dict[str, Any]]:
 
     rows = []
     for index, item in enumerate(list(getattr(gui, "pm_items", []) or []), 1):
-        sequence = str(item.get("sequence", "") or "").strip()
+        # Project Manager is the source of truth for the compact Batch dashboard.
+        # Build the engine sequence from its sequence + linker/tag/label settings
+        # instead of silently dropping those configured units.
+        pm_row = {
+            "N-term": item.get("n_term", ""),
+            "Region 1 seq": item.get("sequence", ""),
+            "Region 1 eq": item.get("region1_eq", "1") or "1",
+            "Linker": item.get("linker", ""),
+            "Region 2 seq": item.get("region2_seq", ""),
+            "Region 2 eq": item.get("region2_eq", ""),
+            "Tag": item.get("tag", ""),
+            "Label": item.get("label", ""),
+            "C-term": item.get("c_term", "NH2") or "NH2",
+        }
+        sequence = _batch_sequence(pm_row)
         if not sequence:
             continue
         copies = max(1, int(round(_float(item.get("copies"), 1))))
@@ -275,6 +294,10 @@ def _project_rows(gui: Any) -> list[dict[str, Any]]:
             "_apply_loading_calc": item_loading_enabled(item, resin),
             "_loading_aa_eq": _float(item.get("loading_aa_eq"), 2.0),
             "_loading_diea_eq": _float(item.get("loading_diea_eq"), 4.0),
+            "_batch_source": {
+                "AA conc M": value(gui, "batch_solution_conc", "0.25"),
+                "AA coupling eq": value(gui, "batch_coupling_eq", value(gui, "coupling_eq", "5")),
+            },
         })
     return rows
 
@@ -404,6 +427,53 @@ def _records_frame(gui: Any, records: dict[tuple[Any, ...], dict[str, Any]]) -> 
             "Volume_mL": volume or "",
         })
     return pd.DataFrame(rows, columns=BATCH_COLUMNS)
+
+
+def _grouped_material_category(item: Any, category: Any) -> str:
+    """Map one prepared material to the four operator-facing groups.
+
+    Display order is fixed by the lab workflow: L-AA, D-AA, Non-natural AA,
+    then Chemical (including linkers, tags, labels and terminal caps).
+    """
+    item_text = str(item or "").strip()
+    category_text = str(category or "").strip().lower()
+    if item_text in set(getattr(catalogs, "FMOC_D_AA_VALUES", [])) or item_text.startswith("Fmoc-D-"):
+        return "D-AA"
+    if item_text in set(getattr(catalogs, "FMOC_NON_NATURAL_AA_VALUES", [])) or "non-natural aa" in category_text:
+        return "Non-natural AA"
+    l_aa_values = set(getattr(catalogs, "FMOC_AA_VALUES", []))
+    l_aa_values.update(getattr(catalogs, "FMOC_PROTECTED_VARIANT_VALUES", []))
+    l_aa_values.update(getattr(catalogs, "AC_AA_VALUES", []))
+    if item_text in l_aa_values or category_text in {"aa", "aa stock", "protected amino acid", "ac-amino acid"}:
+        return "L-AA"
+    return "Chemical"
+
+
+def grouped_aa_chemical_frame(aa_frame: pd.DataFrame, chemical_frame: pd.DataFrame) -> pd.DataFrame:
+    """Combine AA and chemical tables in one deterministic operator order.
+
+    Each group is alphabetized by the physical bottle/reagent name.  This is a
+    presentation merge only; the underlying AA and Chemical calculation tables
+    remain available separately for export and compatibility.
+    """
+    frames = []
+    for source in (aa_frame, chemical_frame):
+        if source is None or source.empty:
+            continue
+        frame = source.copy().reindex(columns=BATCH_COLUMNS)
+        frame["Category"] = [
+            _grouped_material_category(item, category)
+            for item, category in zip(frame["Item"], frame["Category"])
+        ]
+        frames.append(frame)
+    if not frames:
+        return pd.DataFrame(columns=BATCH_COLUMNS)
+    merged = pd.concat(frames, ignore_index=True).reindex(columns=BATCH_COLUMNS)
+    order = {"L-AA": 0, "D-AA": 1, "Non-natural AA": 2, "Chemical": 3}
+    merged["_group_order"] = merged["Category"].map(order).fillna(99)
+    merged["_alpha"] = merged["Item"].astype(str).str.casefold()
+    merged = merged.sort_values(["_group_order", "_alpha"], kind="stable")
+    return merged[BATCH_COLUMNS].reset_index(drop=True)
 
 
 def _direct_volume_frame(gui: Any, totals: dict[tuple[str, str], dict[str, Any]]) -> pd.DataFrame:
@@ -609,14 +679,17 @@ def calculate(gui: Any) -> dict[str, pd.DataFrame]:
         if base_parts else pd.DataFrame(columns=BATCH_COLUMNS)
     )
 
+    aa_frame = _records_frame(gui, aa_records)
+    chemical_frame = _records_frame(gui, chemical_records)
     return {
-        "AA stock": _records_frame(gui, aa_records),
+        "AA + Chemicals": grouped_aa_chemical_frame(aa_frame, chemical_frame),
+        "AA stock": aa_frame,
         "Resin loading": _loading_frame(gui, projects, prepared_plans),
         "Coupling reagents": _records_frame(gui, reagent_records),
         "Catalyst/additive": _records_frame(gui, catalyst_records),
         "Base/Deprotection": base_frame,
         "Solvents": _direct_volume_frame(gui, solvent_totals),
-        "Chemicals": _records_frame(gui, chemical_records),
+        "Chemicals": chemical_frame,
         "Summary": pd.DataFrame(projects, columns=SUMMARY_COLUMNS),
     }
 
@@ -780,13 +853,20 @@ def refresh(gui: Any, *, force: bool = False) -> dict[str, pd.DataFrame]:
             gui._v3_batch_signature = signature
         for name, tree in (getattr(gui, "v29_batch_trees", {}) or {}).items():
             _write_tree(tree, tables.get(name, pd.DataFrame()))
+        aa_tree = getattr(gui, "batch_aa_tree", None)
+        modifier_tree = getattr(gui, "batch_modifier_tree", None)
+        if aa_tree is not None and aa_tree is modifier_tree:
+            # Compact V5 dashboard: one visible material list.  Do not paint the
+            # Chemical table a second time over the AA rows.
+            _write_tree(aa_tree, tables.get("AA + Chemicals", pd.DataFrame()))
+        else:
+            _write_tree(aa_tree, tables.get("AA stock", pd.DataFrame()))
+            _write_tree(modifier_tree, tables.get("Chemicals", pd.DataFrame()))
         named = {
-            "batch_aa_tree": "AA stock",
             "batch_coupling_reagent_tree": "Coupling reagents",
             "batch_catalyst_tree": "Catalyst/additive",
             "batch_base_tree": "Base/Deprotection",
             "batch_solvent_tree": "Solvents",
-            "batch_modifier_tree": "Chemicals",
             "batch_project_tree": "Summary",
         }
         for attribute, name in named.items():
@@ -867,5 +947,5 @@ __all__ = [
     "BATCH_COLUMNS", "calculate", "export", "initialize", "invalidate",
     "invalidate_and_refresh_if_visible", "is_visible", "refresh",
     "request_refresh", "restore_input_rows",
-    "sync_input_from_projects",
+    "sync_input_from_projects", "grouped_aa_chemical_frame",
 ]

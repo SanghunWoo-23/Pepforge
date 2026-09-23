@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-echo Starting Pepforge v3.0.0 from source...
+echo Starting Pepforge v4.0.0 from source...
 python main_launcher.py
 if errorlevel 1 (
   echo.

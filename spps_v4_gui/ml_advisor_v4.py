@@ -1,4 +1,4 @@
-"""Evidence-first loading and cleavage advisors for SPPS Planner V4.0.0."""
+"""Evidence-first loading and cleavage advisors for SPPS Planner V5.0.0."""
 from __future__ import annotations
 
 import math
@@ -30,7 +30,9 @@ def _eligible_loading(db_path: str | Path | None, include_parsed: bool) -> pd.Da
     frame = pd.DataFrame(experimental_data.list_records("loading", db_path, statuses=statuses))
     if frame.empty:
         return frame
-    frame = frame[frame["outlier_flag"].fillna(0).astype(int) == 0]
+    frame = frame[frame["outlier_flag"].fillna(0).astype(int) == 0].copy()
+    frame["resin_type"] = frame["resin_type"].fillna("").map(experimental_data.normalize_resin)
+    frame["amino_acid_normalized"] = frame["amino_acid_normalized"].fillna("").map(experimental_data.normalize_amino_acid)
     frame["loading_rate_mmol_g"] = pd.to_numeric(frame["loading_rate_mmol_g"], errors="coerce")
     return frame.dropna(subset=["loading_rate_mmol_g"])
 
@@ -116,6 +118,8 @@ def loading_advice(
     """
     resin_n = experimental_data.normalize_resin(resin)
     aa_n = experimental_data.normalize_amino_acid(amino_acid)
+    resin_key = experimental_data.canonical_resin_key(resin_n)
+    aa_key = experimental_data.canonical_amino_acid_key(aa_n)
     frame = _eligible_loading(db_path, include_parsed)
     if frame.empty:
         return {"method": "no-data", "prediction": None, "confidence": "LOW", "evidence": [], "recommended_condition": None, "message": "No eligible loading records."}
@@ -123,8 +127,10 @@ def loading_advice(
     q_aa = _num(aa_eq); q_base = _num(base_eq); q_time = _num(loading_time_h)
     q_target = _num(target_loading_mmol_g)
     frame = frame.copy()
-    frame["resin_match"] = (frame["resin_type"].fillna("") == resin_n).astype(float)
-    frame["aa_match"] = (frame["amino_acid_normalized"].fillna("") == aa_n).astype(float)
+    frame_resin_keys = frame.get("resin_key", frame["resin_type"].fillna("").map(experimental_data.canonical_resin_key)).fillna("")
+    frame_aa_keys = frame.get("amino_acid_key", frame["amino_acid_normalized"].fillna("").map(experimental_data.canonical_amino_acid_key)).fillna("")
+    frame["resin_match"] = frame_resin_keys.eq(resin_key).astype(float)
+    frame["aa_match"] = frame_aa_keys.eq(aa_key).astype(float)
     frame["distance"] = 3.0 - 1.2 * frame["resin_match"] - 1.5 * frame["aa_match"]
     for column, query, weight in (("aa_eq", q_aa, 0.7), ("base_eq", q_base, 0.35), ("loading_time_h", q_time, 0.2)):
         values = pd.to_numeric(frame[column], errors="coerce")
@@ -211,156 +217,196 @@ def loading_advice(
         "observed_max": float(frame["loading_rate_mmol_g"].max()),
         "confidence": confidence,
         "evidence_count": len(frame), "exact_count": len(exact), "spread": spread,
+        "evidence_summary": {
+            "source_kind": "HISTORICAL EXACT" if len(exact) else "SIMILARITY EVIDENCE",
+            "total_records": int(len(frame)), "exact_records": int(len(exact)),
+            "verified_exact_records": int((exact["status"] == "verified").sum()) if not exact.empty and "status" in exact else 0,
+            "parsed_exact_records": int((exact["status"] == "parsed").sum()) if not exact.empty and "status" in exact else 0,
+            "apply_allowed": bool((recommended or {}).get("apply_allowed", False)),
+        },
         "recommended_condition": recommended,
         "warnings": warnings, "evidence": evidence,
     }
 
 
 def _normalize_product_key(value: Any) -> str:
-    """Normalize cosmetic/date variants without merging distinct peptide numbers."""
-    text = str(value or "").strip().lower().replace("–", "-").replace("—", "-")
-    # Historical report names commonly append production dates in parentheses.
-    text = re.sub(r"\((?:\d{6,8}|\d{2}[.]\d{2}[.]\d{2})\)\s*$", "", text)
-    text = re.sub(r"\s*-\s*", "-", text)
-    text = re.sub(r"\s+", " ", text).strip(" :")
-    return text
+    return experimental_data.canonical_product_key(value)
 
 
+def _sequence_signature(sequence: Any) -> tuple[str, tuple[str, ...], str] | None:
+    return experimental_data.sequence_signature(sequence)
 
 
 def _sequence_match_key(sequence: Any) -> str:
-    text = str(sequence or "").strip()
-    if not text:
-        return ""
-    try:
-        from spps_planner.parser import parse_sequence
-        parsed = parse_sequence(text)
-        tokens = []
-        for token in list(parsed.core_tokens or []) + list(getattr(parsed, "branch_tokens", []) or []):
-            raw = str(token).strip()
-            if raw.lower().startswith("d") and len(raw) > 1:
-                tokens.append("d" + raw[1:].upper())
-            else:
-                tokens.append(raw.upper())
-        nterm = str(getattr(parsed, "nterm", "") or "").strip().upper()
-        cterm = str(getattr(parsed, "cterm_text", "") or "").strip().upper()
-        return "|".join([nterm, *tokens, cterm])
-    except Exception:
-        return re.sub(r"\s+", "", text).upper()
+    return experimental_data.canonical_sequence_key(sequence)
 
 
-def _bundled_product_sequence_map() -> dict[str, str]:
+def _sequence_observation_matches(observed: Any, current: Any) -> bool:
+    """Match a page-local STD observation without inventing omitted termini.
+
+    Core residues and explicit N-terminal modification must agree.  A blank C-term
+    marker in a Check table is treated as unrecorded, not as evidence against an
+    explicitly entered current -NH2/-COOH marker.  Explicit conflicting C-terms fail.
+    """
+    observed_sig = _sequence_signature(observed)
+    current_sig = _sequence_signature(current)
+    if not observed_sig or not current_sig:
+        return _sequence_match_key(observed) == _sequence_match_key(current)
+    onterm, otokens, octerm = observed_sig
+    cnterm, ctokens, ccterm = current_sig
+    if onterm != cnterm or otokens != ctokens:
+        return False
+    if octerm and ccterm and octerm != ccterm:
+        return False
+    return True
+
+
+def _product_sequence_observations(db_path: str | Path | None = None) -> dict[str, set[str]]:
+    """Return all observed page-local sequences per product; never force 1:1 mapping."""
     root = Path(__file__).resolve().parents[1] / "apps" / "spps_planner_app" / "data" / "experimental_seed"
-    path = root / "cleavage_sequence_map_seed.csv"
-    if not path.is_file():
-        return {}
+    out: dict[str, set[str]] = {}
+    for filename in ("cleavage_sequence_map_seed.csv", "synthesis_sequence_history_seed.csv"):
+        path = root / filename
+        if not path.is_file():
+            continue
+        try:
+            frame = pd.read_csv(path)
+        except Exception:
+            continue
+        product_column = "product_key" if "product_key" in frame.columns else "product" if "product" in frame.columns else ""
+        if not product_column or "sequence" not in frame.columns:
+            continue
+        for _, row in frame.iterrows():
+            product_key = _normalize_product_key(row.get(product_column))
+            sequence = str(row.get("sequence") or "").strip()
+            if product_key and sequence:
+                out.setdefault(product_key, set()).add(sequence)
     try:
-        frame = pd.read_csv(path)
+        rows = experimental_data.list_records("sequence", db_path, statuses=["verified", "parsed"])
     except Exception:
-        return {}
-    out: dict[str, str] = {}
-    for _, row in frame.iterrows():
-        product_key = _normalize_product_key(row.get("product_key"))
-        seq_key = _sequence_match_key(row.get("sequence"))
-        if product_key and seq_key:
-            out[product_key] = seq_key
+        rows = []
+    for row in rows:
+        product_key = _normalize_product_key(row.get("product"))
+        sequence = str(row.get("sequence") or "").strip()
+        if product_key and sequence:
+            out.setdefault(product_key, set()).add(sequence)
     return out
 
 
-def _product_sequence_supported(product: Any, sequence: Any, exact_rows: pd.DataFrame) -> tuple[bool, str]:
-    current_key = _sequence_match_key(sequence)
-    if not current_key:
+def _bundled_product_sequence_map() -> dict[str, set[str]]:
+    """Backward-compatible name: now returns all page-local observations per product."""
+    return _product_sequence_observations(None)
+
+
+def _product_sequence_supported(
+    product: Any,
+    sequence: Any,
+    exact_rows: pd.DataFrame,
+    db_path: str | Path | None = None,
+) -> tuple[bool, str]:
+    current = str(sequence or "").strip()
+    if not current or not _sequence_match_key(current):
         return False, "current sequence is empty/unparseable"
-    row_keys = set()
     if not exact_rows.empty and "sequence" in exact_rows:
         for value in exact_rows["sequence"].dropna().tolist():
-            key = _sequence_match_key(value)
-            if key:
-                row_keys.add(key)
-    if current_key in row_keys:
-        return True, "sequence stored in exact experimental record"
+            if _sequence_observation_matches(value, current):
+                return True, "sequence stored in exact experimental record"
     product_key = _normalize_product_key(product)
-    mapped = _bundled_product_sequence_map().get(product_key)
-    if mapped:
-        return (mapped == current_key, "local product↔sequence mapping" if mapped == current_key else "product name exists but mapped sequence does not match current Planner sequence")
-    return False, "no verified product↔sequence mapping is available for this historical product"
+    observed = _product_sequence_observations(db_path).get(product_key, set())
+    if observed:
+        if any(_sequence_observation_matches(value, current) for value in observed):
+            return True, "page-local Check table product↔sequence observation"
+        return False, "mapped sequence does not match current Planner sequence; product exists in sequence history but no page-local STD observation matches"
+    return False, "no recorded product↔sequence observation is available for this historical product"
 
-def _json_components(value: Any) -> dict[str, float]:
+def _json_component_state(value: Any) -> tuple[dict[str, float], list[str]]:
+    """Return explicitly numeric extra components plus any unresolved entries.
+
+    A non-empty extra component is never silently discarded.  Numeric values are
+    preserved as recorded; text/unknown values make the cocktail incomplete for
+    automatic reproduction until the operator verifies the amount.
+    """
+    text = str(value or "{}").strip()
     try:
         import json
-        raw = json.loads(str(value or "{}"))
+        raw = json.loads(text or "{}")
     except Exception:
-        return {}
+        return {}, ([text] if text not in {"", "{}"} else [])
     if not isinstance(raw, dict):
-        return {}
+        return {}, ([text] if raw not in ({}, None, "") else [])
     out: dict[str, float] = {}
-    for key, value in raw.items():
-        number = _num(value)
+    unresolved: list[str] = []
+    for key, raw_value in raw.items():
+        if str(raw_value).strip() in {"", "None", "0", "0.0"}:
+            continue
+        number = _num(raw_value)
         if number is not None and number > 0:
             out[str(key)] = number
-    return out
+        else:
+            unresolved.append(str(key))
+    return out, unresolved
+
+
+def _json_components(value: Any) -> dict[str, float]:
+    # Backward-compatible helper for callers that need only verified numeric values.
+    return _json_component_state(value)[0]
 
 
 def _recorded_cocktail(row: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Recover one recorded cocktail without turning an unexplained blank into zero.
+    """Recover one complete recorded cocktail without manufacturing components.
 
-    A blank TIS cell can be accepted as a recorded zero only when the other recorded
-    liquid volumes already account for the full reported cocktail volume implied by
-    scale x cleavage_eq.  This supports complete TFA/water records while still preventing arbitrary
-    blank-as-zero interpretation.
+    Other scavengers are preserved as recorded numeric volumes.  A blank standard
+    component is accepted as zero only when all explicitly recorded volumes already
+    account for the full scale×eq cocktail volume within 2%.
     """
     scale = _num(row.get("scale_mmol"))
     eq = _num(row.get("cleavage_eq"))
-    known = {
+    standard: dict[str, float | None] = {
         "TFA": _num(row.get("tfa_ml")),
         "TIS": _num(row.get("tis_ml")),
         "Water": _num(row.get("water_ml")),
     }
-    other = _json_components(row.get("other_scavengers_json"))
-    if other:
+    other, unresolved_other = _json_component_state(row.get("other_scavengers_json"))
+    if unresolved_other:
         return None
-    present_total = sum(v for v in known.values() if v is not None and v >= 0)
+    known: dict[str, float | None] = dict(standard)
+    for name, value in other.items():
+        if name not in known:
+            known[name] = value
+    present_total = sum(float(value) for value in known.values() if value is not None and value >= 0)
     expected_total = (scale * eq) if scale and scale > 0 and eq and eq > 0 else None
     if expected_total is not None and expected_total > 0:
         relative_error = abs(present_total - expected_total) / expected_total
-        blanks = [name for name, value in known.items() if value is None]
+        blanks = [name for name, value in standard.items() if value is None]
         if blanks and relative_error <= 0.02:
-            # The explicitly recorded components already sum to the full reported
-            # total, so the blank standard component is supported as not used.
             for name in blanks:
                 known[name] = 0.0
-    if any(value is None for value in known.values()):
+    if any(known.get(name) is None for name in standard):
         return None
     total = sum(float(value or 0.0) for value in known.values())
     if total <= 0:
         return None
-    pct = {name: float(value or 0.0) / total * 100.0 for name, value in known.items() if float(value or 0.0) > 0}
-    return {"composition_pct": pct, "source_total_ml": total, "source_ml_per_mmol": (total / scale if scale and scale > 0 else None)}
+    pct = {
+        name: float(value or 0.0) / total * 100.0
+        for name, value in known.items()
+        if float(value or 0.0) > 0
+    }
+    return {
+        "composition_pct": pct,
+        "source_total_ml": total,
+        "source_ml_per_mmol": (total / scale if scale and scale > 0 else None),
+    }
 
 
 def _historical_condition_compatible(rule_preset: str, composition: Mapping[str, float]) -> bool:
-    """Require sequence-sensitive scavengers while allowing simple lab 95/5 history."""
-    names = {str(name).strip().lower() for name, value in composition.items() if _num(value) and float(value) > 0}
-    if "tfa" not in names:
-        return False
-    preset = str(rule_preset or "").strip().upper()
-    # Standard/non-sensitive sequences may use a complete recorded TFA/water
-    # condition; TIS is not manufactured when the historical record omits it.
-    if preset in {"DEFAULT_TFA_TIS_WATER", "DEFAULT_TFA_WATER", "TFA_TIS_WATER_96_2_2"}:
-        return "water" in names
-    requirements = {
-        "REDUCING_TFA_TIS_WATER_EDT": {"edt", "water"},
-        "CYS_EDT": {"edt", "water"},
-        "REAGENT_B": {"phenol", "water"},
-        "REAGENT_K": {"phenol", "water", "thioanisole", "edt"},
-        "REAGENT_L": {"dtt", "water"},
-        "REAGENT_R": {"thioanisole", "edt"},
-        "REAGENT_H": {"phenol", "thioanisole", "edt"},
-        "REAGENT_I": {"dmb"},
-    }
-    required = requirements.get(preset)
-    return bool(required and required.issubset(names))
+    """Validate a recorded TFA cocktail without letting a generic preset veto it.
 
+    The generic chemistry preset is a fallback/reference.  It must never reject a
+    real historical TFA cocktail merely because that record did not contain EDT,
+    phenol, thioanisole, DTT, or another reagent suggested by the fallback rule.
+    """
+    names = {str(name).strip().lower() for name, value in composition.items() if _num(value) and float(value) > 0}
+    return bool(names) and "tfa" in names
 
 def _same_eq_time(frame: pd.DataFrame, recommended_eq: float | None) -> tuple[float | None, str]:
     """Recommend time from the closest relevant historical cleavage class."""
@@ -389,6 +435,7 @@ def _sequence_cleavage_condition(
     scale_mmol: float | None,
     frame: pd.DataFrame,
     product: str = "",
+    db_path: str | Path | None = None,
 ) -> dict[str, Any] | None:
     """Build a sequence-first condition, then refine it with one compatible lab record.
 
@@ -420,25 +467,26 @@ def _sequence_cleavage_condition(
         rule_preset = str(preset_info.get("preset") or "DEFAULT_TFA_TIS_WATER")
         rule_eq = _num(eq_info.get("cleavage_eq"))
 
-        # Exact-sequence evidence is the primary refinement source. Product-name
-        # evidence is considered only when an explicit product↔sequence mapping
-        # supports it. A label must never override the current Planner sequence.
-        sequence_key = _sequence_match_key(seq)
-        exact = frame.iloc[0:0]
-        product_sequence_basis = "no exact sequence record"
-        if sequence_key and "sequence" in frame:
-            sequence_keys = frame["sequence"].fillna("").map(_sequence_match_key)
-            exact = frame[sequence_keys.eq(sequence_key)].copy()
-            if not exact.empty:
-                product_sequence_basis = "exact sequence stored in experimental record"
-
+        # Historical evidence is sequence-first.  A current product label may be
+        # stale or unrelated, so a real row can qualify by (a) its stored sequence,
+        # or (b) a page-local Check table product↔sequence observation.  Exact current
+        # product rows are included only when that product is itself sequence-supported.
         product_key = _normalize_product_key(product)
-        if exact.empty and product_key and "product" in frame:
-            keys = frame["product"].fillna("").map(_normalize_product_key)
-            exact = frame[keys.eq(product_key)].copy()
-            product_sequence_ok, product_sequence_basis = _product_sequence_supported(product, seq, exact)
-            if not product_sequence_ok:
-                exact = exact.iloc[0:0]
+        product_keys = frame.get("product_key", frame.get("product", pd.Series(index=frame.index, dtype=object)).fillna("").map(_normalize_product_key)).fillna("")
+        row_sequences = frame.get("sequence", pd.Series(index=frame.index, dtype=object)).fillna("")
+        row_sequence_match = row_sequences.map(lambda observed: _sequence_observation_matches(observed, seq) if str(observed).strip() else False)
+        observations = _product_sequence_observations(db_path)
+        mapped_product_keys = {
+            key for key, values in observations.items()
+            if any(_sequence_observation_matches(observed, seq) for observed in values)
+        }
+        exact = frame[row_sequence_match | product_keys.isin(mapped_product_keys)].copy()
+        current_product_rows = frame[product_keys.eq(product_key)].copy() if product_key else frame.iloc[0:0]
+        product_sequence_ok, product_sequence_basis = _product_sequence_supported(product, seq, current_product_rows, db_path=db_path)
+        if product_sequence_ok and not current_product_rows.empty:
+            exact = pd.concat([exact, current_product_rows], ignore_index=False).drop_duplicates(subset=["record_id"])
+        elif not exact.empty:
+            product_sequence_basis = "sequence stored in a historical record or page-local Check table product↔sequence observation"
         historical_candidates: list[dict[str, Any]] = []
         for _, row in exact.iterrows():
             recovered = _recorded_cocktail(row)
@@ -479,7 +527,7 @@ def _sequence_cleavage_condition(
                 "scaled_total_ml": scaled_total,
                 "volume_apply_allowed": bool(scaled_total is not None and scaled_total > 0),
                 "apply_allowed": bool((_num(chosen.get("cleavage_eq")) or rule_eq) is not None and source_time is not None),
-                "basis": f"{product_sequence_basis}; exact lab record {chosen.get('record_id')} ({chosen.get('source_product')}); sequence rule={rule_preset}",
+                "basis": f"{product_sequence_basis}; exact lab record {chosen.get('record_id')} ({chosen.get('source_product')}) preserved as recorded; chemistry reference={rule_preset}",
                 "time_basis": "same exact-product laboratory record" if _num(chosen.get("cleavage_time_h")) is not None else "mode of exact-product laboratory records",
                 "eq_basis": "same exact-product laboratory record" if _num(chosen.get("cleavage_eq")) is not None else str(eq_info.get("source") or "planner sequence rule"),
                 "condition_source": "exact_lab_record",
@@ -487,6 +535,31 @@ def _sequence_cleavage_condition(
                 "source_product": chosen.get("source_product"),
                 "source_status": chosen.get("source_status"),
                 "rule_preset": rule_preset,
+            }
+
+        if not exact.empty:
+            # The sequence/product mapping is valid, but none of the matched rows
+            # contains a complete reproducible cocktail.  Recognize the user's
+            # history explicitly instead of making it look as if no data existed.
+            return {
+                "sequence": seq,
+                "sequence_length": len(tokens),
+                "cleavage_eq": None,
+                "cleavage_time_h": None,
+                "preset": "",
+                "composition_pct": {},
+                "scaled_total_ml": None,
+                "volume_apply_allowed": False,
+                "apply_allowed": False,
+                "basis": f"{len(exact)} sequence-matched historical record(s) recognized, but none contains a complete reproducible cocktail; chemistry reference={rule_preset}",
+                "time_basis": "historical match incomplete",
+                "eq_basis": "historical match incomplete",
+                "condition_source": "historical_match_incomplete",
+                "source_record_id": None,
+                "source_product": product or None,
+                "source_status": None,
+                "rule_preset": rule_preset,
+                "matched_history_count": int(len(exact)),
             }
 
         recommended_time, time_basis = _same_eq_time(frame, rule_eq)
@@ -549,18 +622,12 @@ def cleavage_advice(
         return {"method": "no-data", "confidence": "LOW", "evidence": [], "recommended_condition": None, "message": "No eligible cleavage records."}
 
     q_scale = _num(scale_mmol); q_eq = _num(cleavage_eq); q_time = _num(cleavage_time_h)
-    product_low = str(product or "").strip().lower()
-    seq_text = str(sequence or "").strip()
-    sequence_key = _sequence_match_key(seq_text)
+    product_low = _normalize_product_key(product)
     frame = all_frame.copy()
     frame["distance"] = 2.0
-    if sequence_key:
-        frame["sequence_match"] = frame["sequence"].fillna("").map(_sequence_match_key).eq(sequence_key).astype(float)
-        frame["distance"] -= frame["sequence_match"] * 1.5
-    else:
-        frame["sequence_match"] = 0.0
     if product_low:
-        frame["product_match"] = frame["product"].fillna("").str.strip().str.lower().eq(product_low).astype(float)
+        product_keys = frame.get("product_key", frame["product"].fillna("").map(_normalize_product_key)).fillna("")
+        frame["product_match"] = product_keys.eq(product_low).astype(float)
         frame["distance"] -= frame["product_match"] * 1.0
     else:
         frame["product_match"] = 0.0
@@ -569,15 +636,70 @@ def cleavage_advice(
         if query is not None:
             frame["distance"] += (values - query).abs().fillna(10.0) * scale
     frame = frame.sort_values("distance").head(10)
-    exact = frame[frame["sequence_match"] == 1].copy() if sequence_key else frame.iloc[0:0].copy()
+    exact = frame[frame["product_match"] == 1].copy()
     parsed_fraction = float((frame["status"] == "parsed").mean())
     confidence = _confidence(len(frame), len(exact), None, parsed_fraction)
 
-    recommended = _sequence_cleavage_condition(seq_text, str(resin or ""), q_scale, all_frame, product=str(product or "")) if seq_text else None
+    seq_text = str(sequence or "").strip()
+    recommended = _sequence_cleavage_condition(seq_text, str(resin or ""), q_scale, all_frame, product=str(product or ""), db_path=db_path) if seq_text else None
+    # Generic chemistry output is reference-only.  It can explain a safe baseline,
+    # but it is not historical/ML evidence and must never become Apply-enabled.
+    if recommended and recommended.get("condition_source") == "sequence_rule_fallback":
+        recommended = dict(recommended)
+        recommended.update({
+            "apply_allowed": False,
+            "volume_apply_allowed": False,
+            "condition_source": "chemistry_rule_reference",
+            "recommendation_kind": "CHEMISTRY RULE",
+        })
     warnings: list[str] = []
+    if recommended and recommended.get("condition_source") == "historical_match_incomplete":
+        warnings.append(
+            f"{recommended.get('matched_history_count', 0)} sequence-matched historical record(s) were recognized, but the recorded cocktail is incomplete/inconsistent, so no missing component is guessed and Apply remains disabled."
+        )
     if not seq_text:
-        recommended = None
-        warnings.append("Planner sequence is empty; product-name matching is evidence only and Apply is disabled.")
+        # Backward-compatible evidence mode for callers that have only a product name.
+        # This branch never substitutes product matching for the new sequence-first UI.
+        if product_low and not exact.empty:
+            verified_exact = exact[exact["status"] == "verified"] if "status" in exact else exact.iloc[0:0]
+            if verified_exact.empty:
+                warnings.append("Exact-product records exist, but none are Verified. Parsed records remain evidence only; Apply is disabled.")
+            else:
+                chosen = verified_exact.sort_values("distance").iloc[0]
+                vals = [_num(chosen.get(k)) for k in ("tfa_ml", "tis_ml", "water_ml")]
+                try:
+                    import json as _json
+                    other = _json.loads(str(chosen.get("other_scavengers_json") or "{}"))
+                except Exception:
+                    other = {"unparsed": chosen.get("other_scavengers_json")}
+                other = {str(k): v for k, v in (other or {}).items() if str(v).strip() not in {"", "None", "0", "0.0"}}
+                complete = all(v is not None for v in vals) and sum(float(v) for v in vals) > 0
+                pct = None
+                if complete and not other:
+                    total = sum(float(v) for v in vals)
+                    pct = {"TFA": float(vals[0]) / total * 100.0, "TIS": float(vals[1]) / total * 100.0, "Water": float(vals[2]) / total * 100.0}
+                if other:
+                    warnings.append("The verified exact-product record contains additional/unknown components. Its cocktail is evidence only and will not be auto-applied.")
+                if not complete:
+                    warnings.append("The verified exact-product record does not contain a complete TFA/TIS/H2O composition. Apply is disabled to avoid interpreting blanks as zero.")
+                chosen_eq = _num(chosen.get("cleavage_eq"))
+                chosen_time = _num(chosen.get("cleavage_time_h"))
+                apply_allowed = bool(complete and not other and (chosen_eq is not None or chosen_time is not None))
+                source_scale = _num(chosen.get("scale_mmol"))
+                source_total_ml = sum(float(v) for v in vals) if complete else None
+                ml_per_mmol = (source_total_ml / source_scale) if source_total_ml is not None and source_scale and source_scale > 0 else None
+                scaled_total_ml = (ml_per_mmol * q_scale) if ml_per_mmol is not None and q_scale is not None and q_scale > 0 else None
+                recommended = {
+                    "record_id": chosen.get("record_id"), "product": chosen.get("product"), "scale_mmol": source_scale,
+                    "cleavage_eq": chosen_eq, "cleavage_time_h": chosen_time, "tfa_ml": vals[0], "tis_ml": vals[1], "water_ml": vals[2],
+                    "composition_pct": pct, "source_total_ml": source_total_ml, "source_ml_per_mmol": ml_per_mmol, "scaled_total_ml": scaled_total_ml,
+                    "other_components": other, "source_status": chosen.get("status"), "apply_allowed": apply_allowed,
+                    "volume_apply_allowed": bool(apply_allowed and scaled_total_ml is not None and scaled_total_ml > 0),
+                }
+                if not apply_allowed:
+                    warnings.append("The verified exact-product record is not a complete, safely reproducible cleavage condition; Apply is disabled.")
+        else:
+            warnings.append("Planner sequence is empty; sequence-based Apply is disabled.")
     elif recommended is None:
         warnings.append("The current sequence could not be parsed into a safe cleavage recommendation.")
     if parsed_fraction:
@@ -603,6 +725,13 @@ def cleavage_advice(
         "confidence": confidence,
         "evidence_count": len(frame),
         "exact_count": len(exact),
+        "evidence_summary": {
+            "source_kind": (recommended or {}).get("recommendation_kind") or ("HISTORICAL PRODUCT EVIDENCE" if len(exact) else "CONTEXT EVIDENCE"),
+            "total_records": int(len(frame)), "exact_product_records": int(len(exact)),
+            "sequence_key": experimental_data.canonical_sequence_key(seq_text),
+            "product_key": product_low,
+            "apply_allowed": bool((recommended or {}).get("apply_allowed", False)),
+        },
         "recommendations": recommendations,
         "recommended_condition": recommended,
         "warnings": warnings,
@@ -781,22 +910,31 @@ def cleavage_recommendation(
     statuses = ["verified"] + (["parsed"] if include_parsed else [])
     frame = pd.DataFrame(experimental_data.list_records("cleavage", db_path, statuses=statuses))
     if frame.empty:
-        fallback = _sequence_cleavage_condition(seq, str(resin or ""), _num(scale_mmol), frame, product="")
-        return {"method": "sequence chemistry fallback", "confidence": "LOW", "recommended_condition": fallback, "warnings": ["No cleavage history is available; recommendation is chemistry-rule only."], "evidence": []}
+        fallback = _sequence_cleavage_condition(seq, str(resin or ""), _num(scale_mmol), frame, product="", db_path=db_path)
+        if fallback:
+            fallback = dict(fallback)
+            fallback.update({"apply_allowed": False, "condition_source": "chemistry_rule_reference", "recommendation_kind": "CHEMISTRY RULE"})
+        return {"method": "sequence chemistry fallback", "confidence": "LOW", "recommended_condition": fallback, "warnings": ["No cleavage history is available. Chemistry rule is shown as a non-applicable reference, not as ML/historical evidence."], "evidence": []}
 
-    current_key = _sequence_match_key(seq)
-    mapped_products = {p for p, s in _bundled_product_sequence_map().items() if s == current_key}
-    row_sequence_keys = frame.get("sequence", pd.Series(index=frame.index, dtype=object)).fillna("").map(_sequence_match_key)
+    observations = _product_sequence_observations(db_path)
+    mapped_products = {
+        product_key for product_key, sequences in observations.items()
+        if any(_sequence_observation_matches(observed, seq) for observed in sequences)
+    }
+    row_sequences = frame.get("sequence", pd.Series(index=frame.index, dtype=object)).fillna("")
+    row_sequence_match = row_sequences.map(lambda observed: _sequence_observation_matches(observed, seq) if str(observed).strip() else False)
     product_keys = frame.get("product", pd.Series(index=frame.index, dtype=object)).fillna("").map(_normalize_product_key)
-    matched = frame[row_sequence_keys.eq(current_key) | product_keys.isin(mapped_products)].copy()
+    matched = frame[row_sequence_match | product_keys.isin(mapped_products)].copy()
 
-    # If the product field itself is correct and mapped to the current sequence, include it.
+    # If the current product name is supported by any page-local STD observation,
+    # include its historical rows. Multiple page observations are retained; there is
+    # no forced product→single-sequence canonicalization.
     product_key = _normalize_product_key(product)
-    if product_key and _bundled_product_sequence_map().get(product_key) == current_key:
+    if product_key and any(_sequence_observation_matches(observed, seq) for observed in observations.get(product_key, set())):
         matched = pd.concat([matched, frame[product_keys.eq(product_key)]], ignore_index=False).drop_duplicates(subset=["record_id"])
 
-    # Get the chemistry-rule class solely as a compatibility gate.
-    rule_only = _sequence_cleavage_condition(seq, str(resin or ""), _num(scale_mmol), frame.iloc[0:0], product="")
+    # Chemistry-rule class remains reference metadata only; it does not veto history.
+    rule_only = _sequence_cleavage_condition(seq, str(resin or ""), _num(scale_mmol), frame.iloc[0:0], product="", db_path=db_path)
     rule_preset = str((rule_only or {}).get("rule_preset") or (rule_only or {}).get("preset") or "")
     candidates: list[dict[str, Any]] = []
     for row in matched.astype(object).where(pd.notna(matched), None).to_dict("records"):
@@ -818,9 +956,30 @@ def cleavage_recommendation(
         })
 
     if not candidates:
-        fallback = _sequence_cleavage_condition(seq, str(resin or ""), _num(scale_mmol), frame, product="")
-        warnings = ["No complete sequence-matched historical cocktail is available; chemistry-rule recommendation is used without inventing a lab cocktail."]
-        return {"method": "sequence chemistry fallback", "confidence": "LOW", "recommended_condition": fallback, "warnings": warnings, "evidence": []}
+        if not matched.empty:
+            evidence_cols = [
+                "record_id", "product", "sequence", "scale_mmol", "tfa_ml", "tis_ml",
+                "water_ml", "other_scavengers_json", "cleavage_eq", "cleavage_time_h",
+                "ether_ratio", "filter_speed", "status", "raw_observation",
+            ]
+            evidence_cols = [column for column in evidence_cols if column in matched.columns]
+            evidence_frame = matched[evidence_cols].copy()
+            return {
+                "method": "sequence-matched history recognized but incomplete",
+                "confidence": "LOW",
+                "recommended_condition": None,
+                "matched_history_count": int(len(matched)),
+                "warnings": [
+                    f"{len(matched)} sequence-matched historical record(s) were recognized, but none contains a complete reproducible cocktail (recorded components + eq + time). No chemistry fallback is substituted as if it were historical data."
+                ],
+                "evidence": evidence_frame.astype(object).where(pd.notna(evidence_frame), None).to_dict("records"),
+            }
+        fallback = _sequence_cleavage_condition(seq, str(resin or ""), _num(scale_mmol), frame, product="", db_path=db_path)
+        if fallback:
+            fallback = dict(fallback)
+            fallback.update({"apply_allowed": False, "condition_source": "chemistry_rule_reference", "recommendation_kind": "CHEMISTRY RULE"})
+        warnings = ["No sequence-matched cleavage history is available. Chemistry rule is shown only as a non-applicable reference; no historical cocktail is invented."]
+        return {"method": "sequence chemistry fallback", "confidence": "LOW", "recommended_condition": fallback, "matched_history_count": 0, "warnings": warnings, "evidence": []}
 
     # Group identical recorded conditions. Composition is atomic; components from
     # different experiments are never averaged or spliced together.
@@ -882,7 +1041,18 @@ def cleavage_recommendation(
             "evidence_count": group["evidence_count"], "verified_count": group["verified_count"],
             "outcome_evidence_count": group["outcome_count"], "outcome_score": group["quality"],
         })
-    return {"method": "sequence-matched observed-condition recommendation", "confidence": confidence, "recommended_condition": recommended, "warnings": warnings, "evidence": evidence}
+    return {
+        "method": "sequence-matched observed-condition recommendation", "confidence": confidence,
+        "evidence_summary": {
+            "source_kind": "HISTORICAL CONSENSUS",
+            "matched_records": int(len(matched)),
+            "condition_records": int(chosen_group["evidence_count"]),
+            "verified_condition_records": int(chosen_group["verified_count"]),
+            "outcome_records": int(chosen_group["outcome_count"]),
+            "apply_allowed": True,
+        },
+        "recommended_condition": recommended, "warnings": warnings, "evidence": evidence,
+    }
 
 
 __all__ = ["loading_advice", "cleavage_advice", "loading_recommendation", "cleavage_recommendation"]

@@ -26,9 +26,9 @@ def test_general_peptide_token_registry_and_structure_stress():
         assert clean_sequence(seq) == expected_core
         props = estimate_properties(seq)
         assert not props.empty
-        assert int(props.loc[props.metric == "length", "value"].iloc[0]) == len(expected_core)
+        assert int(props.loc[props.metric == "canonical_residue_count", "value"].iloc[0]) == len(expected_core)
         dock = docking_readiness_df(seq)
-        assert "docking_readiness_heuristic" in set(dock.metric)
+        assert {"input_readiness", "unsupported_tokens", "3d_requirement", "external_validation"}.issubset(set(dock.metric))
         amph = amphipathic_window_df(seq, window=5)
         assert set(["start", "end", "window_sequence"]).issubset(amph.columns)
 

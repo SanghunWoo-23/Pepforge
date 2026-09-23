@@ -26,7 +26,7 @@ def _read_override_text(value: str | None) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description=VERSION_NAME)
-    ap.add_argument("--seq", "--sequence", dest="seq", default="Ac-EEMQRR-NH2", help="Peptide sequence, e.g. Ac-EEMQRR-NH2 or ghk-nh2")
+    ap.add_argument("--seq", "--sequence", dest="seq", default="", help="Peptide sequence, e.g. Ac-AAAA-NH2 or GHK-NH2")
     ap.add_argument("--resin", dest="resin", default="Amide", help="Resin/resin family. Accepts Amide, Rink Amide AM, CTC/Trityl, 2-CTC, Trityl.")
     ap.add_argument("--mmol", "--scale-mmol", dest="mmol", type=float, default=400)
     ap.add_argument("--loading", "--resin-loading-mmol-g", dest="loading", type=float, default=0.8)

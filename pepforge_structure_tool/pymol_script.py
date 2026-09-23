@@ -58,6 +58,8 @@ def make_pymol_pml(meta_path: str | Path, output_path: str | Path | None = None,
     lines.append(f"load {load_target}, {obj}")
     lines.append(f"hide everything, {obj}")
     lines.append(f"show sticks, {obj}")
+    lines.append(f"show cartoon, {obj} and chain P")
+    lines.append("set seq_view, 1")
     lines.append(f"set stick_radius, 0.14, {obj}")
     lines.append(f"set sphere_scale, 0.18, {obj}")
     lines.append(f"hide everything, {obj} and elem H")

@@ -1,4 +1,4 @@
-"""Real synthesis outcomes, reviewed datasets and ML for SPPS Planner V4.0.0."""
+"""Real synthesis outcomes, reviewed datasets and ML for SPPS Planner V5.0.0."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -35,7 +35,8 @@ def log_path(gui: Any = None) -> Path:
         from spps_v4_gui.modules.data_log_panel import _log_path
         return Path(_log_path())
     except Exception:
-        return Path.home() / ".spps_planner" / "data" / "actual_runs.csv"
+        from spps_planner.build_profile import FALLBACK_DOT_DIR
+        return Path.home() / FALLBACK_DOT_DIR / "data" / "actual_runs.csv"
 
 
 def dataset_dir(gui: Any = None) -> Path:

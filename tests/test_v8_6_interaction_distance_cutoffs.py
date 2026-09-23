@@ -3,7 +3,7 @@ from suite_gui import docking_workbench_gui as dw
 
 def test_interaction_distance_criteria_are_reported():
     df=dw.interaction_distance_criteria_df()
-    assert float(df.loc[df.metric=='hydrogen_bond_DA_cutoff','value'].iloc[0])==3.9
+    assert float(df.loc[df.metric=='hydrogen_bond_DA_cutoff','value'].iloc[0])==3.5
     assert float(df.loc[df.metric=='hydrophobic_contact_cutoff','value'].iloc[0])==5.0
     assert set(df['unit'])=={'Angstrom'}
 

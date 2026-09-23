@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-"""Pepforge Public API v3.0.0.
+"""Pepforge Public API v4.0.0.
 
 Stable public import surface for the research release.  This module intentionally
 re-exports high-level functions that are safe for scripts and documentation.
@@ -11,7 +11,9 @@ Pepforge supports screening, planning, triage, and evidence organization. It doe
 not prove final Kd, true binding, or replace external docking/MD/experimental validation.
 """
 
-PUBLIC_API_VERSION = "3.0.0"
+from peptiforg_core.version import PEPFORGE_VERSION
+
+PUBLIC_API_VERSION = PEPFORGE_VERSION
 
 from peptiforg_core.project_session_manager import (
     new_project_session,
@@ -43,6 +45,9 @@ from peptiforg_core.run_comparison import (
 )
 from peptiforg_core.runtime_validation import run_runtime_validation
 
+from peptiforg_core.simulation_protocol import build_simulation_protocol
+from peptiforg_core.structure_consensus import compare_structures
+
 __all__ = [
     "PUBLIC_API_VERSION",
     "new_project_session",
@@ -62,6 +67,8 @@ __all__ = [
     "export_evidence_engine_report_from_project",
     "export_run_comparison_package",
     "run_runtime_validation",
+    "compare_structures",
+    "build_simulation_protocol",
     "audit_package",
     "run_regression_audit",
     "audit_release_integrity",

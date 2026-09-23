@@ -1,9 +1,11 @@
 
 from __future__ import annotations
+
+from peptiforg_core.version import PEPFORGE_VERSION
 import logging
 LOGGER = logging.getLogger(__name__)
 
-"""Pepforge full package audit for the V3.0.0 public package.
+"""Pepforge full package audit for the V4.0.0 public package.
 
 This module performs a packaging/runtime/documentation audit for the public
 research package. It does not perform scientific validation.
@@ -18,7 +20,7 @@ import re
 import subprocess
 import sys
 
-FULL_PACKAGE_AUDIT_VERSION = "3.0.0"
+FULL_PACKAGE_AUDIT_VERSION = PEPFORGE_VERSION
 
 TEXT_EXTS = {".md",".txt",".py",".iss",".spec",".yml",".yaml",".json",".bat",".cff",".ini"}
 

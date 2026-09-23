@@ -1,15 +1,32 @@
+## v4.0.0 PSB Geometry & Helix-Search Fix (2026-08-28)
+
+- Balanced Top 5 became the recommended PSB preset.
+- Canonical-L torsion seeds now receive constrained molecular-mechanics relaxation before ranking.
+- Per-conformer steric-overlap auditing is part of PSB selection.
+- Strong helix evidence no longer lets `coil_mixed` outrank an alpha seed merely because a small ETKDG sample found coil first.
+- Canonical-L structures gain residue-aware PDB visualization views; modified/D/linker chemistry is never silently canonicalized.
+
 # Pepforge Release History
 
-## v3.0.0 Current STD + SPPS Planner V4 Integration (2026-08-13)
+## v4.0.0 Scientific Context & Ensemble Design (2026-08-27)
 
-- Established Pepforge V3.0.0 + SPPS Planner V4 as the current project STD.
+- Promoted Pepforge to a new major suite generation.
+- Added five PDE objective modes, including fully structure-agnostic Interaction Only.
+- Added context/environment-aware structural objectives and PSB ensemble-role metadata.
+- Preserved latest sanitized SPPS Planner V4 evidence workflow as an independent component.
+- Centralized user result bundles as `YYYY-MM-DD_<name-or-sequence>/` folders containing related artifacts and package ZIPs when applicable.
+- Centralized the active Pepforge suite version in `peptiforg_core/version.py`.
+
+## v3.0.0 Historical STD + SPPS Planner V4 Integration (2026-08-13)
+
+- Established Pepforge V3.0.0 + SPPS Planner V4 as the project STD at that time.
 - Preserved Hot Spot Finder, Peptide Design Engine, Top-5 Structure Builder, SPPS planning, Docking Workbench, and external-validation export workflows.
 - Added conservative experimental-evidence states and sequence-first cleavage advice without applying model-invented conditions.
-- Preserved the confirmed `Ac-EEMQRR-NH2` 30 eq, TFA 95% / water 5%, no-TIS contract.
+- Current maintenance refresh follows the latest SPPS V4 evidence-first cleavage contract: exact cocktails are historical-record reproductions, not peptide-name hard-codes.
 - Excluded LOT Number and Batch Manager from the Pepforge operator surface.
 - Removed private/runtime data from the GitHub package and retained empty public templates only.
 
-> Historical component documents below may use their own development-series numbers. The repository-level public version and current STD are V3.0.0.
+> Historical component documents below may use their own development-series numbers. Those labels describe historical component/repository states; the current suite version is V4.0.0.
 
 ## v2.0.0 GUI/SPPS Planner Patch (2026-06-16)
 
@@ -31,8 +48,8 @@
 
 ```text
 Design Engine
-→ SPPS Planner
 → PyMOL/Structure Builder
+→ SPPS Planner
 → RCSB target fetch
 → Target Preparation
 → Binding Site Selector
@@ -100,12 +117,12 @@ It does not prove final Kd, true nM binding, or replace external docking/MD/expe
 - Stabilized release metadata for public research package.
 
 
-## v4.0.1 Patch Cleanup
+## v4.0.0 Patch Cleanup
 
 - Patch-level cleanup after public stabilization.
 - Preserved all functional modules, tests, templates, examples, and simulation/calculation data.
 - Removed only nonessential packaging/runtime noise.
-- Updated public API version metadata to v4.0.1.
+- Updated public API version metadata to v4.0.0.
 - Updated README/MANUAL/CITATION metadata.
 
 

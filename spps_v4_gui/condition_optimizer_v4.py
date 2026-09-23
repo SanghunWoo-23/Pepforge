@@ -1,4 +1,4 @@
-"""Auditable SPPS condition recommendations for V4.0.0.
+"""Auditable SPPS condition recommendations for V5.0.0.
 
 Recommendations are evidence-first. Repeated successful historical conditions are
 preferred over model output. The module does not synthesize reagent identities or
@@ -288,7 +288,7 @@ def coupling_advice(items: Iterable[Any], current_item: Mapping[str, Any]) -> di
         elif actionable:
             warnings.append("Current building blocks have different supported coupling conditions. Review per-unit recommendations; global Apply is disabled to avoid overwriting distinct conditions.")
     if not historical_rows:
-        warnings.append("No successful operator-reviewed coupling rows are available yet. Use Record Coupling after experiments to build evidence.")
+        warnings.append("No successful operator-reviewed coupling rows are available yet. Use Add Issue for coupling problems and Add Result for measured outcomes to build evidence.")
     elif not actionable:
         warnings.append("No coupling condition repeats enough to support an automatic recommendation for the current building blocks.")
 
