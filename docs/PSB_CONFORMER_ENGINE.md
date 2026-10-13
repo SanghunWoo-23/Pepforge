@@ -23,12 +23,12 @@ PSB is a local **conformer generation and geometry-screening** engine. It is not
    - Two explicit noncanonical turn motifs have dedicated literature-guided local search seeds: `dP-G` (type II-prime candidate) and `Aib-G` (type I-prime candidate). For a beta-hairpin request, beta-extended flank search torsions are added around the explicit turn motif.
    - Explicit Aib can receive a dedicated 3_10 search seed without Aib->Ala conversion. Search seeds are hypotheses; family labels still require measured post-relaxation geometry.
 
-5. **Seed geometry relaxation (V4.0.0)**
+5. **Seed geometry relaxation (V5.0.0)**
    - Stage 1: side chains are minimized while peptide N/CA/C/O backbone atoms are fixed.
    - Stage 2: the whole structure is minimized while each seeded phi/psi is kept inside a narrow torsion window.
    - This removes avoidable steric overlap without turning a seed into an unconstrained force-field minimum.
 
-6. **Steric geometry audit (V4.0.0)**
+6. **Steric geometry audit (V5.0.0)**
    - Non-bonded heavy-atom pairs separated by more than two covalent bonds are screened against van-der-Waals radii.
    - Severe overlaps and a softer overlap count are reported per conformer.
    - The audit is a geometry-quality screen, not a free energy or experimental clash probability.
@@ -44,7 +44,7 @@ PSB is a local **conformer generation and geometry-screening** engine. It is not
    - If too few requested-family conformers remain, clean fallbacks are labelled explicitly. Severe-clash structures are never added merely to fill five slots.
    - Force-field energy is used only within the same molecular graph and is not converted to population or binding probability.
 
-9. **Canonical peptide visualization PDB (V4.0.0)**
+9. **Canonical peptide visualization PDB (V5.0.0)**
    - Plain canonical-L peptides additionally receive a residue-aware, heavy-atom PDB view with chain/residue numbers and N/CA/C/O atom names.
    - The chemistry-faithful SDF/generic graph export remains available.
    - Modified/D/linker constructs are never relabeled as canonical residues just to obtain a prettier PDB.

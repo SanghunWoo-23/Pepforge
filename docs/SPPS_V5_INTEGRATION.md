@@ -1,10 +1,10 @@
-# Pepforge V4.0.0 — Integrated SPPS Planner V5.0.0
+# Pepforge V5.0.0 — Integrated SPPS Planner V5.0.0
 
-Pepforge V4.0.0 embeds the **Public/Data-Sanitized SPPS Planner V5.0.0** calculation and evidence workflow. The suite version and SPPS component version are independent.
+Pepforge V5.0.0 embeds the **Public/Data-Sanitized SPPS Planner V5.0.0** calculation and evidence workflow. The suite version and SPPS component version are independent.
 
 ## Integration boundary
 
-- Active Pepforge suite version remains `4.0.0`.
+- Active Pepforge suite version is `5.0.0`.
 - Embedded synthesis component is `SPPS Planner V5.0.0`.
 - The internal Python namespace remains `spps_v4_gui` for backward import compatibility; this namespace name is not the component version.
 - LOT Number controls and the Batch Manager tab are not exposed in Pepforge. Compatibility fields may remain internally blank so older project schemas can still be read safely.

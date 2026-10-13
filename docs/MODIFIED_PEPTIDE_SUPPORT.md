@@ -1,4 +1,4 @@
-# Pepforge V4.0.0 Modified-Peptide Support Matrix
+# Pepforge V5.0.0 Modified-Peptide Support Matrix
 
 Pepforge does not use a single "supported / unsupported" flag for modified
 peptides. A token can be recognized by one stage while requiring explicit
@@ -31,7 +31,7 @@ Exports:
 The same matrix is embedded in the candidate Summary Report and the external MD
 preparation protocol when available.
 
-## PSB PDB sequence and construct metadata (R14 refinement)
+## PSB PDB sequence and construct metadata 
 
 PSB PDB exports now preserve two complementary layers of identity:
 

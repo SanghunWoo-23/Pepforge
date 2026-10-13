@@ -1,30 +1,23 @@
-# Pepforge Documentation
+# Pepforge V5.0.0 Documentation
 
-## Start here
+This directory contains the public scientific and user-facing contracts that accompany Pepforge V5.0.0.
 
-- [English Manual](../MANUAL_EN.md)
-- [한국어 매뉴얼](../MANUAL_KO.md)
+## User / workflow guides
+
+- [Docking Workbench User Guide](DOCKING_WORKBENCH_USER_GUIDE.md)
+- [RCSB PDB Search / Fetch Guide](RCSB_PDB_SEARCH_FETCH_USER_GUIDE.md)
+- [SPPS Integration](SPPS_V5_INTEGRATION.md)
+- [Simulation Backend Installation](V5_SIMULATION_BACKEND_INSTALL.md)
+
+## Scientific / data contracts
+
 - [Scientific Scope and Validation](SCIENTIFIC_SCOPE_AND_VALIDATION.md)
+- [Modified Peptide Support](MODIFIED_PEPTIDE_SUPPORT.md)
 - [Token Registry and Sequence Grammar](TOKEN_REGISTRY_AND_SEQUENCE_GRAMMAR.md)
-- [Modified Peptide Support](MODIFIED_PEPTIDE_SUPPORT_V4.md)
-
-## Design and structure
-
-- [Design / Structure Theory V4](DESIGN_STRUCTURE_THEORY_V4.md)
-- [Structure Design Evidence V4](STRUCTURE_DESIGN_EVIDENCE_V4.md)
 - [PSB Conformer Engine](PSB_CONFORMER_ENGINE.md)
 - [Simulation / Structure Evidence](SIMULATION_STRUCTURE_EVIDENCE.md)
+- [PDE Scientific Objective Modes](PDE_SCIENTIFIC_OBJECTIVE_MODES.md)
+- [Public API Contract](PUBLIC_API_CONTRACT.md)
+- [Public Output Contract](PUBLIC_OUTPUT_CONTRACT.md)
 
-## SPPS and evidence
-
-- [SPPS V5 Integration](SPPS_V5_INTEGRATION.md)
-- [Evidence Workflow V4](EVIDENCE_WORKFLOW_V4.md)
-- [Citation Policy](CITATION_POLICY.md)
-
-## Release and validation
-
-- [Current V4.0.0 Release Notes](../RELEASE_NOTES_V4.0.0.md)
-- [Release History](RELEASE_HISTORY.md)
-- [R14 Validation](validation/VALIDATION_R14_2026-09-21.md)
-- [GitHub-ready R14 Validation](validation/GITHUB_READY_VALIDATION_R14_2026-09-22.md)
-- [GitHub Upload Guide (KO)](release/GITHUB_UPLOAD_GUIDE_KO.md)
+Development handover notes, future-version roadmaps, and internal validation history are intentionally maintained outside the public GitHub package.

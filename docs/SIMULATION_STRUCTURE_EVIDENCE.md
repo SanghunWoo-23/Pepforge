@@ -1,4 +1,4 @@
-# Pepforge V4.0.0 — Structure & Simulation Evidence Contract
+# Pepforge V5.0.0 — Structure & Simulation Evidence Contract
 
 Pepforge V4 separates **structure generation**, **static structure analysis**, and **external simulation protocol planning**. PSB constrained molecular mechanics is not molecular dynamics. V4 does not expose production MD or trajectory analysis; those functions are reserved for the V5 simulation workflow.
 

@@ -1,6 +1,6 @@
 # Pepforge V5.0.0 FINAL 사용자 매뉴얼
 
-**UI Polish R3 · 2026-10-08**
+**Pepforge V5.0.0 · Public Research Source Release**
 
 ## 1. 시작
 
@@ -40,7 +40,7 @@ Peptide sequence
 - 긴 table: table 자체 scrollbar 사용
 
 ### SPPS Planner
-Pepforge는 **SPPS Planner V7.0.0 FINAL R2** runtime을 기본 synthesis planner로 실행합니다.
+Pepforge는 **SPPS Planner V7.0.0 FINAL** runtime을 기본 synthesis planner로 실행합니다.
 
 주요 화면:
 - Project Manager
@@ -109,10 +109,10 @@ Pepforge는 candidate → structure → docking → follow-up → review의 line
 일반 마우스 휠 또는 오른쪽 scrollbar로 아래로 이동합니다.
 
 ### Studio가 가로로 늘어날 때
-R3에서는 outer page horizontal expansion을 차단했습니다. 최신 R3 package인지 확인하십시오.
+V5.0.0에서는 outer page horizontal expansion을 차단했습니다. 최신 V5.0.0 package인지 확인하십시오.
 
 ### SPPS 화면이 예전 버전처럼 보일 때
-최신 R3 package의 launcher로 실행하십시오. 정상 source runtime 제목은 `SPPS Planner V7.0.0 Final`입니다.
+최신 V5.0.0 package의 launcher로 실행하십시오. 정상 source runtime 제목은 `SPPS Planner V7.0.0 Final`입니다.
 
 ### optional dependency가 없을 때
 Native core는 가능한 범위에서 계속 실행하며 optional backend는 별도 status로 표시됩니다.

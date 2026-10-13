@@ -172,18 +172,18 @@ def run_hotspot_finder() -> None:
 
 
 def run_spps_planner() -> None:
-    """Launch the supplied SPPS Planner V7.0.0 FINAL R2 runtime.
+    """Launch the supplied SPPS Planner V7.0.0 FINAL runtime.
 
-    Pepforge vendors the user's final R2 public runtime as a separate application
+    Pepforge vendors the user's final public runtime as a separate application
     so the planner keeps its own Project Manager / Batch Manager UI and startup
     behavior instead of being silently replaced by Pepforge's older compatibility
     controller.  Workflow values are passed only through environment variables.
     """
     _ensure_runtime_environment()
-    vendor_root = _resource_path("vendor", "spps_planner_v7_r2")
+    vendor_root = _resource_path("vendor", "spps_planner_v7_final")
     vendor_entry = vendor_root / "pepforge_entry.py"
 
-    # Source distributions can launch the exact V7 R2 planner in its own process.
+    # Source distributions can launch the exact V7 final planner in its own process.
     # This is both faster from the Pepforge launcher and prevents Tk/import state
     # from the two applications from interfering with each other.
     if vendor_entry.exists() and not getattr(sys, "frozen", False):

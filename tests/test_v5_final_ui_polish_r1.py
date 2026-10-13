@@ -38,7 +38,7 @@ def test_legacy_dockbench_blank_nested_canvas_removed():
 
 def test_spps_launch_targets_supplied_v7_r2_runtime():
     launcher = _read("main_launcher.py")
-    assert 'vendor", "spps_planner_v7_r2"' in launcher
+    assert 'vendor", "spps_planner_v7_final"' in launcher
     assert 'pepforge_entry.py' in launcher
-    assert 'SPPS Planner V7.0.0 FINAL R2 runtime' in launcher
-    assert Path("vendor/spps_planner_v7_r2/VERSION").read_text(encoding="utf-8").strip() == "V7.0.0"
+    assert 'SPPS Planner V7.0.0 FINAL runtime' in launcher
+    assert Path("vendor/spps_planner_v7_final/VERSION").read_text(encoding="utf-8").strip() == "V7.0.0"

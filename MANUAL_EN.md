@@ -1,6 +1,6 @@
 # Pepforge V5.0.0 FINAL User Manual
 
-**UI Polish R3 · 2026-10-08**
+**Pepforge V5.0.0 · Public Research Source Release**
 
 ## 1. Start
 
@@ -40,7 +40,7 @@ Peptide sequence
 - Wide tables use their own scrollbars
 
 ### SPPS Planner
-Pepforge launches the supplied **SPPS Planner V7.0.0 FINAL R2** runtime as the primary synthesis planner.
+Pepforge launches the supplied **SPPS Planner V7.0.0 FINAL** runtime as the primary synthesis planner.
 
 Primary workspaces include:
 - Project Manager
@@ -105,10 +105,10 @@ Pepforge preserves candidate → structure → docking → follow-up → review 
 Use the ordinary mouse wheel or the right-hand scrollbar.
 
 ### Studio layout stretches horizontally
-R3 prevents outer-page horizontal geometry feedback. Confirm you are using the latest R3 package.
+V5.0.0 prevents outer-page horizontal geometry feedback. Confirm you are using the latest V5.0.0 package.
 
 ### SPPS appears to be an older planner
-Launch through the latest R3 Pepforge launcher. The expected source-runtime title is `SPPS Planner V7.0.0 Final`.
+Launch through the latest V5.0.0 Pepforge launcher. The expected source-runtime title is `SPPS Planner V7.0.0 Final`.
 
 ### Optional dependency is unavailable
 The native core remains available where possible; optional backends are reported separately.

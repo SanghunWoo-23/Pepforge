@@ -4,7 +4,7 @@ If Pepforge or Pepforge-generated workflows materially contribute to academic wo
 
 ## Recommended citation
 
-Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. Version 4.0.0, 2026. https://github.com/poowsh1407/Pepforge
+Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. Version 5.0.0, 2026. https://github.com/SanghunWoo-23/Pepforge
 
 ## BibTeX
 
@@ -13,8 +13,8 @@ Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. Version 4.0.0, 202
   author  = {Woo, Sanghun},
   title   = {Pepforge: An Integrated Peptide Research Workbench},
   year    = {2026},
-  version = {4.0.0},
-  url     = {https://github.com/poowsh1407/Pepforge}
+  version = {5.0.0},
+  url     = {https://github.com/SanghunWoo-23/Pepforge}
 }
 ```
 

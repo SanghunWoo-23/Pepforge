@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Pepforge bridge for the vendored SPPS Planner V7.0.0 FINAL R2 runtime.
+"""Pepforge bridge for the vendored SPPS Planner V7.0.0 FINAL runtime.
 
 The SPPS planner remains its own application/runtime.  This bridge only applies
 optional Pepforge workflow handoff values before entering the exact V7 R2 UI.

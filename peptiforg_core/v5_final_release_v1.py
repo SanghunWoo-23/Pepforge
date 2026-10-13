@@ -84,7 +84,7 @@ def audit_v5_final_release(root_dir: str | Path, output_dir: str | Path, *, poli
     gate_pass = int(gate.get("failed", 1)) == 0 and int(gate.get("passed", 0)) > 0
 
     required = [
-        "pepforge_cli.py", "main_launcher.py", "V5_DEV_STATUS.json", "SCIENTIFIC_QUALITY_POLICY.md",
+        "pepforge_cli.py", "main_launcher.py", "SCIENTIFIC_QUALITY_POLICY.md",
         "NATIVE_VALIDATION_PROTOCOL.md", "peptiforg_core/native_docking_v1.py",
         "peptiforg_core/public_peptide_benchmark_v1.py", "peptiforg_core/uniprot_bridge_v1.py",
         "peptiforg_core/native_docking_tuning_v1.py", "peptiforg_core/native_result_interpretation_v1.py",

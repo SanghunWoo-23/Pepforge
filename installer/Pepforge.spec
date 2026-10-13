@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Pepforge V4.0.0 lightweight PyInstaller spec.
+"""Pepforge V5.0.0 lightweight PyInstaller spec.
 
 This spec deliberately packages only the desktop runtime. Research/training
 stacks (xgboost, scikit-learn training modules, torch/ESM, Streamlit, pytest)

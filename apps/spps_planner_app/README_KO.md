@@ -1,6 +1,6 @@
 # SPPS Planner V5.0.0
 
-Pepforge V4.0.0에 통합된 SPPS Planner **V4.0.0** 애플리케이션 엔진과 필수 데이터입니다.
+Pepforge V5.0.0에 통합된 SPPS Planner **V4.0.0** 애플리케이션 엔진과 필수 데이터입니다.
 
 ## 주요 동작
 
@@ -44,7 +44,7 @@ BUILD_INSTALLER.bat
 결과:
 
 ```text
-installer\output\Pepforge_Setup_V4.0.0.exe
+installer\output\Pepforge_Setup_v5.0.0.exe
 ```
 
 `INSTALL_BUILD_TOOLS_AND_BUILD.bat`도 동일한 Installer 빌드 파일입니다.
