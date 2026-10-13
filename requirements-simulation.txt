@@ -1,0 +1,9 @@
+# Optional Pepforge V5 real simulation / trajectory stack.
+# Core Pepforge does not require these packages. Missing backends are surfaced
+# as unavailable states and never replaced with fake poses or trajectories.
+-r requirements-ml.txt
+openmm>=8.2
+MDAnalysis[analysis]>=2.10
+mdtraj>=1.10
+# HADDOCK3 is an optional external docking backend. Current official releases
+# can be installed separately with: pip install haddock3

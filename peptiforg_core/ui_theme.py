@@ -3,6 +3,7 @@ from __future__ import annotations
 """Single Pepforge Tk theme contract shared by first-party windows."""
 
 import logging
+import tkinter as tk
 from tkinter import ttk
 
 LOGGER = logging.getLogger(__name__)
@@ -41,6 +42,75 @@ def fit_window(window, *, preferred_width: int = 1480, preferred_height: int = 8
     window.geometry(geometry)
     return geometry
 
+
+
+def maximize_when_roomy(window, *, min_width: int = 1500, min_height: int = 850) -> bool:
+    """Maximize a first-party window on roomy desktops, without forcing it on small screens."""
+    try:
+        if int(window.winfo_screenwidth()) < min_width or int(window.winfo_screenheight()) < min_height:
+            return False
+        if str(getattr(window, "tk", "")) and window.tk.call("tk", "windowingsystem") == "win32":
+            window.state("zoomed")
+        else:
+            sw, sh = int(window.winfo_screenwidth()), int(window.winfo_screenheight())
+            window.geometry(f"{max(1100, sw-24)}x{max(700, sh-80)}+0+0")
+        return True
+    except Exception:
+        LOGGER.debug("Window maximize skipped", exc_info=True)
+        return False
+
+
+def bind_canvas_navigation(canvas: tk.Canvas, *, vertical: bool = True, horizontal: bool = True) -> None:
+    """Mouse-wheel + Shift-wheel + middle-button drag navigation for Pepforge canvases."""
+    def _wheel(event):
+        try:
+            delta = int(getattr(event, "delta", 0) or 0)
+            number = int(getattr(event, "num", 0) or 0)
+            if number == 4:
+                units = -3
+            elif number == 5:
+                units = 3
+            elif delta:
+                units = -max(1, abs(delta)//120) if delta > 0 else max(1, abs(delta)//120)
+            else:
+                return None
+            if horizontal and (int(getattr(event, "state", 0) or 0) & 0x0001):
+                canvas.xview_scroll(units, "units")
+            elif vertical:
+                canvas.yview_scroll(units, "units")
+            elif horizontal:
+                canvas.xview_scroll(units, "units")
+            return "break"
+        except Exception:
+            return None
+
+    def _middle_press(event):
+        try:
+            canvas.scan_mark(event.x, event.y)
+            canvas.configure(cursor="fleur")
+            return "break"
+        except Exception:
+            return None
+
+    def _middle_drag(event):
+        try:
+            canvas.scan_dragto(event.x, event.y, gain=1)
+            return "break"
+        except Exception:
+            return None
+
+    def _middle_release(_event):
+        try:
+            canvas.configure(cursor="")
+        except Exception:
+            pass
+        return "break"
+
+    for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        canvas.bind(sequence, _wheel, add="+")
+    canvas.bind("<ButtonPress-2>", _middle_press, add="+")
+    canvas.bind("<B2-Motion>", _middle_drag, add="+")
+    canvas.bind("<ButtonRelease-2>", _middle_release, add="+")
 
 def apply_pepforge_theme(window, density: str = "Standard") -> ttk.Style:
     density = density if density in DENSITIES else "Standard"
@@ -94,3 +164,56 @@ def apply_pepforge_theme(window, density: str = "Standard") -> ttk.Style:
 
 def set_density(window, density: str) -> ttk.Style:
     return apply_pepforge_theme(window, density)
+
+
+def bind_page_navigation(container: tk.Misc, canvas: tk.Canvas) -> None:
+    """Install conventional large-form scrolling on every descendant widget.
+
+    The supplied SPPS Planner V7 R2 uses a bindtag-based page scroll contract:
+    ordinary wheel input moves the outer page even when the pointer is over an
+    Entry, Text, Combobox, or table.  Pepforge uses the same interaction here.
+    No middle-button panning is installed.
+    """
+    scroll_tag = f"PepforgePageScroll_{id(canvas)}"
+
+    def _wheel(event):
+        try:
+            delta = int(getattr(event, "delta", 0) or 0)
+            if delta:
+                canvas.yview_scroll(-1 if delta > 0 else 1, "units")
+                return "break"
+            num = int(getattr(event, "num", 0) or 0)
+            if num in (4, 5):
+                canvas.yview_scroll(-1 if num == 4 else 1, "units")
+                return "break"
+        except tk.TclError:
+            return None
+        return None
+
+    try:
+        owner = canvas.winfo_toplevel()
+        owner.bind_class(scroll_tag, "<MouseWheel>", _wheel)
+        owner.bind_class(scroll_tag, "<Button-4>", _wheel)
+        owner.bind_class(scroll_tag, "<Button-5>", _wheel)
+    except tk.TclError:
+        return
+
+    def _install(widget):
+        try:
+            tags = list(widget.bindtags())
+            if scroll_tag not in tags:
+                tags.insert(1, scroll_tag)
+                widget.bindtags(tuple(tags))
+            for child in widget.winfo_children():
+                _install(child)
+        except tk.TclError:
+            return
+
+    _install(container)
+    try:
+        canvas.bind("<Prior>", lambda _e: (canvas.yview_scroll(-1, "pages"), "break")[-1], add="+")
+        canvas.bind("<Next>", lambda _e: (canvas.yview_scroll(1, "pages"), "break")[-1], add="+")
+        canvas.bind("<Home>", lambda _e: (canvas.yview_moveto(0.0), "break")[-1], add="+")
+        canvas.bind("<End>", lambda _e: (canvas.yview_moveto(1.0), "break")[-1], add="+")
+    except tk.TclError:
+        pass

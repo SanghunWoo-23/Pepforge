@@ -1,0 +1,6 @@
+# Optional Pepforge V5 lightweight ESM-2 embedding backend.
+# Not required for the core desktop application.
+-r requirements-ml.txt
+torch>=2.2
+transformers>=4.41
+safetensors>=0.4

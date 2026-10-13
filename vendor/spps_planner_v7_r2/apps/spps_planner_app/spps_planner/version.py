@@ -1,0 +1,4 @@
+VERSION = "V7.0.0"
+VERSION_NUMBER = "7.0.0"
+VERSION_NAME = "SPPS Planner V7.0.0 Final"
+DATA_VERSION = "SPPS data v6.0.0"

@@ -15,7 +15,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from peptiforg_core.ui_helpers import set_pepforge_icon, open_path
-from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window, maximize_when_roomy
 from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
 from peptiforg_core.version import PEPFORGE_VERSION
 from peptiforg_core.sandbox_runtime import configured_output
@@ -34,6 +34,17 @@ from peptiforg_core.workflow_automation_runner import default_workflow_config, s
 from peptiforg_core.run_comparison import export_run_comparison_package, RUN_COMPARISON_VERSION
 from peptiforg_core.peptide_target_complex_builder import export_complex_builder_package, COMPLEX_BUILDER_VERSION
 from peptiforg_core.lazy_imports import lazy_module
+from peptiforg_core.quality_preserving_peptide_builder_v1 import build_quality_preserving_peptide
+from peptiforg_core.structure_predictor_backends import run_esmfold_prediction
+from peptiforg_core.docking_access_contract_v1 import input_matrix_contract, feature_access_rows
+from peptiforg_core.native_docking_v1 import NativeDockingConfig, run_native_docking, NATIVE_DOCKING_VERSION
+from peptiforg_core.docking_result_contract_v1 import (
+    normalize_native_docking_result, evidence_to_workbench_contacts,
+    normalized_to_workbench_poses, write_atoms_as_pdb, export_normalized_result,
+)
+from peptiforg_core.docking_followup_v1 import run_native_docking_followup
+from peptiforg_core.native_mechanics_v2 import NativeMechanicsV2Config
+from suite_gui.shared_native_result_panel import SharedNativeResultPanel
 
 pd = lazy_module("pandas")
 _interaction_evidence_backend = lazy_module("peptiforg_core.interaction_evidence")
@@ -171,7 +182,8 @@ def _pose_columns() -> list[str]:
         "hydrophobic_proximities", "opposite_charge_proximities",
         "aromatic_proximities", "polar_residue_proximities", "min_centroid_distance_A",
         "rotation_z_deg", "translation_x_A", "translation_y_A", "translation_z_A",
-        "center_x_A", "center_y_A", "center_z_A", "note"
+        "center_x_A", "center_y_A", "center_z_A",
+        "engine", "engine_score", "quality_status", "note"
     ]
 
 
@@ -183,7 +195,7 @@ def _pose_display_columns() -> list[str]:
     candidate interfaces.
     """
     return [
-        "rank", "orientation", "contacts", "protein_residues", "peptide_residues",
+        "rank", "engine", "score", "quality", "orientation", "contacts", "protein_residues", "peptide_residues",
         "closest_A", "hydrophobic", "charge", "aromatic", "polar", "clash_warnings",
     ]
 
@@ -290,7 +302,10 @@ def pose_display_df(poses: pd.DataFrame, contacts: pd.DataFrame | None = None) -
             return ", ".join(vals[:limit]) + f" +{len(vals)-limit}"
         rows.append({
             "rank": pose.get("pose_rank", ""),
-            "orientation": str(pose.get("orientation", "")).replace("forward_N_to_C", "N→C").replace("reverse_C_to_N", "C→N").replace("imported_or_direct", "Direct"),
+            "engine": pose.get("engine", "Legacy geometry" if str(pose.get("conformation", "")).startswith("structure_builder") else ""),
+            "score": pose.get("engine_score", ""),
+            "quality": pose.get("quality_status", ""),
+            "orientation": str(pose.get("orientation", "")).replace("forward_N_to_C", "N→C").replace("reverse_C_to_N", "C→N").replace("imported_or_direct", "Direct").replace("native_rigid_body", "Native rigid-body"),
             "contacts": pose.get("contact_count", 0),
             "protein_residues": compact(protein),
             "peptide_residues": compact(peptide),
@@ -2229,11 +2244,14 @@ class DockingWorkbenchGUI(tk.Tk):
         self.title("Pepforge Docking Workbench")
         set_pepforge_icon(self)
         apply_pepforge_theme(self)
-        fit_window(self, preferred_width=1780, preferred_height=1040, minimum_width=1180, minimum_height=760)
+        fit_window(self, preferred_width=1820, preferred_height=1000, minimum_width=1260, minimum_height=780)
+        self.after(80, lambda: maximize_when_roomy(self, min_width=1600, min_height=900))
         self._startup_trace = StartupTrace("docking_workbench", ROOT / "workspace" / "docking" / "logs")
         self.last_outdir=None
         self._active_result_bundle: Path | None = None
         self._active_result_key: tuple[str, str] | None = None
+        self._progress_history: list[dict] = []
+        self._last_failure_summary: dict = {}
         self._install_green_progress_style()
         self._build()
         mark_window_visible(self, self._startup_trace)
@@ -2314,11 +2332,30 @@ class DockingWorkbenchGUI(tk.Tk):
         main=ttk.Frame(self,padding=12); main.pack(fill="both",expand=True)
         ttk.Label(main,text="Docking Workbench",style="Title.TLabel").pack(anchor="w")
         ttk.Label(main,text="Structure input, local rigid-body geometry/contact screening, and external docking/affinity/MD validation import/export.",style="Sub.TLabel").pack(anchor="w",pady=(2,8))
-        top=ttk.LabelFrame(main,text="Input",padding=8); top.pack(fill="x")
-        self.input_panel = top
+
+        # FINAL UI repair: keep the essential DockBench input controls as normal
+        # widgets.  The old nested Canvas could render as a large blank viewport
+        # on some Windows/Tk combinations (the "broken DockBench" report).
+        # Advanced DockBench remains a compatibility/review surface; the primary
+        # PSB+docking workflow now lives in Structure & Docking Studio.
+        input_host=ttk.LabelFrame(main,text="Input (advanced compatibility / review)",padding=8)
+        input_host.pack(fill="x")
+        self._input_host=input_host
+        top=ttk.Frame(input_host,padding=2)
+        top.grid(row=0,column=0,sticky="nsew")
+        input_host.columnconfigure(0,weight=1)
+        self._input_canvas=None
+        self._input_canvas_window=None
+        self.input_panel = input_host
         self.input_panel_visible = True
         self.target_mode=tk.StringVar(value="PDB")
         self.peptide_mode=tk.StringVar(value="Sequence")
+        self.target_sequence_source=tk.StringVar(value="Auto local")
+        self.docking_engine=tk.StringVar(value="Pepforge Native")
+        self.native_pose_count=tk.IntVar(value=5)
+        self.native_search_preset=tk.StringVar(value="Standard")
+        self.native_mechanics_steps=tk.IntVar(value=400)
+        self.native_freeze_receptor=tk.BooleanVar(value=True)
         self.target_seq=tk.StringVar(value="")
         self.seq=tk.StringVar(value="")
         self.pdb_path=tk.StringVar(value="")
@@ -2361,6 +2398,8 @@ class DockingWorkbenchGUI(tk.Tk):
         cb1=ttk.Combobox(mode_row,textvariable=self.target_mode,values=["PDB","Sequence"],width=12,state="readonly"); cb1.pack(side="left",padx=4)
         ttk.Label(mode_row,text="Peptide input",width=14).pack(side="left",padx=(16,0))
         cb2=ttk.Combobox(mode_row,textvariable=self.peptide_mode,values=["Sequence","PDB"],width=12,state="readonly"); cb2.pack(side="left",padx=4)
+        ttk.Label(mode_row,text="Docking engine",width=14).pack(side="left",padx=(16,0))
+        ttk.Combobox(mode_row,textvariable=self.docking_engine,values=["Pepforge Native","Legacy Geometry Screen"],width=22,state="readonly").pack(side="left",padx=4)
         ttk.Label(mode_row,textvariable=self.mode_hint,foreground="#444").pack(side="left",padx=12)
         self.advanced_input_visible=False
         self.advanced_input_toggle=ttk.Button(mode_row,text="Show advanced input",command=self.toggle_advanced_input)
@@ -2380,6 +2419,16 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Entry(seq_box,textvariable=self.seq).grid(row=1,column=1,columnspan=2,sticky="ew",padx=4)
         ttk.Label(seq_box,text="Output folder",width=22).grid(row=2,column=0,sticky="w")
         ttk.Entry(seq_box,textvariable=self.outdir).grid(row=2,column=1,sticky="ew",padx=4); ttk.Button(seq_box,text="Browse",command=self.browse_outdir).grid(row=2,column=2,padx=4,sticky="e")
+        ttk.Label(seq_box,text="Target sequence 3D",width=22).grid(row=3,column=0,sticky="w")
+        ttk.Combobox(seq_box,textvariable=self.target_sequence_source,values=["Auto local","Pepforge Native","Local ESMFold"],width=20,state="readonly").grid(row=3,column=1,sticky="w",padx=4)
+        ttk.Label(seq_box,text="Auto local: cached/local ESMFold first, then Pepforge native fallback.",foreground="#555").grid(row=3,column=2,sticky="w",padx=4)
+        ttk.Label(seq_box,text="Native search",width=22).grid(row=4,column=0,sticky="w")
+        native_opts=ttk.Frame(seq_box); native_opts.grid(row=4,column=1,columnspan=2,sticky="w",padx=4)
+        ttk.Label(native_opts,text="Preset").pack(side="left")
+        ttk.Combobox(native_opts,textvariable=self.native_search_preset,values=["Fast","Standard","Deep"],width=10,state="readonly").pack(side="left",padx=(4,10))
+        ttk.Label(native_opts,text="Top poses").pack(side="left")
+        ttk.Spinbox(native_opts,from_=1,to=25,textvariable=self.native_pose_count,width=5).pack(side="left",padx=4)
+        ttk.Label(native_opts,text="Used when Docking engine = Pepforge Native",foreground="#555").pack(side="left",padx=8)
         seq_box.columnconfigure(1,weight=1)
         advanced_input=ttk.Frame(top)
         advanced_input.grid(row=2,column=0,columnspan=2,sticky="ew",pady=(6,0))
@@ -2411,26 +2460,41 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Button(complex_box,text="Build Initial Complex",command=self.build_initial_complex).grid(row=0,column=2,padx=8)
         ttk.Label(complex_box,text="Uses target PDB plus peptide coordinates. Sequence peptides are built by Peptide Structure Builder; no surrogate residue model is used.",foreground="#555").grid(row=0,column=3,sticky="w")
         complex_box.columnconfigure(3,weight=1)
+        follow_box=ttk.LabelFrame(advanced_input,text="Native Mechanics / Trajectory Follow-up",padding=8); follow_box.grid(row=3,column=0,sticky="ew",pady=(6,0))
+        ttk.Label(follow_box,text="Mechanics steps",width=18).grid(row=0,column=0,sticky="w")
+        ttk.Spinbox(follow_box,from_=20,to=20000,textvariable=self.native_mechanics_steps,width=8).grid(row=0,column=1,sticky="w",padx=4)
+        ttk.Checkbutton(follow_box,text="freeze receptor; move peptide chain P",variable=self.native_freeze_receptor).grid(row=0,column=2,sticky="w",padx=8)
+        ttk.Label(follow_box,text="Experimental native mechanics only; no production-MD or physical-time claim.",foreground="#555").grid(row=0,column=3,sticky="w",padx=8)
+        follow_box.columnconfigure(3,weight=1)
         advanced_input.grid_remove()
         top.columnconfigure(0,weight=1); top.columnconfigure(1,weight=1)
         for var in (self.target_mode, self.peptide_mode): var.trace_add("write", lambda *_: self._update_mode_hint())
         btns=ttk.Frame(main); btns.pack(fill="x",pady=8)
-        self.input_toggle_btn = ttk.Button(btns,text="Collapse Input",command=self.toggle_input_panel)
+        action_row=ttk.Frame(btns); action_row.pack(fill="x")
+        science_row=ttk.Frame(btns); science_row.pack(fill="x",pady=(5,0))
+        status_row=ttk.Frame(btns); status_row.pack(fill="x",pady=(5,0))
+        self.input_toggle_btn = ttk.Button(action_row,text="Collapse Input",command=self.toggle_input_panel)
         self.input_toggle_btn.pack(side="left",padx=3)
-        ttk.Button(btns,text="Analyze Inputs",command=self.analyze).pack(side="left",padx=3)
-        self.run_screening_btn = ttk.Button(btns,text="Run Screening",command=self.run_docking,style="Accent.TButton")
+        ttk.Button(action_row,text="Analyze Inputs",command=self.analyze).pack(side="left",padx=3)
+        self.run_screening_btn = ttk.Button(action_row,text="Run Docking / Screening",command=self.run_docking,style="Accent.TButton")
         self.run_screening_btn.pack(side="left",padx=3)
-        ttk.Button(btns,text="Export Results",command=self.export).pack(side="left",padx=3)
-        ttk.Button(btns,text="Load Results",command=self.load_output_folder).pack(side="left",padx=3)
-        ttk.Button(btns,text="Open Output Folder",command=self.open_output).pack(side="left",padx=3)
+        ttk.Button(action_row,text="Export Results",command=self.export).pack(side="left",padx=3)
+        ttk.Button(action_row,text="Load Results",command=self.load_output_folder).pack(side="left",padx=3)
+        ttk.Button(action_row,text="Open Output Folder",command=self.open_output).pack(side="left",padx=3)
+        ttk.Label(science_row,text="Native follow-up:").pack(side="left",padx=(3,6))
+        self.run_native_followup_btn=ttk.Button(science_row,text="Run Mechanics + Trajectory",command=self.run_native_followup,style="Accent.TButton")
+        self.run_native_followup_btn.pack(side="left",padx=3)
+        ttk.Button(science_row,text="Show Dynamics Data",command=lambda:self.show_data_full("md")).pack(side="left",padx=3)
+        ttk.Label(science_row,text="Uses best usable native docking pose; descriptive mechanics/trajectory evidence only.",foreground="#555").pack(side="left",padx=8)
         
         self.progress_var=tk.DoubleVar(value=0.0)
         self.progress_text=tk.StringVar(value="Ready")
-        ttk.Progressbar(btns, variable=self.progress_var, maximum=100, length=260, mode="determinate", style="PepforgeGreen.Horizontal.TProgressbar").pack(side="left", padx=(14, 4))
-        ttk.Label(btns, textvariable=self.progress_text, width=34).pack(side="left", padx=4)
-        adv=ttk.Menubutton(btns,text="Advanced")
+        ttk.Progressbar(status_row, variable=self.progress_var, maximum=100, length=320, mode="determinate", style="PepforgeGreen.Horizontal.TProgressbar").pack(side="left", padx=(3, 6))
+        ttk.Label(status_row, textvariable=self.progress_text).pack(side="left", fill="x", expand=True, padx=4)
+        adv=ttk.Menubutton(action_row,text="Advanced")
         adv_menu=tk.Menu(adv,tearoff=False)
         adv_menu.add_command(label="Run docking only", command=self.run_docking)
+        adv_menu.add_command(label="Run native mechanics + trajectory", command=self.run_native_followup)
         adv_menu.add_separator()
         adv_menu.add_command(label="Show full input tables", command=lambda: self.show_data_full("input"))
         adv_menu.add_command(label="Show full result tables", command=lambda: self.show_data_full("results"))
@@ -2443,8 +2507,9 @@ class DockingWorkbenchGUI(tk.Tk):
         input_tab = self._make_tab("Input")
         results = self._make_tab("Results")
         contacts = self._make_tab("Contacts")
-        md = self._make_tab("External validation")
+        md = self._make_tab("Dynamics / validation")
         imports = self._make_tab("Export / Import")
+        access = self._make_tab("Feature access / status")
 
         self.prop_tree=self._tree_panel(input_tab,"Peptide summary",["metric","value","note"], height=5)
         self.terminal_tree=self._tree_panel(input_tab,"Terminal state",["field","value","note"], height=5)
@@ -2461,6 +2526,13 @@ class DockingWorkbenchGUI(tk.Tk):
         self.interpret_tree=self._tree_panel(results,"Screening summary",["item","value","interpretation"], height=6)
         self.best_contact_tree=self._tree_panel(results,"Best pose — contacting residues",_contact_display_columns(), height=12)
         self.pose_tree=self._tree_panel(results,"Pose comparison",_pose_display_columns(), height=8)
+        self.shared_native_result_panel = SharedNativeResultPanel(
+            results,
+            open_path_callback=open_path,
+            rerun_followup_callback=self.run_native_followup_for_pose,
+            title="Unified Native Results",
+        )
+        self.shared_native_result_panel.pack(fill="both", expand=True, pady=(8, 3))
         self.import_tree=None
         self.external_style_tree=None
         self.risk_tree=None
@@ -2473,8 +2545,13 @@ class DockingWorkbenchGUI(tk.Tk):
         self.residue_tree = None
 
         self.external_style_tree=self._tree_panel(md,"External validation status",["engine_style","metric","value","unit","interpretation","external_equivalent"], height=7)
-        self.sim_tree=self._tree_panel(md,"MD / dynamics status",["metric","value","unit","interpretation"], height=7)
-        self.md_tree=self._tree_panel(md,"Imported MD trend",["frame","time_ps","rmsd_A","contacts","clashes","min_distance_A","interpretation"], height=10)
+        self.sim_tree=self._tree_panel(md,"Native mechanics / dynamics status",["metric","value","unit","interpretation"], height=9)
+        self.md_tree=self._tree_panel(md,"Native / imported trajectory trend",["frame","time_ps","rmsd_A","rg_A","cluster","interpretation"], height=11)
+        self.input_provenance_tree=self._tree_panel(access,"Current input matrix / provenance",["item","value","status","note"], height=9)
+        self.feature_access_tree=self._tree_panel(access,"All feature visibility / readiness",["feature","status","tier","note"], height=12)
+        self.progress_history_tree=self._tree_panel(access,"Run progress history",["time","progress","status"], height=10)
+        self.failure_tree=self._tree_panel(access,"Last failure / recovery guidance",["item","value","note"], height=6)
+
         self.md_result_tree=self._tree_panel(imports,"Imported external validation results",["source","series","points","last_value","mean_value","note"], height=8)
         ed_box=ttk.LabelFrame(imports,text="External Docking Result Import",padding=6); ed_box.pack(fill="x",expand=False,pady=3)
         ttk.Label(ed_box,text="File or folder",width=14).grid(row=0,column=0,sticky="w")
@@ -2562,15 +2639,80 @@ class DockingWorkbenchGUI(tk.Tk):
         cal_box.columnconfigure(1,weight=1)
         self.calibration_tree=self._tree_panel(imports,"Calibration summary",["item","value","note"], height=6)
         self.log=self._text_panel(imports,"Log", height=10)
-        self._update_mode_hint(); self.analyze()
+        self._update_mode_hint(); self._refresh_access_panels(); self.analyze()
 
     def _set_progress(self, value: float, text: str):
         try:
-            self.progress_var.set(max(0, min(100, float(value))))
-            self.progress_text.set(str(text))
+            value = max(0, min(100, float(value)))
+            text = str(text)
+            self.progress_var.set(value)
+            self.progress_text.set(text)
+            self._progress_history.append({
+                "time": datetime.now().isoformat(timespec="seconds"),
+                "progress": round(value, 1),
+                "status": text,
+            })
+            # Keep the UI history bounded while retaining enough context to
+            # explain long jobs/failures without hiding the controls themselves.
+            if len(self._progress_history) > 250:
+                self._progress_history = self._progress_history[-250:]
+            if hasattr(self, "progress_history_tree"):
+                self._write_tree(self.progress_history_tree, self._progress_history_df().tail(100))
             self.update_idletasks()
         except Exception:
             LOGGER.debug("Optional operation skipped", exc_info=True)
+
+    def _progress_history_df(self):
+        return pd.DataFrame(getattr(self, "_progress_history", []) or [], columns=["time", "progress", "status"])
+
+    def _input_contract_payload(self):
+        target_runtime = getattr(self, "_runtime_sequence_target", {}) or {}
+        peptide_runtime = {}
+        paths = getattr(self, "peptide_structure_paths", {}) or {}
+        if self.peptide_mode.get() == "Sequence" and paths:
+            peptide_runtime = {
+                "source": "Pepforge peptide structure builder",
+                "evidence_grade": "SEQUENCE_DERIVED_PEPTIDE_STRUCTURE",
+                "claim_guard": "Sequence-derived peptide coordinates are structural candidates, not experimental structures.",
+            }
+        return input_matrix_contract(
+            target_mode=self.target_mode.get(),
+            peptide_mode=self.peptide_mode.get(),
+            target_path=self._target_path(),
+            target_sequence=self.target_seq.get(),
+            peptide_path=self._peptide_pdb_path(),
+            peptide_sequence=self._peptide_metadata_sequence(),
+            target_runtime=target_runtime,
+            peptide_runtime=peptide_runtime,
+        )
+
+    def _input_provenance_df(self):
+        payload = self._input_contract_payload()
+        rows = [
+            {"item":"input_matrix", "value":payload.get("matrix", ""), "status":payload.get("status", ""), "note":payload.get("claim_guard", "")},
+        ]
+        for role in ("target", "peptide"):
+            part = payload.get(role, {}) or {}
+            rows.extend([
+                {"item":f"{role}_input_mode", "value":part.get("input_mode", ""), "status":part.get("readiness", ""), "note":part.get("source_kind", "")},
+                {"item":f"{role}_structure_source", "value":part.get("structure_source", ""), "status":part.get("evidence_grade", ""), "note":part.get("claim_guard", "")},
+                {"item":f"{role}_source_value", "value":part.get("source_value", ""), "status":"PROVENANCE", "note":"Recorded input value/path; never upgrades evidence grade."},
+            ])
+        return pd.DataFrame(rows, columns=["item", "value", "status", "note"])
+
+    def _feature_access_df(self):
+        return pd.DataFrame(feature_access_rows(), columns=["feature", "status", "tier", "note"])
+
+    def _refresh_access_panels(self):
+        try:
+            if hasattr(self, "input_provenance_tree"):
+                self._write_tree(self.input_provenance_tree, self._input_provenance_df())
+            if hasattr(self, "feature_access_tree"):
+                self._write_tree(self.feature_access_tree, self._feature_access_df())
+            if hasattr(self, "progress_history_tree"):
+                self._write_tree(self.progress_history_tree, self._progress_history_df().tail(100))
+        except Exception:
+            LOGGER.debug("Could not refresh access/provenance panels", exc_info=True)
     def _peptide_metadata_sequence(self):
         typed = canonical_peptide_notation(self.seq.get())
         # Preserve terminal notation from the text field even when a peptide PDB is loaded.
@@ -2583,13 +2725,15 @@ class DockingWorkbenchGUI(tk.Tk):
     def _update_mode_hint(self):
         tm, pm = self.target_mode.get(), self.peptide_mode.get()
         if tm == "Sequence" and pm == "PDB":
-            self.mode_hint.set("Mode: target sequence + peptide PDB = descriptors only until target coordinates are supplied")
+            self.mode_hint.set("Mode: target sequence + peptide PDB = local sequence-to-3D target preparation + docking")
         elif tm == "Sequence":
-            self.mode_hint.set("Mode: sequence + sequence = descriptors only; target coordinates required for 3D screening")
+            self.mode_hint.set("Mode: sequence + sequence = local sequence-to-3D preparation for both partners + docking")
         elif pm == "PDB":
             self.mode_hint.set("Mode: target structure + peptide structure = direct contact analysis / local geometry screening")
         else:
             self.mode_hint.set("Mode: target structure + peptide sequence = Structure Builder + local rigid-body geometry screening")
+        if hasattr(self, "feature_access_tree"):
+            self._refresh_access_panels()
 
     def _clean_path_value(self, value):
         """Normalize a path pasted from Windows dialogs, quoted strings, or drag/drop."""
@@ -2671,15 +2815,41 @@ class DockingWorkbenchGUI(tk.Tk):
                 self.log.see("end")
             except Exception:
                 LOGGER.debug("Optional operation skipped", exc_info=True)
+        self._refresh_access_panels()
     def _make_tab(self, name):
-        fr = ttk.Frame(self.tabs, padding=6)
-        self.tabs.add(fr, text=name)
-        fr.columnconfigure(0, weight=1)
-        return fr
+        # RC9: every feature page is vertically scrollable. This prevents stacked
+        # result/analysis panels from being clipped or becoming unreachable after
+        # the window is resized or extra feature sections are exposed.
+        outer = ttk.Frame(self.tabs)
+        self.tabs.add(outer, text=name)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0)
+        ybar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=ybar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        ybar.grid(row=0, column=1, sticky="ns")
+        inner = ttk.Frame(canvas, padding=6)
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner._pepforge_scroll_content = True
+        def _sync_region(_event=None):
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except Exception:
+                pass
+        def _sync_width(event):
+            try:
+                canvas.itemconfigure(window_id, width=max(1, int(event.width)))
+                _sync_region()
+            except Exception:
+                pass
+        inner.bind("<Configure>", _sync_region)
+        canvas.bind("<Configure>", _sync_width)
+        return inner
 
     def _tree_panel(self, parent, title, cols, height=8):
         box = ttk.LabelFrame(parent, text=title, padding=4)
-        box.pack(fill="both", expand=True, pady=3)
+        box.pack(fill="both", expand=not bool(getattr(parent, "_pepforge_scroll_content", False)), pady=3)
         box.rowconfigure(0, weight=1)
         box.columnconfigure(0, weight=1)
         tr = ttk.Treeview(box, columns=cols, show="headings", height=height)
@@ -2723,7 +2893,7 @@ class DockingWorkbenchGUI(tk.Tk):
 
     def _text_panel(self, parent, title, height=8):
         box = ttk.LabelFrame(parent, text=title, padding=4)
-        box.pack(fill="both", expand=True, pady=3)
+        box.pack(fill="both", expand=not bool(getattr(parent, "_pepforge_scroll_content", False)), pady=3)
         txt = tk.Text(box, wrap="word", height=height)
         txt.pack(fill="both", expand=True)
         return txt
@@ -2747,9 +2917,19 @@ class DockingWorkbenchGUI(tk.Tk):
         if getattr(self,"advanced_input_visible",False):
             frame.grid_remove(); self.advanced_input_visible=False
             self.advanced_input_toggle.configure(text="Show advanced input")
+            try:
+                self._input_canvas.yview_moveto(0.0)
+                self._input_canvas.configure(scrollregion=self._input_canvas.bbox("all"))
+            except Exception: pass
         else:
             frame.grid(); self.advanced_input_visible=True
             self.advanced_input_toggle.configure(text="Hide advanced input")
+            try:
+                # The viewport remains fixed; all newly exposed controls remain
+                # reachable through the input scrollbars without shrinking the
+                # results notebook or hiding command buttons.
+                self._input_canvas.configure(scrollregion=self._input_canvas.bbox("all"))
+            except Exception: pass
 
     def toggle_input_panel(self):
         """Collapse/expand the large Input block so Target summary and result panes remain visible."""
@@ -2795,7 +2975,7 @@ class DockingWorkbenchGUI(tk.Tk):
             {"engine_style":"Pepforge","metric":"local_geometry_candidates","value":len(poses) if isinstance(poses,pd.DataFrame) else 0,"unit":"count","interpretation":"Rigid-body geometry candidates generated from supplied target coordinates and peptide coordinates.","external_equivalent":"Not equivalent to Vina/Glide/HADDOCK scoring."},
             {"engine_style":"Pepforge","metric":"displayed_centroid_contacts","value":len(contacts) if isinstance(contacts,pd.DataFrame) else 0,"unit":"rows","interpretation":"Residue/token-centroid proximity rows.","external_equivalent":"Inspect atom-level/external docking contacts for quantitative interpretation."},
             {"engine_style":"External docking/affinity","metric":"import_status","value":"loaded" if isinstance(ext,pd.DataFrame) and not ext.empty else "not loaded","unit":"-","interpretation":"External ΔG/Kd/docking scores are shown only when imported from a user-supplied result.","external_equivalent":"Vina/PRODIGY/MM-PBSA/experiment as supplied by the user."},
-            {"engine_style":"External molecular dynamics","metric":"import_status","value":"loaded" if isinstance(md_ext,pd.DataFrame) and not md_ext.empty else "not loaded","unit":"-","interpretation":"Pepforge does not generate MD trajectories internally.","external_equivalent":"GROMACS/OpenMM/NAMD/AMBER output import."},
+            {"engine_style":"External molecular dynamics (optional validation)","metric":"import_status","value":"loaded" if isinstance(md_ext,pd.DataFrame) and not md_ext.empty else "not loaded","unit":"-","interpretation":"This Docking Workbench import route reads external MD results. Pepforge V5 PSB can separately run an installed OpenMM backend and then analyze its generated trajectories.","external_equivalent":"GROMACS/OpenMM/NAMD/AMBER output import or V5 PSB OpenMM output."},
             {"engine_style":"External validation","metric":"recommended_next_step","value":"export/import","unit":"workflow","interpretation":"Export coordinates and run the appropriate validated external tool before quantitative binding or stability claims.","external_equivalent":"Method chosen by the user/research protocol."},
         ]
         return pd.DataFrame(rows, columns=["engine_style","metric","value","unit","interpretation","external_equivalent"])
@@ -3390,6 +3570,8 @@ class DockingWorkbenchGUI(tk.Tk):
             "terminal_modifier_policy": terminal_modifier_policy_df(active_peptide_seq),
             "all_atom_parameter_requirements": all_atom_parameter_requirements_df(active_peptide_seq),
             "docking_pose_candidates": getattr(self, "poses", pd.DataFrame()),
+            "docking_result_contract_poses": (getattr(self, "normalized_docking_result", {}) or {}).get("poses", pd.DataFrame()),
+            "docking_result_contract_evidence": (getattr(self, "normalized_docking_result", {}) or {}).get("evidence", pd.DataFrame()),
             "docking_residue_contact_report": getattr(self, "contacts", pd.DataFrame()),
             "docking_residue_contact_report_full": getattr(self, "all_contacts", getattr(self, "contacts", pd.DataFrame())),
             "docking_atom_contact_report": getattr(self, "atom_contacts", pd.DataFrame()),
@@ -3400,11 +3582,17 @@ class DockingWorkbenchGUI(tk.Tk):
             "external_style_validation_summary": self._external_style_validation_df(),
             "simulation_summary": simulation_summary_df(getattr(self, "poses", pd.DataFrame()), getattr(self, "contacts", pd.DataFrame()), getattr(self, "risk", pd.DataFrame())),
             "molecular_dynamics_status": getattr(self, "md_summary", pd.DataFrame()),
+            "native_trajectory_frames": getattr(self, "md_frames", pd.DataFrame()),
+            "native_followup_selected_pose": pd.DataFrame([((getattr(self,"native_followup_result",{}) or {}).get("selected_pose") or {})]) if getattr(self,"native_followup_result",None) else pd.DataFrame(),
             "md_result_import_summary": getattr(self, "md_result_import", pd.DataFrame()),
             "peptide_risk_summary": getattr(self, "risk", pd.DataFrame()),
             "docking_readiness": getattr(self, "readiness", pd.DataFrame()),
             "result_interpretation": self._interpretation_df() if hasattr(self, "_interpretation_df") else pd.DataFrame(),
             "initial_complex_builder": getattr(self, "complex_builder_report", pd.DataFrame()),
+            "input_matrix_provenance": self._input_provenance_df(),
+            "feature_access_status": self._feature_access_df(),
+            "progress_history": self._progress_history_df(),
+            "last_failure_summary": pd.DataFrame([getattr(self, "_last_failure_summary", {})]) if getattr(self, "_last_failure_summary", {}) else pd.DataFrame(),
         }
         return tables
 
@@ -3412,9 +3600,9 @@ class DockingWorkbenchGUI(tk.Tk):
         """Open a resizable full-data window, similar to SPPS Planner *full buttons."""
         group = str(group or "results").lower()
         groups = {
-            "input": ["peptide_properties", "terminal_state", "target_structure_summary", "target_preparation_report", "binding_site_selector_report", "rcsb_pdb_search_results", "sequence_pair_heuristic", "workflow", "modified_residue_compatibility", "terminal_modifier_policy", "all_atom_parameter_requirements"],
-            "results": ["result_interpretation", "docking_pose_candidates", "screening_evidence_summary", "external_result_import_summary", "external_style_validation_summary", "peptide_risk_summary", "docking_readiness", "simulation_summary", "docking_residue_contact_report", "docking_residue_contact_report_full", "docking_atom_contact_report", "docking_specific_interaction_evidence", "interaction_evidence_profiles"],
-            "md": ["external_style_validation_summary", "molecular_dynamics_status", "md_result_import_summary"],
+            "input": ["input_matrix_provenance", "feature_access_status", "peptide_properties", "terminal_state", "target_structure_summary", "target_preparation_report", "binding_site_selector_report", "rcsb_pdb_search_results", "sequence_pair_heuristic", "workflow", "modified_residue_compatibility", "terminal_modifier_policy", "all_atom_parameter_requirements"],
+            "results": ["result_interpretation", "docking_pose_candidates", "docking_result_contract_poses", "docking_result_contract_evidence", "screening_evidence_summary", "external_result_import_summary", "external_style_validation_summary", "peptide_risk_summary", "docking_readiness", "simulation_summary", "docking_residue_contact_report", "docking_residue_contact_report_full", "docking_atom_contact_report", "docking_specific_interaction_evidence", "interaction_evidence_profiles"],
+            "md": ["molecular_dynamics_status", "native_trajectory_frames", "native_followup_selected_pose", "external_style_validation_summary", "md_result_import_summary"],
         }
         tables = self._all_docking_data_tables()
         names = groups.get(group, groups["results"])
@@ -3513,6 +3701,21 @@ class DockingWorkbenchGUI(tk.Tk):
                 self.log.see("end")
             except Exception as exc:
                 LOGGER.debug("Could not write validation failure to UI log: %s", exc)
+            self._last_failure_summary = {
+                "stage": "input validation",
+                "error_type": "INPUT_VALIDATION",
+                "error": " | ".join(reasons),
+                "diagnostic_log": "",
+                "recovery": "Correct the listed input fields. All four input modes remain visible and selectable.",
+            }
+            try:
+                rows = [{"item":"stage", "value":"input validation", "note":"Run did not start because required input was missing/invalid."}]
+                rows.extend({"item":f"reason_{i+1}", "value":reason, "note":"Correct this item and rerun; the feature is not hidden."} for i, reason in enumerate(reasons))
+                if hasattr(self, "failure_tree"):
+                    self._write_tree(self.failure_tree, pd.DataFrame(rows))
+            except Exception:
+                LOGGER.debug("Could not update validation guidance", exc_info=True)
+            self._refresh_access_panels()
             messagebox.showerror("Docking input check failed", "\n".join("- "+r for r in reasons))
             return False
         try:
@@ -3594,6 +3797,7 @@ class DockingWorkbenchGUI(tk.Tk):
                 self.collapse_input_panel()
             except Exception:
                 LOGGER.debug("Could not adjust analysis view", exc_info=True)
+            self._refresh_access_panels()
             self._set_progress(100, "Analysis complete")
             self.log.insert("end","Input analysis updated. No target/peptide 3D coordinates were fabricated during Analyze.\n")
             self.log.see("end")
@@ -3601,6 +3805,50 @@ class DockingWorkbenchGUI(tk.Tk):
             messagebox.showerror("Docking Workbench analysis error", str(exc))
             raise
 
+
+    def _prepare_sequence_target_structure(self, sequence: str) -> dict:
+        """Prepare local 3D coordinates for a sequence target without network access.
+
+        Auto-local policy prefers a locally cached ESMFold model when available;
+        it never downloads weights here. If unavailable/failing, Pepforge's native
+        sequence-derived builder provides an explicitly experimental fallback so
+        all four Docking Workbench input combinations remain executable.
+        """
+        seq = re.sub(r"\s+", "", str(sequence or "").upper())
+        if not seq:
+            raise ValueError("Target sequence is empty.")
+        cache_root = self._output_base_dir() / "_screening_cache"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        cache_dir = Path(tempfile.mkdtemp(prefix="target_sequence_", dir=str(cache_root)))
+        policy = str(getattr(self, "target_sequence_source", tk.StringVar(value="Auto local")).get() or "Auto local")
+        attempts=[]
+        if policy in {"Auto local", "Local ESMFold"}:
+            pred = run_esmfold_prediction(seq, cache_dir / "esmfold", local_files_only=True)
+            attempts.append({"source":"Local ESMFold","status":pred.get("status"),"pdb":pred.get("pdb"),"error":pred.get("error")})
+            if pred.get("status") == "COMPLETED" and pred.get("pdb"):
+                return {
+                    "status":"COMPLETED","path":str(pred["pdb"]),"source":"Local ESMFold",
+                    "evidence_grade":"PREDICTED_LOCAL_MODEL","attempts":attempts,
+                    "claim_guard":"Sequence-derived predicted coordinates are not experimental structure evidence.",
+                }
+            if policy == "Local ESMFold":
+                raise RuntimeError("Local ESMFold was requested but no local prediction could be completed. " + str(pred.get("error") or pred.get("status")))
+        # Native fallback is deliberately provenance-labeled. RDKit enhancement is
+        # used only for modest sequence lengths to avoid excessive cost on proteins.
+        native = build_quality_preserving_peptide(
+            seq, cache_dir / "native_target", chain="A", enable_rdkit=(len(seq) <= 80)
+        )
+        preferred = dict(native.get("preferred_structure") or {})
+        pdb_path = str(preferred.get("pdb") or native.get("native",{}).get("pdb") or "")
+        if not pdb_path or not Path(pdb_path).exists():
+            raise RuntimeError("Pepforge native target structure preparation did not produce a PDB file.")
+        attempts.append({"source":"Pepforge Native","status":"COMPLETED","pdb":pdb_path})
+        return {
+            "status":"COMPLETED","path":pdb_path,"source":"Pepforge Native",
+            "evidence_grade":"EXPERIMENTAL_SEQUENCE_DERIVED_GEOMETRY","attempts":attempts,
+            "quality_arbitration":native.get("quality_arbitration"),
+            "claim_guard":"Native sequence-derived target geometry enables offline screening but is not a validated folded protein structure. Prefer experimental PDB or a validated local predictor for scientific conclusions.",
+        }
 
     def _active_target_atoms_for_docking(self):
         """Return only coordinate-derived target atoms; sequence-only targets return empty."""
@@ -3611,13 +3859,78 @@ class DockingWorkbenchGUI(tk.Tk):
         return pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"])
 
 
+    def _native_docking_config(self) -> NativeDockingConfig:
+        preset = str(getattr(self, "native_search_preset", tk.StringVar(value="Standard")).get() or "Standard").strip().lower()
+        pose_count = max(1, min(25, int(getattr(self, "native_pose_count", tk.IntVar(value=5)).get() or 5)))
+        table = {
+            "fast": dict(anchor_count=8, rotations_per_anchor=10, max_candidates=180, local_refine_steps=1),
+            "standard": dict(anchor_count=12, rotations_per_anchor=18, max_candidates=500, local_refine_steps=2),
+            "deep": dict(anchor_count=20, rotations_per_anchor=30, max_candidates=1000, local_refine_steps=3),
+        }
+        kw = table.get(preset, table["standard"])
+        return NativeDockingConfig(mode="blind", poses=pose_count, **kw)
+
+    def _run_native_workbench_docking(self, resolved: dict, peptide_pdb: str) -> dict:
+        """Run Pepforge Native Docking and adapt it to Workbench tables.
+
+        PDB/mmCIF and sequence-derived inputs are normalized to local PDB files
+        before docking.  No network access or external docking executable is used.
+        """
+        run_root = self._effective_outdir() / "native_docking"
+        run_root.mkdir(parents=True, exist_ok=True)
+
+        target_path = str(resolved.get("path") or "")
+        target_atoms = resolved.get("atoms")
+        if not target_path or Path(target_path).suffix.lower() != ".pdb":
+            if not isinstance(target_atoms, pd.DataFrame) or target_atoms.empty:
+                raise ValueError("Native Docking requires readable target coordinates.")
+            target_path = write_atoms_as_pdb(target_atoms, run_root / "normalized_target.pdb", default_chain="A")
+
+        pep_path = str(peptide_pdb or "")
+        if not pep_path:
+            raise ValueError("Native Docking requires peptide coordinates after input preparation.")
+        if Path(pep_path).suffix.lower() != ".pdb":
+            pep_atoms = parse_pdb_atoms(pep_path)
+            if pep_atoms is None or pep_atoms.empty:
+                raise ValueError("Peptide coordinate input could not be normalized for Native Docking.")
+            pep_path = write_atoms_as_pdb(pep_atoms, run_root / "normalized_peptide.pdb", default_chain="P")
+
+        cfg = self._native_docking_config()
+        raw = run_native_docking(target_path, pep_path, run_root / "engine", config=cfg)
+        normalized = normalize_native_docking_result(raw)
+        export_normalized_result(normalized, run_root / "normalized")
+        self.native_docking_result = raw
+        self.normalized_docking_result = normalized
+        self.poses = normalized_to_workbench_poses(normalized)
+        self.contacts = evidence_to_workbench_contacts(normalized.get("evidence"))
+        self.all_contacts = self.contacts.copy()
+        self.specific_interactions = normalized.get("evidence", pd.DataFrame()).copy()
+        if hasattr(self, "shared_native_result_panel"):
+            self.shared_native_result_panel.load_result(
+                normalized, source="Docking Workbench", output_dir=run_root
+            )
+        self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
+        self.peptide_posed_atoms = pd.DataFrame()
+
+        poses_contract = normalized.get("poses")
+        if isinstance(poses_contract, pd.DataFrame) and not poses_contract.empty:
+            top_pdb = str(poses_contract.iloc[0].get("pose_pdb") or "")
+            if top_pdb and Path(top_pdb).exists():
+                complex_atoms = parse_pdb_atoms(top_pdb)
+                if isinstance(complex_atoms, pd.DataFrame) and not complex_atoms.empty:
+                    # Native engine exports peptide as chain P.  This is only for
+                    # display/interface review; full interaction evidence already
+                    # comes from the engine's receptor/peptide frames.
+                    self.peptide_posed_atoms = complex_atoms[complex_atoms["chain"].astype(str).eq("P")].copy()
+        return normalized
+
     def run_full_workflow(self):
-        """Analyze and start 3D/contact screening; MD remains external-only."""
+        """Analyze and start docking; native mechanics/trajectory is a visible one-click follow-up."""
         self._set_progress(0, "Starting workflow...")
         self.analyze()
         self._set_progress(20, "Starting screening...")
         self.run_docking()
-        self.log.insert("end", "Workflow started: input analysis + geometry/contact screening. Molecular dynamics is external-only.\n")
+        self.log.insert("end", f"Workflow started: input analysis + {self.docking_engine.get()} docking/screening. Use the visible Native Mechanics + Trajectory button for offline post-docking follow-up; external validation remains separately provenance-labeled.\n")
         self.log.see("end")
 
 
@@ -3631,7 +3944,7 @@ class DockingWorkbenchGUI(tk.Tk):
             rows.append({"item":"3D screening","status":"Geometry candidates available","interpretation":f"Top candidate rank={best.get('pose_rank','')}; centroid contacts={best.get('contact_count','')}; overlap warnings={best.get('centroid_overlap_warnings','')}. No ΔG/Kd is inferred."})
         rows.append({"item":"Interface","status":"Centroid contacts available" if isinstance(contacts,pd.DataFrame) and not contacts.empty else "No centroid contacts","interpretation":"Residue/token-centroid proximity is a geometric screening descriptor, not a bond or affinity measurement."})
         rows.append({"item":"Atom-level contacts","status":"Available when both atomic structures are supplied","interpretation":"Hydrogen-bond distance candidates and other atom-level proximity labels require actual atomic coordinates."})
-        rows.append({"item":"Molecular dynamics","status":"External only","interpretation":"Run a validated external MD engine and import its results if dynamics are needed."})
+        rows.append({"item":"Molecular dynamics","status":"External only","interpretation":"Pepforge native mechanics/trajectory is available for offline descriptive follow-up; use a validated external MD engine only when production-MD claims are required."})
         return pd.DataFrame(rows, columns=["item","status","interpretation"])
 
 
@@ -3674,7 +3987,7 @@ class DockingWorkbenchGUI(tk.Tk):
         self._set_screening_busy(True)
         self._set_progress(2, "Screening requested...")
         try:
-            self.log.insert("end", "Run Screening requested.\n")
+            self.log.insert("end", f"Run Docking / Screening requested. Engine={self.docking_engine.get()}\n")
             self.log.see("end")
         except Exception as exc:
             LOGGER.debug("Could not write screening start log: %s", exc)
@@ -3710,8 +4023,31 @@ class DockingWorkbenchGUI(tk.Tk):
                 active_peptide_seq, self._target_path(), self._peptide_pdb_path()
             )
 
-            # Sequence-only target: descriptors only. No invented protein geometry.
+            # RC9 input matrix: all four combinations (PDB/PDB, PDB/Sequence,
+            # Sequence/PDB, Sequence/Sequence) enter the same coordinate workflow.
+            # Sequence targets are prepared locally with explicit provenance.
             if resolved.get("mode") != "PDB":
+                stage = "sequence target 3D preparation"
+                self._set_progress(24, "Preparing local 3D coordinates for target sequence...")
+                prepared_target = self._prepare_sequence_target_structure(active_target_seq)
+                prepared_path = str(prepared_target.get("path") or "")
+                prepared_atoms = parse_pdb_atoms(prepared_path)
+                if prepared_atoms is None or prepared_atoms.empty:
+                    raise ValueError("Sequence target preparation produced no readable coordinate atoms.")
+                resolved = {
+                    **resolved, "mode":"PDB", "path":prepared_path, "atoms":prepared_atoms,
+                    "sequence":active_target_seq, "sequence_input":True,
+                    "structure_source":prepared_target.get("source"),
+                    "evidence_grade":prepared_target.get("evidence_grade"),
+                    "claim_guard":prepared_target.get("claim_guard"),
+                }
+                self._runtime_sequence_target = prepared_target
+                self._refresh_access_panels()
+
+            # Legacy descriptor-only branch is retained as unreachable defensive
+            # documentation; RC9 converts valid sequence targets to a local 3D
+            # structure above before entering the common docking path.
+            if False and resolved.get("mode") != "PDB":
                 stage = "sequence-only descriptor analysis"
                 self._set_progress(45, "Sequence-only mode: no 3D target fabricated")
                 self.target_atoms = pd.DataFrame(columns=["record","atom","resn","chain","resi","x","y","z","element","aa"])
@@ -3731,14 +4067,21 @@ class DockingWorkbenchGUI(tk.Tk):
             else:
                 stage = "target coordinate preparation"
                 self._set_progress(28, "Loading target coordinates...")
-                self.target_atoms = self._active_target_atoms_for_docking()
+                atoms = resolved.get("atoms")
+                self.target_atoms = atoms if isinstance(atoms, pd.DataFrame) and not atoms.empty else parse_pdb_atoms(resolved.get("path") or self._target_path())
                 if self.target_atoms is None or self.target_atoms.empty:
-                    raise ValueError("Target PDB/mmCIF contained no valid coordinate atoms. Invalid coordinate rows are not replaced with (0,0,0).")
+                    raise ValueError("Target structure contained no valid coordinate atoms. Invalid coordinate rows are not replaced with (0,0,0).")
                 self.pdb = pdb_summary_df(resolved.get("path") or self._target_path())
-                self.seqpair = pd.DataFrame([{"metric":"mode","value":"coordinate_target","note":"3D screening uses supplied target coordinates."}])
+                target_note = "3D screening uses sequence-derived local coordinates." if resolved.get("sequence_input") else "3D screening uses supplied target coordinates."
+                self.seqpair = pd.DataFrame([
+                    {"metric":"mode","value":"coordinate_target","note":target_note},
+                    {"metric":"target_structure_source","value":resolved.get("structure_source") or "PDB/mmCIF","note":resolved.get("claim_guard") or "Coordinate provenance recorded."},
+                    {"metric":"target_evidence_grade","value":resolved.get("evidence_grade") or "SUPPLIED_STRUCTURE","note":"Sequence-derived coordinates remain distinguished from experimental structures."},
+                ])
 
                 stage = "peptide coordinate preparation"
                 self._set_progress(40, "Preparing peptide coordinates...")
+                engine = str(getattr(self, "docking_engine", tk.StringVar(value="Pepforge Native")).get() or "Pepforge Native")
                 complex_mode = (
                     self.peptide_mode.get() == "PDB"
                     and not (self._peptide_pdb_path() and Path(self._peptide_pdb_path()).exists())
@@ -3759,7 +4102,7 @@ class DockingWorkbenchGUI(tk.Tk):
                         self.peptide_source_pdb = str(pp)
                         self.peptide_structure_paths = {"pdb": str(pp)}
                     else:
-                        cache_root = self._default_outdir() / "_screening_cache"
+                        cache_root = self._output_base_dir() / "_screening_cache"
                         cache_root.mkdir(parents=True, exist_ok=True)
                         cache_dir = Path(tempfile.mkdtemp(prefix="peptide_", dir=str(cache_root)))
                         self.peptide_model, self.peptide_structure_paths = build_peptide_structure_bundle(
@@ -3767,24 +4110,36 @@ class DockingWorkbenchGUI(tk.Tk):
                         )
                         self.peptide_source_pdb = str(self.peptide_structure_paths["pdb"])
                         pep_points = self.peptide_model
+                        self._refresh_access_panels()
 
-                    stage = "geometry/contact screening"
-                    self._set_progress(55, "Screening rigid-body geometry/contact candidates...")
-                    if self.peptide_mode.get() == "PDB":
-                        direct_poses, direct_contacts = analyze_pdb_pdb_contacts(self._target_path(), self._peptide_pdb_path())
-                        if not direct_poses.empty and int(float(direct_poses.iloc[0].get("contact_count",0) or 0)) > 0:
-                            self.poses, self.contacts = direct_poses, direct_contacts
-                            self.atom_contacts = analyze_atom_level_contacts(self._target_path(), self._peptide_pdb_path())
+                    stage = "docking / geometry screening"
+                    if engine == "Pepforge Native" and not complex_mode:
+                        self._set_progress(55, "Running Pepforge Native Docking...")
+                        normalized = self._run_native_workbench_docking(resolved, self.peptide_source_pdb)
+                        self.peptide_model = pep_points
+                        self.log.insert("end", f"Pepforge Native Docking completed: status={normalized.get('status')} poses={len(self.poses)}\n")
+                        self.log.see("end")
+                    else:
+                        self._set_progress(55, "Running legacy geometry/contact screening...")
+                        if complex_mode:
+                            # A single multi-chain complex is a direct-contact
+                            # review mode, not a native redocking request.
+                            self.poses, self.contacts, self.atom_contacts, self.peptide_model = analyze_complex_structure_contacts(resolved.get("path"))
+                        elif self.peptide_mode.get() == "PDB":
+                            direct_poses, direct_contacts = analyze_pdb_pdb_contacts(resolved.get("path") or self._target_path(), self._peptide_pdb_path())
+                            if not direct_poses.empty and int(float(direct_poses.iloc[0].get("contact_count",0) or 0)) > 0:
+                                self.poses, self.contacts = direct_poses, direct_contacts
+                                self.atom_contacts = analyze_atom_level_contacts(resolved.get("path") or self._target_path(), self._peptide_pdb_path())
+                            else:
+                                self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, pep_points, active_peptide_seq)
+                                self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
                         else:
                             self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, pep_points, active_peptide_seq)
                             self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
-                    else:
-                        self.poses, self.contacts, self.peptide_model = run_pose_search(self.target_atoms, pep_points, active_peptide_seq)
-                        self.atom_contacts = pd.DataFrame(columns=_atom_contact_columns())
 
                     # When local pose search was used, apply the exact recorded rigid-body
                     # transform to the actual peptide atomic coordinates and analyze those.
-                    if (self.atom_contacts is None or self.atom_contacts.empty) and isinstance(self.poses,pd.DataFrame) and not self.poses.empty and getattr(self,"peptide_source_pdb",""):
+                    if engine != "Pepforge Native" and (self.atom_contacts is None or self.atom_contacts.empty) and isinstance(self.poses,pd.DataFrame) and not self.poses.empty and getattr(self,"peptide_source_pdb",""):
                         source_atoms=parse_pdb_atoms(self.peptide_source_pdb)
                         meta_path=(getattr(self, "peptide_structure_paths", {}) or {}).get("json")
                         source_atoms=annotate_peptide_atoms_from_structure_metadata(source_atoms, meta_path)
@@ -3792,10 +4147,19 @@ class DockingWorkbenchGUI(tk.Tk):
                             self.peptide_posed_atoms=apply_pose_transform_to_atoms(source_atoms,self.poses.iloc[0])
                             self.atom_contacts=analyze_atom_level_contact_frames(self.target_atoms,self.peptide_posed_atoms)
 
-                # Specific interaction evidence is a geometry-aware review layer,
-                # kept separate from the legacy coarse screening labels for backward compatibility.
-                self.specific_interactions = pd.DataFrame()
+                # Specific interaction evidence is a geometry-aware review layer.
+                # Native Docking already exports the exact evidence used by its
+                # score; preserve it instead of recalculating against an unrelated
+                # unposed peptide structure. Legacy/direct modes calculate here.
+                if engine != "Pepforge Native" or complex_mode:
+                    self.specific_interactions = pd.DataFrame()
                 try:
+                    if engine == "Pepforge Native" and not complex_mode:
+                        self.interface_quality_evidence = {
+                            "status":"native_evidence_available",
+                            "reason":"Pepforge Native Docking interaction evidence is preserved from the selected poses.",
+                        }
+                        raise StopIteration
                     evidence_target = pd.DataFrame()
                     evidence_peptide = pd.DataFrame()
                     if complex_mode and resolved.get("path"):
@@ -3814,6 +4178,8 @@ class DockingWorkbenchGUI(tk.Tk):
                         self.interface_quality_evidence = interface_quality_evidence(
                             evidence_target, evidence_peptide, interaction_profile="CONSERVATIVE_MANUAL"
                         )
+                except StopIteration:
+                    pass
                 except Exception:
                     LOGGER.exception("Specific interaction evidence analysis failed; coarse screening remains available")
                     self.specific_interactions = pd.DataFrame()
@@ -3855,6 +4221,10 @@ class DockingWorkbenchGUI(tk.Tk):
                         break
             except Exception:
                 LOGGER.debug("Could not switch to Results tab", exc_info=True)
+            self._last_failure_summary = {}
+            if hasattr(self, "failure_tree"):
+                self._write_tree(self.failure_tree, pd.DataFrame([{"item":"status","value":"No current failure","note":"Last screening completed successfully."}]))
+            self._refresh_access_panels()
             self._set_progress(100, completion_text)
             self.log.insert("end", completion_text + ".\n")
             self.log.see("end")
@@ -3865,7 +4235,26 @@ class DockingWorkbenchGUI(tk.Tk):
                 log_path = self._screening_failure_log(stage, exc)
             except Exception:
                 log_path = None
+            self._last_failure_summary = {
+                "stage": stage,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "diagnostic_log": str(log_path or ""),
+                "recovery": "Correct the reported input/resource problem and rerun. The feature remains visible; unavailable optional resources do not hide the workflow.",
+            }
             self._set_progress(0, f"Screening failed: {stage}")
+            try:
+                failure_rows = pd.DataFrame([
+                    {"item":"stage", "value":stage, "note":"Last failing workflow stage"},
+                    {"item":"error", "value":f"{type(exc).__name__}: {exc}", "note":"Exact failure; not replaced with a fabricated success state"},
+                    {"item":"diagnostic_log", "value":str(log_path or ""), "note":"Open this file for traceback details"},
+                    {"item":"recovery", "value":"Fix input/resource and rerun", "note":"Feature remains visible and accessible."},
+                ])
+                if hasattr(self, "failure_tree"):
+                    self._write_tree(self.failure_tree, failure_rows)
+            except Exception:
+                LOGGER.debug("Could not update failure guidance", exc_info=True)
+            self._refresh_access_panels()
             LOGGER.exception("Docking screening failed at stage %s", stage)
             detail = f"Screening failed during: {stage}\n\n{type(exc).__name__}: {exc}"
             if log_path:
@@ -3885,22 +4274,75 @@ class DockingWorkbenchGUI(tk.Tk):
         return pd.DataFrame(columns=["frame","time_ps","rmsd_A","contacts","clashes","min_distance_A","interpretation"])
 
 
-    def run_md_lite(self):
-        """Compatibility action directing the user to external molecular dynamics."""
-        self.md_summary = pd.DataFrame([{
-            "metric":"molecular_dynamics", "value":"not run internally",
-            "note":"Pepforge exports starting structures/templates only. Run GROMACS/OpenMM/NAMD externally and import the resulting RMSD/RMSF/energy/contact data."
-        }])
-        self.md_frames = pd.DataFrame(columns=self.md_tree["columns"])
-        self._write_tree(self.sim_tree, self._md_readable_summary(self.md_summary))
-        self._write_tree(self.md_tree, self._md_readable_frames(self.md_frames))
-        self._set_progress(100, "External MD preparation only")
+    def run_native_followup(self):
+        return self._run_native_followup_for_pose(None)
+
+    def run_native_followup_for_pose(self, pose_id):
+        return self._run_native_followup_for_pose(pose_id)
+
+    def _run_native_followup_for_pose(self, pose_id=None):
+        """Run native mechanics + descriptive trajectory analysis from the best usable native docking pose."""
         try:
-            self.log.insert("end", "Pepforge does not run internal molecular dynamics. Use Export for external MD preparation/import.\n")
-            self.log.see("end")
-        except Exception:
-            LOGGER.debug("Could not update MD guidance log", exc_info=True)
-        return self.md_summary
+            self._set_progress(3, "Preparing native follow-up...")
+            if not self._screening_results_are_current() or not isinstance(getattr(self, "normalized_docking_result", None), dict):
+                self._set_progress(8, "Native docking required before follow-up...")
+                if not self._run_docking_guarded():
+                    return None
+            normalized=getattr(self,"normalized_docking_result",None)
+            if not isinstance(normalized,dict) or not isinstance(normalized.get("poses"),pd.DataFrame) or normalized.get("poses").empty:
+                raise ValueError("Native docking result contract is unavailable. Select Pepforge Native docking and run docking first.")
+            steps=max(20,min(20000,int(getattr(self,"native_mechanics_steps",tk.IntVar(value=400)).get() or 400)))
+            freeze=bool(getattr(self,"native_freeze_receptor",tk.BooleanVar(value=True)).get())
+            cfg=NativeMechanicsV2Config(steps=steps,save_every=max(1,steps//10),freeze_receptor=freeze,peptide_chain="P")
+            self._set_progress(70, "Running native mechanics + trajectory analysis...")
+            follow_name = "native_followup" if not pose_id else f"native_followup_{str(pose_id).replace(':','_').replace('/','_')}"
+            payload=run_native_docking_followup(normalized,
+                self._effective_outdir()/follow_name, mechanics_config=cfg, pose_id=pose_id
+            )
+            self.native_followup_result=payload
+            try:
+                self.md_summary=pd.read_csv(payload.get("summary_csv"))
+            except Exception:
+                self.md_summary=pd.DataFrame()
+            try:
+                self.md_frames=pd.read_csv(payload.get("frames_csv"))
+            except Exception:
+                self.md_frames=pd.DataFrame()
+            self._write_tree(self.sim_tree,self.md_summary)
+            self._write_tree(self.md_tree,self.md_frames)
+            if hasattr(self, "shared_native_result_panel"):
+                follow_item = dict(payload)
+                follow_item["frames"] = self.md_frames
+                self.shared_native_result_panel.load_result(
+                    getattr(self, "normalized_docking_result", None),
+                    followups=[follow_item],
+                    source="Docking Workbench",
+                    output_dir=self._effective_outdir(),
+                )
+            self._set_progress(100, "Native mechanics + trajectory completed")
+            try:
+                sel=(payload.get("selected_pose") or {}).get("pose_id","")
+                self.log.insert("end",f"Native follow-up completed from {sel}. Results are experimental mechanics/descriptive trajectory evidence, not production MD.\n")
+                self.log.see("end")
+            except Exception:
+                LOGGER.debug("Could not update follow-up log",exc_info=True)
+            return payload
+        except Exception as exc:
+            self._last_failure_summary={
+                "stage":"native mechanics / trajectory follow-up",
+                "error_type":type(exc).__name__,
+                "error":str(exc),
+                "diagnostic_log":"",
+                "recovery":"Run Pepforge Native docking first and ensure at least one PASS/WARN pose PDB exists.",
+            }
+            self._refresh_access_panels()
+            self._set_progress(0,"Native follow-up failed")
+            messagebox.showerror("Native follow-up failed",f"{type(exc).__name__}: {exc}")
+            return None
+
+    def run_md_lite(self):
+        """Compatibility alias for the native mechanics/trajectory follow-up."""
+        return self.run_native_followup()
 
 
     def export(self):
@@ -3928,10 +4370,12 @@ class DockingWorkbenchGUI(tk.Tk):
         self.screening_evidence=screening_evidence_df(getattr(self,"poses",pd.DataFrame()), getattr(self,"contacts",pd.DataFrame()))
         external_results=getattr(self,"imported_results",pd.DataFrame())
         md_import=getattr(self,"md_result_import",pd.DataFrame())
-        md_status=pd.DataFrame([{
-            "metric":"molecular_dynamics","value":"not run internally",
-            "note":"Pepforge exports structures/templates and imports results from validated external MD engines."
-        }])
+        md_status=getattr(self,"md_summary",pd.DataFrame())
+        if not isinstance(md_status,pd.DataFrame) or md_status.empty:
+            md_status=pd.DataFrame([{
+                "metric":"native_mechanics_followup","value":"not run",
+                "unit":"-","interpretation":"Run Native Mechanics + Trajectory after Pepforge Native docking. This is experimental mechanics/descriptive trajectory analysis, not production MD."
+            }])
         tables={
             "peptide_properties":getattr(self,"props",pd.DataFrame()),
             "target_structure_summary":getattr(self,"pdb",pd.DataFrame()),
@@ -3960,10 +4404,15 @@ class DockingWorkbenchGUI(tk.Tk):
             "external_validation_status":self._external_style_validation_df(),
             "screening_summary":simulation_summary_df(getattr(self,"poses",pd.DataFrame()),getattr(self,"contacts",pd.DataFrame()),getattr(self,"risk",pd.DataFrame())),
             "molecular_dynamics_status":md_status,
+            "native_trajectory_frames":getattr(self,"md_frames",pd.DataFrame()),
+            "native_followup_selected_pose":pd.DataFrame([((getattr(self,"native_followup_result",{}) or {}).get("selected_pose") or {})]) if getattr(self,"native_followup_result",None) else pd.DataFrame(),
             "amphipathic_windows":amphipathic_window_df(self.seq.get()),
             "rcsb_pdb_search_results":getattr(self,"rcsb_results",pd.DataFrame()),
             "target_preparation_report":getattr(self,"target_prep_report",pd.DataFrame()),
             "complex_builder_report":getattr(self,"complex_builder_report",pd.DataFrame()),
+            "input_matrix_provenance":self._input_provenance_df(),
+            "feature_access_status":self._feature_access_df(),
+            "run_progress_history":self._progress_history_df(),
         }
         for name,df in tables.items():
             if not isinstance(df,pd.DataFrame): df=pd.DataFrame(df)

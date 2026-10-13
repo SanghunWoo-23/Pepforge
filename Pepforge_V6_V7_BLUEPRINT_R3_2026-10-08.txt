@@ -1,0 +1,56 @@
+Pepforge V6 → V7 Development Blueprint
+
+Baseline: Pepforge V5.0.0 FINAL — UI Polish R3
+
+V6 — Scientific Engine Upgrade
+
+Goal: preserve the V5 workflow while improving measurable docking/search/ranking accuracy, confidence, modified-chemistry support, and compute efficiency.
+
+Workstreams
+1. Benchmark Protocol V2 — sequence/family controlled splits, blind holdout, redocking/unbound separation, CI and failure taxonomy.
+2. Native Search V2 — coarse-to-fine, hotspot guidance, adaptive budgets, interface-aware refinement, hard-negative mining.
+3. Scoring V2 — explicit component features and provenance.
+4. Ranker V2 — pairwise/listwise ranking with sequence, graph, structure, pose, interaction and trajectory descriptors.
+5. Uncertainty/OOD — confidence, disagreement and unsupported-domain warnings.
+6. Multi-backend consensus — optional external docking evidence without replacing the Pepforge source-of-truth workflow.
+7. Modified-residue parameter registry — atom typing, charge, topology, provenance and validation levels.
+8. GPU/parallel execution — batched scoring and reproducible benchmark execution.
+9. Production-MD handoff — parameter-gated OpenMM/GROMACS integration distinct from Native Mechanics.
+
+V6 promotion gate
+- V5 regressions preserved.
+- Independent holdout benchmark established.
+- Search/Scoring V2 improvement measured.
+- Ranker V2 externally validated.
+- Uncertainty/OOD behavior validated.
+- Modified-chemistry unsupported states fail safely.
+- Fresh Windows package verified.
+
+---
+
+V7 — Native Generative Intelligence
+
+Goal: add target-conditioned generative design only after V6 establishes a validated accuracy baseline.
+
+Workstreams
+1. Target-conditioned peptide generation.
+2. Native coordinate/conformer generator.
+3. Learned docking pose proposal with physics-aware refinement.
+4. Joint Sequence–Ensemble–Target–Pose–Trajectory ranker.
+5. Physics–AI hybrid validation gates.
+6. Opt-in active learning with provenance-controlled experiment feedback.
+7. Fully offline inference/model pack with hashes, licenses and reproducibility metadata.
+
+V7 promotion gate
+- Independent benchmark improvement over V6.
+- Generative quality validation, not novelty alone.
+- Calibrated uncertainty/OOD.
+- Chemistry and synthesis safety gates.
+- Reproducible offline inference.
+- Clear model/data provenance.
+
+---
+
+V8+
+
+Do not freeze the scope yet. Decide only after V6/V7 benchmark evidence.

@@ -41,6 +41,7 @@ import csv
 import os
 
 from peptiforg_core.design_intent import normalize_design_intent
+from peptiforg_core.pfee_v1 import pfee_search_plan, build_candidate_pool, diversify_ranked_representatives, adaptive_sampling_request
 
 from peptiforg_core.peptide_conformation import (
     analyze_conformer_ensemble, canonical_l_helix_evidence, EVIDENCE_REFERENCES,
@@ -1400,6 +1401,39 @@ def _append_conformers_until(
     return new_ids, attempts
 
 
+def _append_diversity_conformers(
+    mol,
+    requested: int,
+    seed: int,
+    num_threads: int,
+    round_index: int,
+    warnings: List[str],
+) -> List[int]:
+    """Append a real ETKDG batch for PFEE adaptive diversity search."""
+    count = max(0, int(requested))
+    if count <= 0:
+        return []
+    params = AllChem.ETKDGv3()
+    params.randomSeed = int(seed) + 7919 * (max(0, int(round_index)) + 1)
+    params.enforceChirality = True
+    params.useSmallRingTorsions = True
+    params.useMacrocycleTorsions = True
+    params.useRandomCoords = bool(round_index > 0)
+    # A small pruning threshold encourages geometric novelty while still
+    # allowing the downstream measured RMSD audit to make the final decision.
+    params.pruneRmsThresh = 0.35
+    try:
+        params.clearConfs = False
+        params.numThreads = max(1, int(num_threads))
+    except AttributeError:
+        pass
+    try:
+        return [int(cid) for cid in AllChem.EmbedMultipleConfs(mol, numConfs=count, params=params)]
+    except Exception as exc:
+        warnings.append(f"PFEE adaptive diversity sampling round {round_index + 1} warning: {exc}")
+        return []
+
+
 def _optimize_added_conformers(
     mol,
     conf_ids: List[int],
@@ -1707,7 +1741,8 @@ def build_structure(
     helix_evidence = canonical_l_helix_evidence(tokens)
     sequence_evidence = sequence_conformation_evidence(tokens)
     family_plan = evidence_guided_family_plan(sequence_evidence, search_profile)
-    search_budget = dict(family_plan.get("budget") or {})
+    pfee_plan = pfee_search_plan(sequence_evidence, family_plan, environment_conditions)
+    search_budget = dict(pfee_plan.get("budget") or family_plan.get("budget") or {})
 
     params = AllChem.ETKDGv3()
     params.randomSeed = int(seed)
@@ -1840,14 +1875,90 @@ def build_structure(
     )
     rmsd_matrix = pairwise_conformer_rmsd(mol_h)
     requested_rmsd_threshold = float(search_budget.get("rmsd_threshold_A", 1.0) or 1.0)
-    top_conformers = select_top_conformers(
-        conformation_analysis, sequence_evidence, limit=required_final,
+    representative_candidate_limit = required_final if pde_mode == "INTERACTION_ONLY" else max(required_final, min(25, required_final * 4))
+    baseline_top_conformers = select_top_conformers(
+        conformation_analysis, sequence_evidence, limit=representative_candidate_limit,
         pairwise_rmsd=rmsd_matrix,
         minimum_rmsd_A=requested_rmsd_threshold,
         family_priority=list(family_plan.get("family_priority") or []),
         preferred_structure=pde_preferred_structure,
         design_mode=pde_mode,
     )
+    # PFEE v1 diversity pass is deliberately secondary to PSB's established
+    # quality/requested-structure ranking. It never forces fold-family diversity
+    # and falls back to that quality order when RMSD separation cannot fill the
+    # requested representative set. Interaction-only mode remains structure-
+    # agnostic and therefore bypasses this representative-diversity preference.
+    pfee_candidate_pool = build_candidate_pool(conformation_analysis)
+    if pde_mode == "INTERACTION_ONLY":
+        top_conformers = baseline_top_conformers
+        pfee_representative_audit = {
+            "method": "disabled_for_interaction_only",
+            "requested_count": required_final,
+            "selected_count": len(top_conformers),
+            "minimum_rmsd_A": requested_rmsd_threshold,
+            "fallback_count": 0,
+            "status": "not_applied",
+            "claim_guard": "Interaction Only preserves PSB geometry-quality ranking and does not optimize structural diversity.",
+        }
+    else:
+        top_conformers, pfee_representative_audit = diversify_ranked_representatives(
+            baseline_top_conformers, rmsd_matrix, limit=required_final,
+            minimum_rmsd_A=requested_rmsd_threshold,
+        )
+
+    adaptive_diversity_sampling: List[Dict[str, Any]] = []
+    if pde_mode != "INTERACTION_ONLY":
+        max_diversity_rounds = max(0, min(2, int(search_budget.get("adaptive_diversity_rounds", 2) or 2)))
+        for adaptive_round in range(max_diversity_rounds):
+            request = adaptive_sampling_request(
+                pfee_representative_audit, pfee_candidate_pool,
+                requested_representatives=required_final, round_index=adaptive_round,
+                max_rounds=max_diversity_rounds, per_round_cap=max(8, required_final * 3),
+            )
+            record = dict(request)
+            if not request.get("request_additional_sampling"):
+                adaptive_diversity_sampling.append(record)
+                break
+            new_ids = _append_diversity_conformers(
+                mol_h, int(request.get("requested_additional_conformers") or 0),
+                int(seed), int(num_threads), adaptive_round, warnings,
+            )
+            record["created_conformers"] = len(new_ids)
+            record["created_conf_ids"] = list(new_ids)
+            if not new_ids:
+                record["status"] = "no_new_coordinates"
+                adaptive_diversity_sampling.append(record)
+                break
+            new_energy = _optimize_added_conformers(mol_h, new_ids, max(20, int(max_iters)), warnings)
+            for row in new_energy:
+                row["source"] = f"pfee_adaptive_diversity_round_{adaptive_round + 1}"
+            conformer_summary.setdefault("energies", []).extend(new_energy)
+            for cid in new_ids:
+                conformer_sources[int(cid)] = f"pfee_adaptive_diversity_round_{adaptive_round + 1}"
+            conformation_analysis = analyze_conformer_ensemble(
+                mol_h, atom_ranges, conformer_summary.get("energies", []), conformer_sources=conformer_sources
+            )
+            rmsd_matrix = pairwise_conformer_rmsd(mol_h)
+            baseline_top_conformers = select_top_conformers(
+                conformation_analysis, sequence_evidence, limit=representative_candidate_limit,
+                pairwise_rmsd=rmsd_matrix, minimum_rmsd_A=requested_rmsd_threshold,
+                family_priority=list(family_plan.get("family_priority") or []),
+                preferred_structure=pde_preferred_structure, design_mode=pde_mode,
+            )
+            pfee_candidate_pool = build_candidate_pool(conformation_analysis)
+            top_conformers, pfee_representative_audit = diversify_ranked_representatives(
+                baseline_top_conformers, rmsd_matrix, limit=required_final,
+                minimum_rmsd_A=requested_rmsd_threshold,
+            )
+            record["status"] = "resampled"
+            record["post_selection_status"] = pfee_representative_audit.get("status")
+            record["post_fallback_count"] = pfee_representative_audit.get("fallback_count")
+            record["post_usable_candidates"] = pfee_candidate_pool.get("usable_candidates")
+            adaptive_diversity_sampling.append(record)
+            if pfee_representative_audit.get("status") == "threshold_met":
+                break
+        conformer_summary["embedded_conformers"] = int(mol_h.GetNumConformers())
     if not top_conformers:
         raise PepforgeBuildError(
             "PSB generated coordinate candidates but none passed the severe-steric-clash screen; "
@@ -1859,6 +1970,9 @@ def build_structure(
         )
     conformation_analysis["top_conformers"] = top_conformers
     conformation_analysis["top_conformer_limit"] = required_final
+    conformation_analysis["pfee_candidate_pool"] = pfee_candidate_pool
+    conformation_analysis["pfee_representative_selection"] = pfee_representative_audit
+    conformation_analysis["pfee_adaptive_diversity_sampling"] = adaptive_diversity_sampling
     requested_families = preferred_structure_families(pde_preferred_structure) if pde_mode != "INTERACTION_ONLY" else []
     conformation_analysis["ranking_method"] = (
         "PDE-intent-aware steric-first selection without artificial family diversity: requested structure-family "
@@ -2084,6 +2198,7 @@ def build_structure(
         "canonical_L_helix_evidence": helix_evidence,
         "sequence_conformation_evidence": sequence_evidence,
         "evidence_guided_family_plan": family_plan,
+        "pfee_search_plan": pfee_plan,
         "environment_conditions": condition_record,
         "pde_design_intent": pde_design_intent,
         "pde_intent_claim_guard": "When PDE specifies a supported structure preference, PSB prioritizes clash-free conformers in that measured geometry family. Fallbacks are explicit and no family label is fabricated.",

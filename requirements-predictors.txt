@@ -1,0 +1,9 @@
+# Optional Pepforge V5 receptor prediction / embedding stack.
+# Large model files are downloaded/configured by the user and are not shipped in Pepforge.
+-r requirements-ml.txt
+torch>=2.2
+transformers>=4.41
+safetensors>=0.4
+accelerate>=0.30
+# AlphaFold 3 is an external optional backend. Install/configure it separately;
+# Pepforge does not redistribute AF3 model parameters or databases.

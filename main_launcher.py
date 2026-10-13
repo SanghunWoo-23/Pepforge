@@ -172,9 +172,74 @@ def run_hotspot_finder() -> None:
 
 
 def run_spps_planner() -> None:
+    """Launch the supplied SPPS Planner V7.0.0 FINAL R2 runtime.
+
+    Pepforge vendors the user's final R2 public runtime as a separate application
+    so the planner keeps its own Project Manager / Batch Manager UI and startup
+    behavior instead of being silently replaced by Pepforge's older compatibility
+    controller.  Workflow values are passed only through environment variables.
+    """
     _ensure_runtime_environment()
-    from suite_gui.spps_tk_gui import main
-    main()
+    vendor_root = _resource_path("vendor", "spps_planner_v7_r2")
+    vendor_entry = vendor_root / "pepforge_entry.py"
+
+    # Source distributions can launch the exact V7 R2 planner in its own process.
+    # This is both faster from the Pepforge launcher and prevents Tk/import state
+    # from the two applications from interfering with each other.
+    if vendor_entry.exists() and not getattr(sys, "frozen", False):
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        subprocess.Popen(
+            [sys.executable, str(vendor_entry)],
+            cwd=str(vendor_root),
+            env=env,
+        )
+        return
+
+    # Frozen builds may not have a system Python capable of executing vendored
+    # source.  Preserve the verified embedded controller as an explicit fallback
+    # rather than pretending the V7 runtime launched.
+    state = {"module": None, "error": None}
+    loader = tk.Tk()
+    loader.title("Pepforge SPPS Planner")
+    loader.resizable(False, False)
+    _apply_icon(loader)
+    box = ttk.Frame(loader, padding=18)
+    box.pack(fill="both", expand=True)
+    ttk.Label(box, text="SPPS Planner", font=("Segoe UI Semibold", 13)).pack(anchor="w")
+    ttk.Label(box, text="Opening compatibility planner…", padding=(0, 8, 0, 0)).pack(anchor="w")
+    bar = ttk.Progressbar(box, mode="indeterminate", length=380)
+    bar.pack(fill="x", pady=(10, 0))
+    bar.start(12)
+    loader.update_idletasks()
+    sw, sh = loader.winfo_screenwidth(), loader.winfo_screenheight()
+    w, h = 430, 120
+    loader.geometry(f"{w}x{h}+{max(0,(sw-w)//2)}+{max(0,(sh-h)//2)}")
+
+    def _import():
+        try:
+            import suite_gui.spps_tk_gui as module
+            state["module"] = module
+        except Exception:
+            state["error"] = traceback.format_exc()
+
+    threading.Thread(target=_import, daemon=True).start()
+
+    def _poll():
+        if state["module"] is None and state["error"] is None:
+            loader.after(40, _poll)
+            return
+        try:
+            bar.stop()
+        except Exception:
+            pass
+        loader.destroy()
+
+    loader.after(40, _poll)
+    loader.mainloop()
+    if state["error"]:
+        raise RuntimeError(state["error"])
+    state["module"].main()
 
 
 def run_docking_workbench() -> None:
@@ -274,10 +339,10 @@ def launcher_main() -> None:
             "outputs": "Designed peptide candidates and design-engine exports",
         },
         "pymol": {
-            "group": "WORKFLOW", "number": "3", "name": "Peptide Structure Builder",
-            "summary": "Generate and analyze peptide conformational candidates and ensembles without pretending to replace MD.",
-            "workflow": "Modified peptide → conformer generation → relaxation → family / torsion analysis → representative outputs",
-            "outputs": "PDB, SDF, ensemble SDF, conformer families, backbone torsions, reports",
+            "group": "WORKFLOW", "number": "3", "name": "Structure & Docking Studio",
+            "summary": "Build peptide conformers, prepare a receptor, run Pepforge Native docking and review native results in one unified workspace.",
+            "workflow": "Peptide sequence → conformer ensemble → receptor preparation → native docking → interactions / mechanics / trajectory → review",
+            "outputs": "Peptide structures, docking poses, interaction evidence, shared native results and review exports",
         },
         "spps": {
             "group": "WORKFLOW", "number": "4", "name": "SPPS Planner",
@@ -286,16 +351,16 @@ def launcher_main() -> None:
             "outputs": "SPPS plan, selected materials, total materials and checklist outputs",
         },
         "external": {
-            "group": "WORKFLOW", "number": "6", "name": "External Validation",
+            "group": "WORKFLOW", "number": "5", "name": "External Validation",
             "summary": "Check external-tool prerequisites and prepare hand-off packages for Vina or GROMACS.",
             "workflow": "Pepforge output → prerequisite check → input preparation → external program hand-off",
             "outputs": "Prepared external-validation folders and guidance; no fabricated docking or MD results",
         },
         "docking": {
-            "group": "WORKFLOW", "number": "5", "name": "Docking Workbench",
-            "summary": "Run Pepforge screening with visible validation, staged progress, contacts, scoring and ranking.",
-            "workflow": "Validation → target / peptide preparation → poses → contacts → scoring → ranking → export",
-            "outputs": "Screening poses, contacts, ranked results and diagnostics",
+            "group": "HIDDEN", "number": "", "name": "Advanced Docking Review",
+            "summary": "Legacy compatibility/review surface retained for detailed imports and diagnostics.",
+            "workflow": "Existing structures/results → advanced review / import / diagnostics",
+            "outputs": "Compatibility review tables and diagnostics",
         },
         "workflow": {
             "group": "ADVANCED", "number": "", "name": "Workflow Mode",
@@ -370,12 +435,13 @@ def launcher_main() -> None:
     menu.add_cascade(label="File", menu=file_menu)
 
     workflow_menu = tk.Menu(menu, tearoff=False)
-    for key in ("hotspot", "design", "pymol", "spps", "docking", "external"):
+    for key in ("hotspot", "design", "pymol", "spps", "external"):
         workflow_menu.add_command(label=tools[key]["name"], command=lambda value=key: update_selection(value))
     menu.add_cascade(label="Workflow", menu=workflow_menu)
 
     tools_menu = tk.Menu(menu, tearoff=False)
     tools_menu.add_command(label="Workflow Mode", command=lambda: update_selection("workflow"))
+    tools_menu.add_command(label="Advanced Docking Review (legacy)", command=lambda: launch_selected("docking"))
     tools_menu.add_separator()
     tools_menu.add_command(label="Open Selected Tool", command=lambda: launch_selected())
     menu.add_cascade(label="Tools", menu=tools_menu)

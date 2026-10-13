@@ -13,12 +13,18 @@ import time
 import json
 import csv
 import traceback
+import threading
 from datetime import datetime
 from peptiforg_core.ui_helpers import set_pepforge_icon
-from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window
+from peptiforg_core.ui_scroll import VerticalPageScroller
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window, maximize_when_roomy
 from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
 from peptiforg_core.sandbox_runtime import configured_output
 from peptiforg_core.output_bundle import create_result_bundle, write_bundle_manifest, build_bundle_zip, compact_sequence_label
+from peptiforg_core.docking_followup_v1 import load_normalized_result_export, run_native_docking_followup
+from peptiforg_core.docking_result_contract_v1 import combine_normalized_results
+from peptiforg_core.native_mechanics_v2 import NativeMechanicsV2Config
+from suite_gui.shared_native_result_panel import SharedNativeResultPanel
 
 from pepforge_structure_tool.version import STRUCTURE_TOOL_VERSION
 
@@ -330,10 +336,11 @@ Do not claim: final Kd, true nM binder, full all-atom MD validation, or experime
 class PyMOLStructureBuilderGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Pepforge Peptide Structure Builder")
+        self.title("Pepforge Peptide Structure & Docking Studio")
         set_pepforge_icon(self)
         apply_pepforge_theme(self)
-        fit_window(self, preferred_width=1500, preferred_height=900, minimum_width=1180, minimum_height=720)
+        fit_window(self, preferred_width=1820, preferred_height=1000, minimum_width=1260, minimum_height=780)
+        self.after(80, lambda: maximize_when_roomy(self, min_width=1600, min_height=900))
         self._startup_trace = StartupTrace("structure_builder", Path.cwd() / "workspace" / "pymol" / "logs")
         self.output_dir = tk.StringVar(value="")
         self.sequence_var = tk.StringVar(value="")
@@ -364,6 +371,25 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.bridge_size_x = tk.DoubleVar(value=22.0)
         self.bridge_size_y = tk.DoubleVar(value=22.0)
         self.bridge_size_z = tk.DoubleVar(value=22.0)
+        # V5 one-click PSB -> docking -> DockBench -> PyMOL -> optional MD.
+        self.v5_receptor_source = tk.StringVar(value="file")
+        self.v5_receptor_sequence = tk.StringVar(value="")
+        self.v5_binding_mode = tk.StringVar(value="blind")
+        self.v5_binding_residues = tk.StringVar(value="")
+        self.v5_docking_preset = tk.StringVar(value="standard")
+        self.v5_docking_backend = tk.StringVar(value="native")
+        self.v5_execution_mode = tk.StringVar(value="offline")
+        self.v5_resource_root = tk.StringVar(value="")
+        self.v5_initial_conformers = tk.IntVar(value=100)
+        self.v5_run_md = tk.BooleanVar(value=False)
+        self.v5_run_native_followup = tk.BooleanVar(value=True)
+        self.v5_native_mechanics_steps = tk.IntVar(value=400)
+        self.v5_md_production_ns = tk.DoubleVar(value=1.0)
+        self.v5_md_replicates = tk.IntVar(value=3)
+        self._v5_pipeline_thread = None
+        self._v5_pipeline_result = None
+        self._v5_pipeline_error = None
+        self._v5_pending_after_build = False
         self._build()
         mark_window_visible(self, self._startup_trace)
 
@@ -408,7 +434,32 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self._active_result_key = key
         return bundle
 
+    def _sync_sequence_var_from_text(self, _event=None) -> None:
+        widget = getattr(self, "sequence_text", None)
+        if widget is None:
+            return
+        try:
+            value = widget.get("1.0", "end-1c").strip()
+            if value != str(self.sequence_var.get() or ""):
+                self.sequence_var.set(value)
+        except Exception:
+            pass
+
+    def _sync_sequence_text_from_var(self, *_args) -> None:
+        widget = getattr(self, "sequence_text", None)
+        if widget is None:
+            return
+        try:
+            value = str(self.sequence_var.get() or "")
+            current = widget.get("1.0", "end-1c")
+            if current != value:
+                widget.delete("1.0", "end")
+                widget.insert("1.0", value)
+        except Exception:
+            pass
+
     def _require_sequence(self) -> str | None:
+        self._sync_sequence_var_from_text()
         seq = str(self.sequence_var.get() or "").strip()
         if not seq:
             messagebox.showwarning("Input required", "Enter a peptide sequence first.")
@@ -416,25 +467,57 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         return seq
 
     def _build(self):
-        root = ttk.Frame(self, padding=12)
-        root.pack(fill="both", expand=True)
+        # One vertically scrollable Studio page: PSB and docking are a single
+        # primary workflow.  This follows the SPPS Planner's large-window /
+        # work-item approach and prevents lower controls from disappearing.
+        shell = ttk.Frame(self)
+        shell.pack(fill="both", expand=True)
+        shell.rowconfigure(0, weight=1)
+        shell.columnconfigure(0, weight=1)
 
-        ttk.Label(root, text="Peptide Structure Builder", style="Title.TLabel").pack(anchor="w")
+        # R4: one vertical-only analysis page. The shared helper coalesces
+        # high-resolution wheel events, clamps at page edges, and debounces
+        # scrollregion updates so the last part of long PSB pages does not
+        # stutter. The inner frame is always viewport-width; child widgets can
+        # never push the outer canvas wider (prevents the Windows stretching bug).
+        self._studio_scroller = VerticalPageScroller(self, shell, background="#F3F6FA", padding=14, wheel_step=2)
+        self._studio_scroller.grid(row=0, column=0, sticky="nsew")
+        self._studio_scroller.scrollbar.grid(row=0, column=1, sticky="ns")
+        root = self._studio_scroller.inner
+        root.columnconfigure(0, weight=1)
+        self._studio_canvas = self._studio_scroller.canvas
+        self._studio_page = root
+        self._studio_scrollbar = self._studio_scroller.scrollbar
+        self._studio_page_window = self._studio_scroller.window
+
+        ttk.Label(root, text="Peptide Structure & Docking Studio", style="Title.TLabel").pack(anchor="w")
         ttk.Label(
             root,
             text=(
-                f"Pepforge Peptide Structure Builder v{STRUCTURE_TOOL_VERSION}. "
-                "Analyze a canonical or modified peptide sequence and build peptide-only SDF/PDB/JSON/PML starting conformers. "
-                "Outputs are plausible starting structures for inspection and external validation, not AlphaFold predictions or MD trajectories."
+                f"Pepforge Structure & Docking Studio v{STRUCTURE_TOOL_VERSION}. "
+                "Build canonical or modified peptide conformers, prepare a receptor, run Pepforge Native docking, and review shared native results in one window. "
+                "Generated structures and docking scores remain computational evidence, not experimental structures or affinity measurements."
             ),
             wraplength=1200,
         ).pack(anchor="w", pady=(4, 12))
 
         input_box = ttk.LabelFrame(root, text="Input", style="Input.TLabelframe")
         input_box.pack(fill="x")
-        ttk.Label(input_box, text="Peptide sequence").grid(row=0, column=0, sticky="w", padx=8, pady=8)
-        ent = ttk.Entry(input_box, textvariable=self.sequence_var)
-        ent.grid(row=0, column=1, sticky="ew", padx=8, pady=8)
+        ttk.Label(input_box, text="Peptide sequence").grid(row=0, column=0, sticky="nw", padx=8, pady=8)
+        # Keep the sequence field visibly large even before focus/click.  A
+        # multi-line entry is easier for long/modified constructs than the old
+        # narrow single-line widget.
+        seq_frame = ttk.Frame(input_box)
+        seq_frame.grid(row=0, column=1, columnspan=2, sticky="nsew", padx=8, pady=8)
+        self.sequence_text = tk.Text(seq_frame, height=3, wrap="none", font=("Consolas", 11), undo=True)
+        seq_x = ttk.Scrollbar(seq_frame, orient="horizontal", command=self.sequence_text.xview)
+        self.sequence_text.configure(xscrollcommand=seq_x.set)
+        self.sequence_text.pack(fill="x", expand=True)
+        seq_x.pack(fill="x")
+        self.sequence_text.insert("1.0", str(self.sequence_var.get() or ""))
+        self.sequence_text.bind("<KeyRelease>", self._sync_sequence_var_from_text, add="+")
+        self.sequence_text.bind("<FocusOut>", self._sync_sequence_var_from_text, add="+")
+        self.sequence_var.trace_add("write", self._sync_sequence_text_from_var)
         ttk.Label(input_box, text="Output name").grid(row=1, column=0, sticky="w", padx=8, pady=8)
         ttk.Entry(input_box, textvariable=self.name_var, width=36).grid(row=1, column=1, sticky="w", padx=8, pady=8)
         ttk.Label(input_box, text="Output folder").grid(row=2, column=0, sticky="w", padx=8, pady=8)
@@ -511,27 +594,94 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         ttk.Button(actions, text="Analyze Structures", command=self.analyze_structure_files, width=18).grid(row=2, column=0, columnspan=2, padx=4, pady=4, sticky="ew")
         ttk.Button(actions, text="Compare Structures", command=self.compare_structure_files, width=18).grid(row=2, column=2, columnspan=2, padx=4, pady=4, sticky="ew")
 
-        pane = ttk.PanedWindow(root, orient="vertical")
-        pane.pack(fill="both", expand=True)
+        v5_box = ttk.LabelFrame(root, text="Integrated Docking & Simulation", style="Card.TLabelframe")
+        v5_box.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            v5_box,
+            text="PSB and native docking are unified here. The legacy Docking Workbench is retained only as an advanced compatibility/review tool.",
+            style="Sub.TLabel", wraplength=1450,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=6, pady=(6, 4))
+        ttk.Label(v5_box, text="Receptor source").grid(row=1, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(v5_box, textvariable=self.v5_receptor_source, state="readonly", values=("file","ESMFold"), width=12).grid(row=1, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="AF3: advanced CLI adapter").grid(row=1, column=2, sticky="e", padx=6, pady=5)
+        ttk.Label(v5_box, text="Receptor PDB/mmCIF").grid(row=2, column=0, sticky="w", padx=6, pady=5)
+        ttk.Entry(v5_box, textvariable=self.bridge_receptor_path).grid(row=2, column=1, sticky="ew", padx=6, pady=5)
+        ttk.Button(v5_box, text="Browse", command=self._browse_receptor).grid(row=2, column=2, padx=6, pady=5)
+        ttk.Label(v5_box, text="Receptor sequence").grid(row=3, column=0, sticky="w", padx=6, pady=5)
+        ttk.Entry(v5_box, textvariable=self.v5_receptor_sequence).grid(row=3, column=1, columnspan=2, sticky="ew", padx=6, pady=5)
+        ttk.Label(v5_box, text="Binding").grid(row=4, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(v5_box, textvariable=self.v5_binding_mode, state="readonly", values=("blind","hotspot","manual"), width=12).grid(row=4, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="Residues (e.g. A:10;A:24)").grid(row=4, column=1, sticky="e", padx=(140,6), pady=5)
+        ttk.Entry(v5_box, textvariable=self.v5_binding_residues, width=26).grid(row=4, column=2, sticky="ew", padx=6, pady=5)
+        ttk.Label(v5_box, text="Docking backend").grid(row=5, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(v5_box, textvariable=self.v5_docking_backend, state="readonly", values=("native","haddock3"), width=12).grid(row=5, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="Native = Pepforge-owned experimental search; HADDOCK3 = optional external validation.", style="Sub.TLabel").grid(row=5, column=2, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="Docking preset").grid(row=6, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(v5_box, textvariable=self.v5_docking_preset, state="readonly", values=("fast","standard","deep"), width=12).grid(row=6, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="Peptide sampling N").grid(row=6, column=1, sticky="e", padx=(120,6), pady=5)
+        ttk.Entry(v5_box, textvariable=self.v5_initial_conformers, width=7).grid(row=6, column=2, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="Execution").grid(row=7, column=0, sticky="w", padx=6, pady=5)
+        ttk.Combobox(v5_box, textvariable=self.v5_execution_mode, state="readonly", values=("offline","auto","online_enhanced"), width=16).grid(row=7, column=1, sticky="w", padx=6, pady=5)
+        ttk.Label(v5_box, text="Offline blocks optional network fetches; Pepforge native docking stays available.", style="Sub.TLabel").grid(row=7, column=2, sticky="w", padx=6, pady=5)
+        ttk.Checkbutton(v5_box, text="Run Pepforge Native Mechanics + Trajectory after native docking", variable=self.v5_run_native_followup).grid(row=8, column=0, columnspan=2, sticky="w", padx=6, pady=5)
+        native_row = ttk.Frame(v5_box)
+        native_row.grid(row=8, column=2, sticky="e", padx=6, pady=5)
+        ttk.Label(native_row, text="Mechanics steps").pack(side="left")
+        ttk.Spinbox(native_row, from_=20, to=20000, textvariable=self.v5_native_mechanics_steps, width=8).pack(side="left", padx=(5,0))
+        ttk.Checkbutton(v5_box, text="Optional OpenMM MD backend", variable=self.v5_run_md).grid(row=9, column=0, sticky="w", padx=6, pady=5)
+        mdrow=ttk.Frame(v5_box); mdrow.grid(row=9, column=1, columnspan=2, sticky="w", padx=6, pady=5)
+        ttk.Label(mdrow, text="production ns").pack(side="left"); ttk.Entry(mdrow, textvariable=self.v5_md_production_ns, width=6).pack(side="left", padx=(4,12))
+        ttk.Label(mdrow, text="replicates").pack(side="left"); ttk.Entry(mdrow, textvariable=self.v5_md_replicates, width=4).pack(side="left", padx=(4,8))
+        self.v5_run_button = ttk.Button(v5_box, text="BUILD + DOCK + ANALYZE", command=self.run_v5_full_simulation, style="Accent.TButton")
+        self.v5_run_button.grid(row=10, column=0, columnspan=3, sticky="ew", padx=6, pady=(8,10))
+        v5_box.columnconfigure(1, weight=1); v5_box.columnconfigure(2, weight=1)
 
-        token_frame = ttk.LabelFrame(pane, text="Chemistry interpretation", style="Card.TLabelframe")
-        pane.add(token_frame, weight=3)
+        # Results are normal stacked sections, not a PanedWindow inside a
+        # scrolling Canvas.  A resizable paned container inside another scrolling
+        # geometry manager created a width/height feedback loop on Windows and
+        # was the remaining cause of the reported "spaghetti" stretching.
+        results_stack = ttk.Frame(root)
+        results_stack.pack(fill="x", pady=(0, 8))
+
+        token_frame = ttk.LabelFrame(results_stack, text="Chemistry interpretation", style="Card.TLabelframe")
+        token_frame.pack(fill="x", pady=(0, 8))
+        token_frame.columnconfigure(0, weight=1)
+        token_frame.rowconfigure(0, weight=1)
         cols = ("position", "raw", "token", "class", "note", "warning")
-        self.tree = ttk.Treeview(token_frame, columns=cols, show="headings", height=15)
+        self.tree = ttk.Treeview(token_frame, columns=cols, show="headings", height=11)
         widths = {"position": 80, "raw": 130, "token": 180, "class": 180, "note": 420, "warning": 420}
         for c in cols:
             self.tree.heading(c, text=c)
-            self.tree.column(c, width=widths.get(c, 160), stretch=True)
-        self.tree.pack(side="left", fill="both", expand=True)
-        y = ttk.Scrollbar(token_frame, orient="vertical", command=self.tree.yview)
-        y.pack(side="right", fill="y")
-        self.tree.configure(yscrollcommand=y.set)
+            # Keep the page width stable.  This table owns any extra horizontal
+            # width through its own scrollbar instead of pushing the outer page.
+            self.tree.column(c, width=widths.get(c, 160), minwidth=60, stretch=False)
+        tree_y = ttk.Scrollbar(token_frame, orient="vertical", command=self.tree.yview)
+        tree_x = ttk.Scrollbar(token_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=tree_y.set, xscrollcommand=tree_x.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        tree_y.grid(row=0, column=1, sticky="ns")
+        tree_x.grid(row=1, column=0, sticky="ew")
 
-        note_frame = ttk.LabelFrame(pane, text="Top-five ensemble and evidence", style="Card.TLabelframe")
-        pane.add(note_frame, weight=2)
-        self.note = tk.Text(note_frame, height=12, wrap="word")
-        self.note.pack(fill="both", expand=True)
+        note_frame = ttk.LabelFrame(results_stack, text="Top-five ensemble and evidence", style="Card.TLabelframe")
+        note_frame.pack(fill="x", pady=(0, 8))
+        note_frame.columnconfigure(0, weight=1)
+        note_frame.rowconfigure(0, weight=1)
+        self.note = tk.Text(note_frame, height=10, wrap="word")
+        note_y = ttk.Scrollbar(note_frame, orient="vertical", command=self.note.yview)
+        self.note.configure(yscrollcommand=note_y.set)
+        self.note.grid(row=0, column=0, sticky="nsew")
+        note_y.grid(row=0, column=1, sticky="ns")
         self.note.insert("1.0", "Enter a peptide sequence, review the chemistry interpretation, then build the evidence-aware top five structures.")
+
+        unified_frame = ttk.LabelFrame(results_stack, text="Unified Native Results", style="Card.TLabelframe")
+        unified_frame.pack(fill="x")
+        self.shared_native_result_panel = SharedNativeResultPanel(
+            unified_frame,
+            open_path_callback=lambda p: _open_path(Path(p)),
+            rerun_followup_callback=self._rerun_selected_native_followup,
+            title="Structure & Docking Shared Native Result Viewer",
+        )
+        self.shared_native_result_panel.pack(fill="both", expand=False)
 
     def _browse(self):
         d = filedialog.askdirectory(initialdir=str(self._effective_output_dir().parent if str(self.output_dir.get()).strip() else self._default_output_dir().parent))
@@ -577,6 +727,15 @@ class PyMOLStructureBuilderGUI(tk.Tk):
 
     def _start_structure_worker(self, sequence: str, name: str, conditions: dict) -> None:
         settings = self._build_settings()
+        if self._v5_pending_after_build:
+            # V5 full simulation deliberately samples a larger peptide ensemble
+            # before retaining the physics/evidence-ranked Top 5.  The value is
+            # user-editable because cost grows rapidly with peptide size.
+            requested_n = max(5, min(2000, int(self.v5_initial_conformers.get())))
+            settings["num_confs"] = requested_n
+            settings["min_final_conformers"] = 5
+            settings["search_profile"] = "evidence_thorough" if requested_n >= 50 else "evidence_balanced"
+            settings["max_embedding_retries"] = max(int(settings.get("max_embedding_retries", 3)), 4)
         job_dir = Path(tempfile.mkdtemp(prefix="pepforge_psb_job_"))
         request_path = job_dir / "request.json"
         result_path = job_dir / "result.json"
@@ -646,7 +805,14 @@ class PyMOLStructureBuilderGUI(tk.Tk):
                 write_bundle_manifest(self._active_result_bundle, tool="PSB", name=self._effective_output_name(), sequence=self.sequence_var.get(), artifacts={**paths, "zip": zip_path})
                 self.note.insert("end", f"\nResult bundle ZIP: {zip_path}\n")
             self._set_done("Top-five ensemble complete")
-            messagebox.showinfo("Export complete", "The ranked top five structures plus evidence report, ensemble, family CSV, torsion CSV, JSON and PyMOL files were exported.")
+            if self._v5_pending_after_build:
+                self._v5_pending_after_build = False
+                meta_path = paths.get("json") or paths.get("meta_path")
+                if not meta_path:
+                    raise RuntimeError("PSB build completed but metadata JSON was not returned for the V5 pipeline.")
+                self.after(50, lambda p=meta_path: self._start_v5_pipeline(p))
+            else:
+                messagebox.showinfo("Export complete", "The ranked top five structures plus evidence report, ensemble, family CSV, torsion CSV, JSON and PyMOL files were exported.")
         except Exception as exc:
             diag = self._write_diagnostics("build_sdf_pdb_pml", exc)
             self.note.insert("end", "\nStructure worker diagnostic written:\n")
@@ -676,7 +842,11 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         self.note.insert("end", f"- family evidence identifiers: {plan.get('family_evidence', {})}\n")
         self.note.insert("end", f"- adaptive Top-5 retries: {conf.get('adaptive_embedding_attempts', [])}\n")
         audit = ca.get("top5_diversity_audit") or {}
-        self.note.insert("end", f"- Top-5 RMSD spread diagnostic (not a selection objective): {audit.get('status', 'unavailable')} | unique families={audit.get('unique_family_count')} | min pairwise RMSD={audit.get('minimum_pairwise_rmsd_A')} Å\n")
+        pfee_sel = ca.get("pfee_representative_selection") or {}
+        pool = ca.get("pfee_candidate_pool") or {}
+        self.note.insert("end", f"- PFEE candidate pool: usable={pool.get('usable_candidates')} / total={pool.get('total_candidates')} | rejected={pool.get('rejected_candidates')}\n")
+        self.note.insert("end", f"- PFEE representative selection: {pfee_sel.get('status', 'unavailable')} | threshold={pfee_sel.get('minimum_rmsd_A')} Å | observed min={pfee_sel.get('minimum_observed_pairwise_rmsd_A')} Å | fallback={pfee_sel.get('fallback_count')}\n")
+        self.note.insert("end", f"- Top-5 post-selection RMSD audit: {audit.get('status', 'unavailable')} | unique families={audit.get('unique_family_count')} | min pairwise RMSD={audit.get('minimum_pairwise_rmsd_A')} Å\n")
         self.note.insert("end", f"- canonical-L seed status: {conf.get('canonical_seed_status', 'unavailable')} | applied={conf.get('applied_backbone_seed_count', 0)} | labels={conf.get('applied_backbone_seed_labels', [])}\n")
         self.note.insert("end", f"- requested evidence-guided canonical seed families: {conf.get('requested_canonical_seed_labels', [])}; variants/preferred={conf.get('guided_seed_variants_per_preferred', 0)}\n")
         self.note.insert("end", "- ranked top five:\n")
@@ -910,7 +1080,7 @@ class PyMOLStructureBuilderGUI(tk.Tk):
         warnings = [t.warning for t in toks if t.warning]
         self.note.insert("end", f"Parsed {len(toks)} tokens.\n")
         self.note.insert("end", "Examples: Ac-K(FITC)-LVFF-NH2, Ac-K(Ahx-Biotin)-LVFF-NH2, FITC-Cha-AEEA-dK-NH2, Pal-EEMQRR-NH2.\n")
-        self.note.insert("end", "The default workflow is peptide analysis and structure generation. Docking and MD are external validation steps.\n")
+        self.note.insert("end", "The V5 workflow can continue from peptide analysis/Top-5 structure generation into real HADDOCK3 docking, DockBench interaction review, PyMOL export, and optional OpenMM MD when those optional backends are installed.\n")
         self.note.insert("end", "Primary outputs: ranked top-five SDF/PDB structures, JSON evidence, TXT report, PyMOL PML, and audit CSV files.\n")
         self.note.insert("end", "Generated structures are connected 3D starting models for PyMOL inspection/screening. They are not fully parameterized all-atom MD structures.\n")
         if warnings:
@@ -938,6 +1108,187 @@ class PyMOLStructureBuilderGUI(tk.Tk):
             self._set_failed("Build could not start")
             messagebox.showerror("Export failed", "The isolated build could not start, but diagnostic files were written.\n\n" + str(exc))
 
+
+    def _v5_binding_residue_list(self):
+        text=str(self.v5_binding_residues.get() or "")
+        return [x.strip() for x in text.replace(",",";").split(";") if x.strip()]
+
+    def run_v5_full_simulation(self):
+        """One-click V5 path: fresh PSB Top-5 build, then real docking/analysis."""
+        seq=self._require_sequence()
+        if seq is None:
+            return
+        receptor_source=str(self.v5_receptor_source.get() or "file").strip()
+        receptor=str(self.bridge_receptor_path.get() or "").strip()
+        if receptor_source == "file" and not receptor:
+            messagebox.showwarning("Receptor required", "Select a receptor PDB/mmCIF before running the V5 full simulation.")
+            return
+        if receptor_source == "ESMFold" and not str(self.v5_receptor_sequence.get() or "").strip():
+            messagebox.showwarning("Receptor sequence required", "Enter a canonical receptor protein sequence for ESMFold prediction.")
+            return
+        mode=str(self.v5_binding_mode.get() or "blind")
+        if mode in {"manual","hotspot"} and not self._v5_binding_residue_list():
+            messagebox.showwarning("Binding residues required", "Manual/Hotspot docking requires receptor residues such as A:10;A:24.")
+            return
+        if self._build_process is not None or (self._v5_pipeline_thread is not None and self._v5_pipeline_thread.is_alive()):
+            messagebox.showinfo("Run in progress", "A PSB build or V5 simulation is already running.")
+            return
+        self._v5_pending_after_build=True
+        self.note.insert("end", "\nV5 full simulation requested. Building a fresh PSB Top-5 ensemble first...\n")
+        self.export()
+
+    def _start_v5_pipeline(self, meta_path):
+        from peptiforg_core.psb_v5_full_pipeline import run_psb_v5_pipeline
+        from peptiforg_core.openmm_md_backend import OpenMMProtocol
+        receptor_source=str(self.v5_receptor_source.get() or "file").strip()
+        receptor=str(self.bridge_receptor_path.get() or "").strip()
+        receptor_sequence=str(self.v5_receptor_sequence.get() or "").strip()
+        output=(self._active_result_bundle or self._effective_output_dir()) / "V5_Full_Simulation"
+        protocol=OpenMMProtocol(
+            production_ns=max(0.001,float(self.v5_md_production_ns.get())),
+            replicates=max(1,int(self.v5_md_replicates.get())),
+        )
+        kwargs=dict(
+            psb_meta_path=meta_path, receptor_path=receptor, output_dir=output,
+            model_limit=5, pose_limit_per_model=5,
+            binding_site_mode=str(self.v5_binding_mode.get() or "blind"),
+            binding_site_residues=self._v5_binding_residue_list(),
+            docking_preset=str(self.v5_docking_preset.get() or "standard"),
+            docking_backend=str(self.v5_docking_backend.get() or "native"),
+            run_docking=True, run_dockbench=True, run_md=bool(self.v5_run_md.get()),
+            run_native_mechanics_followup=bool(self.v5_run_native_followup.get()),
+            native_mechanics_steps=max(20,int(self.v5_native_mechanics_steps.get() or 400)),
+            md_protocol=protocol, execution_mode=str(self.v5_execution_mode.get() or "offline"),
+            resource_root=(str(self.v5_resource_root.get() or "").strip() or None),
+        )
+        self._v5_pipeline_result=None; self._v5_pipeline_error=None
+        self._set_busy("V5 docking/simulation running...")
+        try: self.v5_run_button.configure(state="disabled")
+        except Exception: pass
+        def worker():
+            try:
+                if receptor_source == "ESMFold":
+                    from peptiforg_core.structure_predictor_backends import run_esmfold_prediction
+                    execution_mode = str(self.v5_execution_mode.get() or "offline")
+                    pred = run_esmfold_prediction(
+                        receptor_sequence, output / "Receptor_Prediction",
+                        local_files_only=(execution_mode == "offline"),
+                    )
+                    if pred.get("status") != "COMPLETED" or not pred.get("pdb"):
+                        raise RuntimeError(f"ESMFold receptor prediction did not complete: {pred.get('status')}")
+                    kwargs["receptor_path"] = pred["pdb"]
+                self._v5_pipeline_result=run_psb_v5_pipeline(**kwargs)
+            except Exception as exc:
+                self._v5_pipeline_error=(type(exc).__name__,str(exc),traceback.format_exc())
+        self._v5_pipeline_thread=threading.Thread(target=worker,daemon=True,name="pepforge-v5-pipeline")
+        self._v5_pipeline_thread.start()
+        self.after(500,self._poll_v5_pipeline)
+
+    def _rerun_selected_native_followup(self, pose_id: str):
+        """Re-run native mechanics/trajectory for a viewer-selected PSB pose."""
+        result = getattr(self, "_v5_pipeline_result", None)
+        if not isinstance(result, dict):
+            messagebox.showinfo("Native follow-up", "Run PSB Full Simulation first.")
+            return None
+        import re as _re
+        m = _re.match(r"^m(\d{2})_(.+)$", str(pose_id or ""))
+        if not m:
+            messagebox.showerror("Native follow-up", f"Could not resolve PSB model from pose id: {pose_id}")
+            return None
+        model_rank = int(m.group(1))
+        local_pose_id = m.group(2)
+        model = next((x for x in (result.get("model_results") or []) if int(x.get("model_rank") or 0) == model_rank), None)
+        if not isinstance(model, dict):
+            messagebox.showerror("Native follow-up", f"PSB model {model_rank} is unavailable.")
+            return None
+        exported = model.get("normalized_result") or {}
+        contract_path = exported.get("contract_json") if isinstance(exported, dict) else ""
+        if not contract_path:
+            messagebox.showerror("Native follow-up", "Shared docking-result contract is unavailable for the selected model.")
+            return None
+
+        def worker():
+            try:
+                normalized = load_normalized_result_export(contract_path)
+                steps = max(20, min(20000, int(self.v5_native_mechanics_steps.get() or 400)))
+                cfg = NativeMechanicsV2Config(steps=steps, save_every=max(1, steps // 10), freeze_receptor=True, peptide_chain="P")
+                out = Path(contract_path).resolve().parent / f"native_followup_{local_pose_id.replace(':','_').replace('/','_')}"
+                payload = run_native_docking_followup(normalized, out, mechanics_config=cfg, pose_id=local_pose_id)
+                model["native_followup"] = payload
+                self.after(0, lambda: self._update_shared_native_result_view(result))
+                self.after(0, lambda: self.progress_var.set(f"Native follow-up completed for {pose_id}"))
+            except Exception as exc:
+                self.after(0, lambda e=exc: messagebox.showerror("Native follow-up failed", str(e)))
+        self.progress_var.set(f"Running native follow-up for {pose_id}...")
+        threading.Thread(target=worker, daemon=True, name="pepforge-selected-followup").start()
+        return True
+
+    def _update_shared_native_result_view(self, result):
+        if not hasattr(self, "shared_native_result_panel"):
+            return
+        normalized_items=[]
+        followups=[]
+        for model in (result.get("model_results") or []):
+            rank=int(model.get("model_rank") or 0)
+            exported=model.get("normalized_result") or {}
+            contract_path=exported.get("contract_json") if isinstance(exported,dict) else ""
+            if contract_path:
+                try:
+                    normalized_items.append((rank, load_normalized_result_export(contract_path)))
+                except Exception:
+                    LOGGER.debug("Could not load model %s normalized docking result", rank, exc_info=True)
+            follow=model.get("native_followup")
+            if isinstance(follow,dict):
+                item={"model_rank":rank, "payload":follow, "status":follow.get("status","")}
+                frames_path=follow.get("frames_csv")
+                if frames_path and Path(str(frames_path)).exists():
+                    try:
+                        import pandas as _pd
+                        item["frames"]=_pd.read_csv(frames_path)
+                    except Exception:
+                        LOGGER.debug("Could not load model %s native follow-up frames", rank, exc_info=True)
+                followups.append(item)
+        combined=combine_normalized_results(normalized_items) if normalized_items else {}
+        self.shared_native_result_panel.load_result(
+            combined, followups=followups, source="PSB Full Simulation",
+            output_dir=(Path(result.get("manifest")).parent if result.get("manifest") else self._effective_output_dir()),
+        )
+
+    def _poll_v5_pipeline(self):
+        thread=self._v5_pipeline_thread
+        if thread is not None and thread.is_alive():
+            self.progress_var.set("V5 docking/simulation running · see run folders/logs for backend progress")
+            self.after(1000,self._poll_v5_pipeline)
+            return
+        try: self.v5_run_button.configure(state="normal")
+        except Exception: pass
+        if self._v5_pipeline_error:
+            etype,msg,tb=self._v5_pipeline_error
+            exc=RuntimeError(f"{etype}: {msg}")
+            diag=self._write_diagnostics("v5_full_simulation",exc)
+            self.note.insert("end", f"\nV5 full simulation failed: {etype}: {msg}\n{tb}\n")
+            for k,p in diag.items(): self.note.insert("end",f"- {k}: {p}\n")
+            self._set_failed("V5 full simulation failed")
+            messagebox.showerror("V5 simulation failed", f"{etype}: {msg}")
+            return
+        result=self._v5_pipeline_result or {}
+        self.note.insert("end", "\nV5 full simulation result:\n")
+        self.note.insert("end", f"- status: {result.get('status')}\n- verified docking poses: {result.get('verified_pose_count',0)}\n")
+        if result.get("manifest"): self.note.insert("end",f"- manifest: {result['manifest']}\n")
+        if isinstance(result.get("pymol"),dict) and result["pymol"].get("pml"): self.note.insert("end",f"- PyMOL: {result['pymol']['pml']}\n")
+        bs=result.get("backend_status") or {}
+        self.note.insert("end", f"- docking backend: {result.get('docking_backend')}\n")
+        if result.get("verified_pose_count",0)==0 and result.get("docking_backend") == "haddock3":
+            self.note.insert("end", f"- HADDOCK3: {(bs.get('haddock3') or {}).get('status')}\n")
+        if bool(self.v5_run_md.get()): self.note.insert("end",f"- OpenMM: {(bs.get('openmm') or {}).get('status')}\n")
+        if result.get("native_followup_results"):
+            self.note.insert("end",f"- native mechanics/trajectory follow-ups: {len(result.get('native_followup_results') or [])}\n")
+        try:
+            self._update_shared_native_result_view(result)
+        except Exception:
+            LOGGER.debug("Could not refresh shared native result viewer", exc_info=True)
+        self._set_done(f"V5: {result.get('status','complete')}")
+        messagebox.showinfo("V5 simulation finished", f"Status: {result.get('status')}\nVerified poses: {result.get('verified_pose_count',0)}\n\nNo unavailable backend is replaced with a fake result.")
 
     def _export_bridge_kind(self, label: str, kind: str, advanced_runner):
         seq = self._require_sequence()

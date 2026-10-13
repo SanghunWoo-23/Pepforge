@@ -1,0 +1,17 @@
+{
+  "checkpoint": "DEV2_END_TO_END_SIMULATION_CORE",
+  "date": "2026-09-28",
+  "test_batches": [
+    {"scope": "V4 PSB PDB metadata + explicit chemistry + sequence-aware Top5", "passed": 16, "failed": 0},
+    {"scope": "PDE intent + Docking Workbench + V5 docking legacy regressions", "passed": 17, "failed": 0},
+    {"scope": "V2 bridges + DEV1 ESM/ranker/orchestrator + DEV2 backend/trajectory/full pipeline", "passed": 19, "failed": 0},
+    {"scope": "release gate/verify/integrity plus DEV2 selected regressions final rerun", "passed": 13, "failed": 0}
+  ],
+  "full_package_audit": {"passed": 20, "failed": 0, "python_files_checked": 339, "compile_errors": 0, "runtime_artifacts": 0},
+  "native_backend_execution": {
+    "haddock3": "not installed in build container",
+    "openmm": "not installed in build container",
+    "mdtraj": "installed and used for real trajectory regression",
+    "note": "HADDOCK3 subprocess and scored-pose harvesting were validated with a controlled test executable. This is software-contract validation, not a scientific benchmark run."
+  }
+}

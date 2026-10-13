@@ -1,0 +1,26 @@
+SPPS Planner Public Academic Citation License
+Version 1.0
+
+Copyright (c) 2026 Sanghun Woo
+
+Permission is granted to use, copy, modify, and distribute this software and its documentation for academic, educational, research, portfolio-review, and non-commercial purposes, subject to the following conditions:
+
+1. Copyright Notice
+   The above copyright notice and this license notice must be included in all copies or substantial portions of the software.
+
+2. Academic Citation Requirement
+   If SPPS Planner, SPPS Planner-generated results, SPPS Planner-derived workflows, or modified versions of SPPS Planner are used in academic work, including journal articles, preprints, theses, dissertations, posters, presentations, reports, grant documents, or research-derived software, the user must cite SPPS Planner and the corresponding release DOI when available.
+
+   Recommended citation:
+   Woo, S. SPPS Planner: Solid-Phase Peptide Synthesis Planning and Evidence-Driven Decision Support. GitHub repository, Version 6.0.0. https://github.com/SanghunWoo-23/SPPS-PLANNER
+
+3. Result Attribution
+   SPPS Planner planning outputs, exported calculation packages, derived workflows, figures, or tables should retain or reproduce the SPPS Planner citation notice when they are redistributed or used in academic work.
+
+4. No Warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. THE AUTHOR SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+5. Scientific Scope
+   SPPS Planner calculations, empirical rules, recommendations, risk/evidence summaries, and machine-learning outputs are intended for planning, screening, prioritization, and research support. They do not replace an approved SOP, SDS, institutional safety requirements, qualified analytical methods, operator review, or experimental validation.
+
+Note: This is a custom public-source license with an academic citation requirement. It is not an OSI-approved open-source license. If you need OSI-approved open-source compatibility or commercial-use permission, contact the author before redistribution under different terms.

@@ -13,7 +13,7 @@ from tkinter import filedialog
 
 from peptiforg_core.sandbox_runtime import configured_output
 from peptiforg_core.ui_helpers import set_pepforge_icon
-from peptiforg_core.ui_theme import apply_pepforge_theme
+from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window, maximize_when_roomy
 from peptiforg_core.version import PEPFORGE_VERSION
 from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
 from spps_v4_gui.release import SPPSGui as _SPPSV5Gui
@@ -47,6 +47,10 @@ class SPPSGui(_SPPSV5Gui):
         self.title(f"Pepforge V{PEPFORGE_VERSION} - SPPS Planner V5.0.0")
         set_pepforge_icon(self)
         apply_pepforge_theme(self)
+        # Match the supplied SPPS Planner V7 reference: start as a roomy work
+        # surface instead of a cramped dialog, then maximize on desktop screens.
+        fit_window(self, preferred_width=1780, preferred_height=980, minimum_width=1260, minimum_height=760)
+        self.after(80, lambda: maximize_when_roomy(self, min_width=1600, min_height=900))
         mark_window_visible(self, self._startup_trace)
         for name in ("lot_no", "pm_lot"):
             variable = getattr(self, name, None)

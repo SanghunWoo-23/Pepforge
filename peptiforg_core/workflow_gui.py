@@ -28,6 +28,7 @@ from peptiforg_core.hotspot_workflow_bridge import ranked_region_to_transfer, wr
 from peptiforg_core.docking_lineage import lineage_record, export_lineage
 from peptiforg_core.candidate_evidence_matrix import export_candidate_evidence_matrix, export_blind_review_matrix
 from peptiforg_core.ui_helpers import set_pepforge_icon
+from peptiforg_core.ui_scroll import VerticalPageScroller
 from peptiforg_core.ui_theme import apply_pepforge_theme, fit_window, BORDER, SURFACE
 from peptiforg_core.startup_runtime import StartupTrace, mark_window_visible
 from peptiforg_core.workflow_pde_bridge import (
@@ -83,8 +84,18 @@ class WorkflowApp:
         style.configure("Sec.TLabel", font=("Segoe UI Semibold", 11))
         style.configure("Action.TButton", font=("Segoe UI Semibold", 10), padding=(12, 8))
 
-        main = ttk.Frame(self.root, padding=12)
-        main.pack(fill="both", expand=True)
+        # Long project workflows use the same stable, vertical-only page
+        # contract as Structure & Docking Studio. Ordinary mouse-wheel scrolling
+        # works over entries/text/comboboxes, edge events are clamped, and
+        # scrollregion work is debounced to avoid end-of-page stutter.
+        shell = ttk.Frame(self.root)
+        shell.pack(fill="both", expand=True)
+        shell.rowconfigure(0, weight=1)
+        shell.columnconfigure(0, weight=1)
+        self._workflow_scroller = VerticalPageScroller(self.root, shell, background="#F3F6FA", padding=12, wheel_step=2)
+        self._workflow_scroller.grid(row=0, column=0, sticky="nsew")
+        self._workflow_scroller.scrollbar.grid(row=0, column=1, sticky="ns")
+        main = self._workflow_scroller.inner
         ttk.Label(main, text="Pepforge Workflow Mode", style="Title.TLabel").pack(anchor="w")
         ttk.Label(main, text="Project-centered hand-off across Hot Spot → Design → Structure → SPPS, with stable candidate IDs and auditable artifacts.", style="Sub.TLabel", wraplength=1080).pack(anchor="w", pady=(6, 14))
 

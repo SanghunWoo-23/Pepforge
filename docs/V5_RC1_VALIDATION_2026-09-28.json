@@ -1,0 +1,37 @@
+{
+  "checkpoint": "Pepforge V5.0.0 RC1_NATIVE_READY",
+  "date": "2026-09-28",
+  "selected_regression_tests": {
+    "passed": 74,
+    "failed": 0,
+    "note": "V5, V4 PSB/SPPS/modified-chemistry/bridge, source-integrity/package/release regression selections; long groups were executed in smaller completed batches."
+  },
+  "v5_regression_final_rerun": {
+    "passed": 24,
+    "failed": 0
+  },
+  "release_gate": {
+    "passed": 25,
+    "failed": 0,
+    "python_files_compiled": 342,
+    "compile_errors": 0,
+    "stale_hits": 0,
+    "bad_artifacts": 0
+  },
+  "full_package_audit": {
+    "passed": 20,
+    "failed": 0,
+    "compile_errors": 0,
+    "stale_hits": 0,
+    "bad_artifacts": 0
+  },
+  "native_backend_state_in_build_container": {
+    "haddock3": "BACKEND_UNAVAILABLE",
+    "openmm": "BACKEND_UNAVAILABLE",
+    "mdtraj": "READY and exercised with a real DCD trajectory",
+    "esm_transformers": "OPTIONAL_DEPENDENCY_MISSING",
+    "alphafold3": "CONFIGURATION_REQUIRED"
+  },
+  "scientific_claim_boundary": "Software readiness and failure-path validation are not native scientific benchmark validation. No missing docking/MD/prediction engine is replaced with fabricated scientific output.",
+  "baseline_version_note": "The frozen V4 suite-version literal remains unchanged in this RC working tree so existing V4 release-contract regressions remain valid. Final public V5 version/release-document migration is reserved for the post-native-validation release step."
+}

@@ -1,0 +1,2 @@
+﻿target_id,reference_pdb,receptor_chain,ligand_chain,models_dir,models_glob,models,score_csv,split,source,experimental_id,notes
+example_target,references/example_complex.pdb,A,P,predictions/example_target,*.pdb,,predictions/example_target/native_docking_poses.csv,test,public experimental structure source; fill explicitly,fill_explicitly,Replace this example row before scientific use
