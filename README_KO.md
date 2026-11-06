@@ -263,7 +263,7 @@ python pepforge_cli.py release-gate --root-dir . --output-dir qa_output
 </div>
 
 
-## V6.0.0 Docking 입력·결과 개선 (2026-10-30)
+## V6.0.0 Docking 입력·결과 개선
 
 - **수용체 파일:** `.pdb`, `.cif`, `.mmcif` 지원. mmCIF는 Biopython 기반 PDB 좌표 변환 후 검증하며 Gemmi를 보조 변환기로 사용합니다. 원본 구조를 보존하고 chain/alternate location/ligand/원자 누락을 검토하세요.
 - **펩타이드 파일:** 3D 구조가 있는 PDB/mmCIF/SDF/MOL. Structure Builder와 Docking 탭은 서열 입력을 공유합니다.
