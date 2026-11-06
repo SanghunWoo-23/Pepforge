@@ -357,7 +357,7 @@ For bug reports, provide the Pepforge version, OS, Python version, minimal *nonc
 </div>
 
 
-## V6.0.0 native docking input and results update (2026-10-30)
+## V6.0.0 native docking input and results update
 
 - **Receptor file input** accepts `.pdb`, `.cif`, and `.mmcif`. mmCIF is converted into a validated PDB coordinate adapter with Biopython; Gemmi is available as a fallback. Preserve the original mmCIF as the authoritative source. Check chain identifiers, alternate conformers, ligands, and atom coverage after conversion.
 - **Peptide file input** accepts PDB, mmCIF, SDF, or MOL when suitable 3D coordinates are present. Structure Builder and Docking tabs share the modified-peptide sequence.
