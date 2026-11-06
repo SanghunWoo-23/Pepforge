@@ -373,6 +373,14 @@ def export_modified_peptide_structure(
         max_embedding_retries=max(0, int(max_embedding_retries)),
     )
     pml = make_pymol_pml(result.meta_path, prefer="pdb")
+    # Evaluate the actual explicit chemistry with an installed, recognized
+    # intramolecular MMFF94s parameter set; never claim MD or binding energy.
+    try:
+        from peptiforg_core.v6_modified_forcefield import evaluate_sdf
+        evaluate_sdf(result.sdf_path, out / f"{Path(result.sdf_path).stem}_mmff94s_audit.json")
+    except Exception as ff_exc:
+        (out / "modified_forcefield_unavailable.txt").write_text(
+            f"MMFF94s assessment not available: {type(ff_exc).__name__}: {ff_exc}\n", encoding="utf-8")
 
     meta_path = Path(result.meta_path)
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -449,6 +457,8 @@ def export_modified_peptide_structure(
         "json": str(result.meta_path),
         "report": str(result.report_path),
         "pml": str(pml),
+        "pymol_sequence_map": str(pml.with_name(pml.stem + "_sequence_token_map.tsv")),
+        "mmff94s_report": str(out / f"{Path(result.sdf_path).stem}_mmff94s_audit.json"),
         "top5_compare_pml": str(top5_pml),
         "token_map": str(token_map),
         "csv": str(token_map),

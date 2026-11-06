@@ -1,0 +1,119 @@
+Integrated SPPS project planning, optional Auto Plan, sequence risk screening, Loading/Cleavage recommendations, and traceable experimental review
+
+# SPPS Planner V8.0.0 — GitHub Public Source Release
+
+SPPS Planner V8.0.0 expands the V7 Project Manager workflow with an optional Auto Plan confirmation flow, sequence-level risk review, clearer evidence-aware Loading/Cleavage recommendations, scrollable analysis pages, and stronger project-file safeguards. The native Tkinter editor, operator-controlled synthesis choices, and established chemistry engine remain intact.
+
+## Highlights
+
+### Optional Auto Plan
+
+- Review sequence, terminal notation, peptide setup, resin/loading, scale, copies, and selected coupling chemistry before generation.
+- Choose **Auto Plan (Optional)** → review → **Generate Full Plan** without removing the original manual **Generate** pathway.
+- Generate linked Plan, Materials, Checklist, Total Materials, Cleavage Cocktail, and Workup views through the existing calculator.
+- Previewing Auto Plan does not silently change chemistry settings. Invalid or absent setup details still require operator input.
+- Auto Plan does not infer a laboratory-validated cleavage time/cocktail or synthesis success probability from sequence alone.
+
+### Project Manager and SPPS planning
+
+- Project and peptide metadata, editable sequence, scale/copies, resin/loading, LOTs, and exact reagent bottles.
+- Editable Plan and existing Apply Change workflow; unified materials and checklist calculation.
+- My Recipes, Batch Manager, and preparation-default separation retained.
+- Established 2-CTC direct-loading default: resin 1 eq / amino acid 2 eq / DIEA 4 eq when selected; adjustable for already-loaded resin.
+- Cleavage and post-cleavage ether/hexane workup remain separately accounted for.
+
+### Sequence Risk Map and evidence-assisted recommendations
+
+- Position-aware rule findings, levels, explanations, and traceable rule identifiers.
+- More prominent Loading and Cleavage condition summaries, applicability, evidence source, and uncertainty.
+- Rule-based advice, operator anchors, and experimental observations remain distinct; recommendations are never silently applied.
+- Sequence risk indications are not calibrated probabilities of experimental failure.
+
+### UI / UX improvements
+
+- Reordered Project Manager actions to Generate → Apply Change → **Auto Plan (Optional)** → Recommendations & Lab History → Sequence Risk Map → Save Session Now. Auto Plan now sits immediately after Apply Change and uses the same blue primary button style as Generate.
+- Reordered Recommendations & Lab History actions by experiment lifecycle: **Preflight → Start Experiment → Add Result → Add Issue → Final Result → Finish → Repeat Run**, then **Refresh → Data Store → Backup DB** for maintenance. No Run-lifecycle calculations or recording commands were changed.
+- Removed only redundant main-toolbar shortcuts for Loading Advice, Cleavage Advice and Record Lab Data; their existing tabs and recording controls remain fully available in the recommendations window.
+- Original Project Manager, Batch Manager, Step 1 and Step 2 Tkinter editing workflow preserved.
+- Scrolling added to long Recommendations/Lab History pages, with mouse-wheel and scrollbar dragging behavior implemented in source.
+- Window title standardized as **SPPS Planner V8.0.0** with the existing application icon.
+- Loading/Cleavage result summaries are more visible and stale results are cleared on analysis failure.
+- Fixed a cross-window Tkinter style collision: opening Recommendations & Lab History no longer resets the main Plan/Materials Treeview header font or row height. Recommendation/history tables now use a dedicated namespaced Treeview style; the Plan header remains bold.
+
+### Project data integrity and public/private separation
+
+- Project JSON validation, atomic writes, backup preservation, conflict handling, and safer open/save behavior.
+- The Public source archive is isolated from private experimental seed files and private laboratory databases; it does not contain a runtime SQLite database.
+- A single consolidated Windows build entry point replaces three separate BAT scripts:
+  `INSTALL_BUILD_TOOLS_AND_BUILD.bat` (tool discovery/install attempts, EXE build, self-tests, Installer build, artifact checks).
+- Required TXT files (requirements, version identity, Windows version resource) are retained; duplicate build scripts and historical release reports are excluded.
+
+## Workflow
+
+```text
+Project Manager → Add / Edit Peptide
+  ↓
+Sequence + Scale + Resin + Loading + Exact bottles
+  ↓
+Generate  OR  Auto Plan (Optional) → Review → Generate Full Plan
+  ↓
+Plan → Materials → Checklist → Total Materials
+   └→ Cleavage Cocktail → Workup
+  ↓
+Sequence Risk Map / Loading & Cleavage Recommendations / Lab History
+  ↓
+Batch Manager / Export / Operator Review / Experimental Validation
+```
+
+## Windows source build
+
+Extract the complete Public ZIP and on Windows 10/11 run:
+
+```bat
+INSTALL_BUILD_TOOLS_AND_BUILD.bat
+```
+
+The script checks for Python 3.11/3.12 x64 and Inno Setup 6/7, attempts missing-tool installation via `winget`, installs Python dependencies, validates the source, builds and self-tests the EXE, compiles the Installer, and checks the outputs. The expected Installer filename is `SPPS_Planner_Setup_V8.0.0.exe`. Network access/permissions and a working Windows toolchain are needed. **This source archive contains neither a prebuilt EXE nor an Installer.**
+
+## Verification
+
+| Check | Result |
+| --- | --- |
+| Public Linux/headless full regression | **474 passed / 48 skipped / 0 failed** |
+| Focused action-bar and experiment-workflow UI checks | **3 passed** (subset of full regression) |
+| New recommendation-window style-isolation regression | **2 passed** under Linux Xvfb; **1 passed + 1 skipped** in displayless run |
+| Python source compilation | **Passed** |
+| Windows release source contract | **Passed** (static check only) |
+| Core chemistry engine SHA-256 | `5cf59ad71ea1637df4768d812612a86635b31c691efc153f93ef328d736108de` (unchanged) |
+| Public ZIP private experimental seed and SQLite file scan | **No bundled private seed files or SQLite DB** |
+| ZIP CRC / per-file hash verification | **Passed** |
+| Linux Xvfb Tkinter widget order / Auto Plan style smoke checks | **Passed** (Public; non-Windows) |
+| Native Windows EXE / installer build and installation | **Not verified** |
+| Native Windows GUI and mouse scroll acceptance | **Not verified** |
+
+Automated Linux/source checks do not establish successful Windows packaging, native GUI operation, installation, upgrade, uninstall, or laboratory validity.
+
+## Scientific scope
+
+This software is intended for SPPS planning, reagent accounting, evidence review, experiment traceability, and operator decision support. It cannot establish complete coupling/deprotection, optimal cleavage conditions, yield, purity, validated SOPs, GMP/GLP compliance, or biological performance. Review outputs against approved SOPs, SDS, safety rules, and experimental measurements.
+
+## Requirements
+
+- Target platform: Windows 10 / 11
+- Source/build: 64-bit Python 3.11 or 3.12 with Tk support
+- Python dependencies: `requirements.txt`; test dependencies: `requirements-dev.txt`
+- Windows Installer builder: Inno Setup 6 or 7 (installation can be attempted through the BAT using `winget`)
+
+## Source
+
+Repository: https://github.com/SanghunWoo-23/SPPS-PLANNER
+
+See `README.md`, `README_KO.md`, `docs/USER_MANUAL_EN.md`, `docs/USER_MANUAL_KO.md`, and `docs/WINDOWS_BUILD_KO.md` for usage and installation guidance.
+
+The repository uses a custom academic-citation license; see `LICENSE` and `CITATION.cff` for details.
+
+## Release asset
+
+Public source archive: see the accompanying GitHub Release for the exact filename and external SHA-256.
+
+**SPPS Planner V8.0.0 — From peptide sequence to reviewable synthesis plans and evidence-aware laboratory decisions.**

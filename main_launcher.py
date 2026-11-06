@@ -116,7 +116,7 @@ def run_peptide_design_engine() -> None:
     box.pack(fill="both", expand=True)
     ttk.Label(box, text="Peptide Design Engine", font=("Segoe UI Semibold", 13)).pack(anchor="w")
     ttk.Label(box, text="Loading design engine...", padding=(0, 8, 0, 0)).pack(anchor="w")
-    bar = ttk.Progressbar(box, mode="indeterminate", length=360)
+    bar = ttk.Progressbar(box, mode="determinate", maximum=100, value=5, length=360)
     bar.pack(fill="x", pady=(10, 0))
     # Avoid a distracting loading-window flash when the import is already warm.
     # The loader becomes visible only if initialization actually takes noticeable time.
@@ -136,7 +136,8 @@ def run_peptide_design_engine() -> None:
         if not worker.is_alive() or not loader.winfo_exists():
             return
         loader.deiconify()
-        bar.start(12)
+        # Import duration cannot be estimated. Fill only verified startup stages.
+        bar.configure(value=10)
         loader.update_idletasks()
         try:
             loader.eval('tk::PlaceWindow . center')
@@ -147,10 +148,7 @@ def run_peptide_design_engine() -> None:
         if worker.is_alive():
             loader.after(50, _poll)
             return
-        try:
-            bar.stop()
-        except Exception:
-            pass
+        bar.configure(value=100 if state["module"] is not None else 0)
         loader.destroy()
 
     loader.after(250, _show_loader_if_needed)
@@ -172,74 +170,73 @@ def run_hotspot_finder() -> None:
 
 
 def run_spps_planner() -> None:
-    """Launch the supplied SPPS Planner V7.0.0 FINAL runtime.
+    """Launch the V8 public planner without swapping in the legacy V5 controller.
 
-    Pepforge vendors the user's final public runtime as a separate application
-    so the planner keeps its own Project Manager / Batch Manager UI and startup
-    behavior instead of being silently replaced by Pepforge's older compatibility
-    controller.  Workflow values are passed only through environment variables.
+    Source: invoke the vendored V8 script using this exact Python interpreter.
+    Frozen EXE: invoke a separately packaged SPPS_Planner.exe from the same
+    installation. The Pepforge PyInstaller bootloader is NOT a Python CLI.
     """
     _ensure_runtime_environment()
-    vendor_root = _resource_path("vendor", "spps_planner_v7_final")
-    vendor_entry = vendor_root / "pepforge_entry.py"
+    RUNTIME_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = RUNTIME_LOG_DIR / "spps_v8_launch.log"
+    v8_root = _resource_path("vendor", "spps_planner_v8")
+    v8_entry = v8_root / "main_launcher.py"
+    is_frozen = bool(getattr(sys, "frozen", False))
 
-    # Source distributions can launch the exact V7 final planner in its own process.
-    # This is both faster from the Pepforge launcher and prevents Tk/import state
-    # from the two applications from interfering with each other.
-    if vendor_entry.exists() and not getattr(sys, "frozen", False):
-        env = os.environ.copy()
-        env["PYTHONUTF8"] = "1"
-        subprocess.Popen(
-            [sys.executable, str(vendor_entry)],
-            cwd=str(vendor_root),
-            env=env,
+    if is_frozen:
+        # Inno Setup and the unified build BAT install this companion alongside
+        # Pepforge.exe; never try to run .py using the frozen executable.
+        exe_dir = Path(sys.executable).resolve().parent
+        companion = exe_dir / "SPPS_Planner" / "SPPS_Planner.exe"
+        if not companion.is_file():
+            raise RuntimeError(
+                "SPPS Planner V8 executable is missing: " + str(companion)
+                + "\nRebuild/reinstall using INSTALL_BUILD_TOOLS_AND_BUILD.bat "
+                  "(menu 1 or 2). The Windows installer must include the "
+                  "SPPS_Planner companion directory."
+            )
+        command = [str(companion)]
+        cwd = companion.parent
+    else:
+        if not v8_entry.is_file():
+            raise RuntimeError(
+                "SPPS Planner V8 source is missing: " + str(v8_entry)
+                + "\nUse the full Pepforge Public ZIP including vendor/spps_planner_v8."
+            )
+        command = [sys.executable, str(v8_entry)]
+        cwd = v8_root
+
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PEPFORGE_LAUNCHED_SPPS_V8"] = "1"
+    # Preserve launch errors even when the planner exits before displaying a UI.
+    with log_path.open("a", encoding="utf-8") as log_file:
+        log_file.write(f"\n--- SPPS Planner V8 launch: {command!r} ---\n")
+        log_file.flush()
+        try:
+            proc = subprocess.Popen(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError as exc:
+            raise RuntimeError(f"SPPS Planner failed to start: {exc}\nLog: {log_path}") from exc
+        # Fast failure preflight: catch immediate import/missing-DLL exits. Do
+        # not claim startup success just because Popen returned a PID.
+        try:
+            exit_code = proc.wait(timeout=1.2)
+        except subprocess.TimeoutExpired:
+            exit_code = None
+    if exit_code is not None:
+        raise RuntimeError(
+            f"SPPS Planner V8 exited before opening its GUI (exit code {exit_code})."
+            f"\nInspect: {log_path}\nFor source runs install V8 requirements "
+            "in the active environment: python -m pip install -r "
+            "vendor/spps_planner_v8/requirements.txt"
         )
-        return
-
-    # Frozen builds may not have a system Python capable of executing vendored
-    # source.  Preserve the verified embedded controller as an explicit fallback
-    # rather than pretending the V7 runtime launched.
-    state = {"module": None, "error": None}
-    loader = tk.Tk()
-    loader.title("Pepforge SPPS Planner")
-    loader.resizable(False, False)
-    _apply_icon(loader)
-    box = ttk.Frame(loader, padding=18)
-    box.pack(fill="both", expand=True)
-    ttk.Label(box, text="SPPS Planner", font=("Segoe UI Semibold", 13)).pack(anchor="w")
-    ttk.Label(box, text="Opening compatibility planner…", padding=(0, 8, 0, 0)).pack(anchor="w")
-    bar = ttk.Progressbar(box, mode="indeterminate", length=380)
-    bar.pack(fill="x", pady=(10, 0))
-    bar.start(12)
-    loader.update_idletasks()
-    sw, sh = loader.winfo_screenwidth(), loader.winfo_screenheight()
-    w, h = 430, 120
-    loader.geometry(f"{w}x{h}+{max(0,(sw-w)//2)}+{max(0,(sh-h)//2)}")
-
-    def _import():
-        try:
-            import suite_gui.spps_tk_gui as module
-            state["module"] = module
-        except Exception:
-            state["error"] = traceback.format_exc()
-
-    threading.Thread(target=_import, daemon=True).start()
-
-    def _poll():
-        if state["module"] is None and state["error"] is None:
-            loader.after(40, _poll)
-            return
-        try:
-            bar.stop()
-        except Exception:
-            pass
-        loader.destroy()
-
-    loader.after(40, _poll)
-    loader.mainloop()
-    if state["error"]:
-        raise RuntimeError(state["error"])
-    state["module"].main()
+    LOGGER.info("Started SPPS Planner V8 pid=%s from %s; log=%s", proc.pid, cwd, log_path)
 
 
 def run_docking_workbench() -> None:
@@ -357,8 +354,8 @@ def launcher_main() -> None:
             "outputs": "Prepared external-validation folders and guidance; no fabricated docking or MD results",
         },
         "docking": {
-            "group": "HIDDEN", "number": "", "name": "Advanced Docking Review",
-            "summary": "Legacy compatibility/review surface retained for detailed imports and diagnostics.",
+            "group": "HIDDEN", "number": "", "name": "Docking Workbench",
+            "summary": "Advanced Docking Review (legacy): compatibility surface for imports and diagnostics.",
             "workflow": "Existing structures/results → advanced review / import / diagnostics",
             "outputs": "Compatibility review tables and diagnostics",
         },
@@ -398,11 +395,15 @@ def launcher_main() -> None:
         target = tool or selected_tool.get()
         data = tools[target]
         try:
-            _run_subprocess(target)
+            if target == "spps":
+                run_spps_planner()  # same standalone-window model as PDE / PSB
+            else:
+                _run_subprocess(target)
             run_status.set(f"Launch requested: {data['name']}")
         except Exception as exc:
             run_status.set(f"Launch failed: {data['name']}")
-            raise exc
+            LOGGER.exception("Could not launch %s", target)
+            messagebox.showerror("Launch failed", str(exc), parent=root)
 
     def open_selected_workspace() -> None:
         target = selected_tool.get()
@@ -441,7 +442,7 @@ def launcher_main() -> None:
 
     tools_menu = tk.Menu(menu, tearoff=False)
     tools_menu.add_command(label="Workflow Mode", command=lambda: update_selection("workflow"))
-    tools_menu.add_command(label="Advanced Docking Review (legacy)", command=lambda: launch_selected("docking"))
+    tools_menu.add_command(label=tools["docking"]["name"] + " (advanced/legacy)", command=lambda: launch_selected("docking"))
     tools_menu.add_separator()
     tools_menu.add_command(label="Open Selected Tool", command=lambda: launch_selected())
     menu.add_cascade(label="Tools", menu=tools_menu)
@@ -542,6 +543,10 @@ def launcher_main() -> None:
     ttk.Label(footer, textvariable=density_var, style="Muted.TLabel").pack(side="left", padx=(5, 0))
     ttk.Button(footer, text="Project folder", command=lambda: _open_path(ROOT)).pack(side="right")
     ttk.Button(footer, text="Runtime logs", command=lambda: _open_path(RUNTIME_LOG_DIR)).pack(side="right", padx=(0, 8))
+
+    # SPPS Planner V8 launches in its own normal desktop window, just like
+    # PDE / Structure Builder. Do not reparent across Tk processes: on Windows
+    # this can break focus, modal dialogs, resizing and DPI behavior.
 
     update_selection("hotspot")
     root.mainloop()

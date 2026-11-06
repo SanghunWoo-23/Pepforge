@@ -39,7 +39,7 @@ def verify_release_matrix(root_dir: str | Path, output_dir: str | Path) -> dict[
 
     # Version and required files
     version_file = root / "VERSION.txt"
-    add("version_file", version_file.exists() and version_file.read_text(encoding="utf-8", errors="ignore").strip() == RELEASE_VERIFY_VERSION, version_file.read_text(encoding="utf-8", errors="ignore").strip() if version_file.exists() else "missing")
+    add("version_file", version_file.exists() and version_file.read_text(encoding="utf-8", errors="ignore").strip().removeprefix("V") == RELEASE_VERIFY_VERSION, version_file.read_text(encoding="utf-8", errors="ignore").strip() if version_file.exists() else "missing")
 
     required = [
         "pepforge_cli.py",

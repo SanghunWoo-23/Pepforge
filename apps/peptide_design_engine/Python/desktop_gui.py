@@ -967,6 +967,20 @@ class PeptideDesktopGUI(tk.Tk):
             foreground="#555"
         ).pack(side="left", padx=12)
 
+    @staticmethod
+    def _copyable_result_lines(values):
+        """Render the results as selectable TSV (also pastes into spreadsheets)."""
+        return "\n".join("\t".join(str(cell).replace("\t", " ").replace("\r", " ").replace("\n", " ") for cell in row) for row in values)
+
+    def _select_result_from_text(self, event) -> None:
+        """Preserve Treeview-backed MSDS lookup when a result line is clicked."""
+        try:
+            line = int(self.result_text.index(f"@{event.x},{event.y}").split(".")[0])
+            items = self.tree.get_children()
+            self.tree.selection_set(items[line - 2] if 2 <= line <= len(items) + 1 else ())
+        except (AttributeError, IndexError, ValueError, tk.TclError):
+            LOGGER.debug("Text result selection not mapped to a candidate", exc_info=True)
+
     def _tab_run_log(self) -> None:
         tab = ttk.Frame(self.nb)
         self.nb.add(tab, text="6. Log / Results")
@@ -984,7 +998,19 @@ class PeptideDesktopGUI(tk.Tk):
         for col, w in [("rank", 70), ("score", 100), ("length", 80), ("valid", 80), ("sequence", 700)]:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor="w")
-        self.tree.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 8))
+        # Treeview does not support character-by-character mouse selection. Keep
+        # it as the canonical row model, but display a selectable Text surface.
+        # The Text widget provides native mouse drag, Ctrl+C and Ctrl+V without
+        # adding a copy button or altering candidate generation.
+        self.result_text = tk.Text(tab, height=10, wrap="none", undo=False,
+                                   font=("Consolas", 10), takefocus=True)
+        self.result_text.grid(row=2, column=0, sticky="nsew", padx=8, pady=(4, 8))
+        self.result_text.configure(tabs=(90, 195, 280, 370))
+        self.result_text.bind("<ButtonRelease-1>", self._select_result_from_text, add="+")
+        self.result_text.insert("1.0", "rank\tscore\tlength\tvalid\tsequence\n")
+        # Tk.Text's disabled state still permits drag-to-select and Ctrl+C,
+        # while preventing accidental edits to computed results.
+        self.result_text.configure(state="disabled")
 
     def _msds_context_terms(self) -> List[str]:
         """Collect explicit PDE chemistry tokens for operator SDS lookup.
@@ -1689,6 +1715,16 @@ class PeptideDesktopGUI(tk.Tk):
                 r.get("valid", ""),
                 r.get("sequence", ""),
             ))
+        lines = [self.tree.item(item, "values") for item in self.tree.get_children()]
+        display = "rank\tscore\tlength\tvalid\tsequence"
+        if lines:
+            display += "\n" + self._copyable_result_lines(lines)
+        self.result_text.configure(state="normal")
+        try:
+            self.result_text.delete("1.0", "end")
+            self.result_text.insert("1.0", display)
+        finally:
+            self.result_text.configure(state="disabled")
 
     def _set_buttons_running(self, running: bool) -> None:
         self.config(cursor="watch" if running else "")

@@ -30,7 +30,10 @@ def audit_source_tree(root_dir: str | Path) -> dict[str, Any]:
             findings.append({"file": relative, "line": 0, "rule": "banned_release_file"})
     for path in sorted(root.rglob("*.py")):
         relative = path.relative_to(root).as_posix()
-        if relative.startswith("tests/") or relative in {
+        # SPPS Planner V8 is separately versioned and embedded unchanged.
+        # Audit Pepforge-owned sources here; its vendor test suite and source
+        # contract are evaluated independently (see test_spps_v8_vendor_integration).
+        if relative.startswith(("tests/", "vendor/")) or relative in {
             "scripts/consolidate_duplicate_definitions.py",
             "peptiforg_core/source_integrity_audit.py",
         }:

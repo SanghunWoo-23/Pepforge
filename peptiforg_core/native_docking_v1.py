@@ -316,8 +316,11 @@ def run_native_docking(
     *,
     config: NativeDockingConfig | None = None,
     binding_residues: Sequence[str] | None = None,
+    progress_callback=None,
 ) -> dict[str, Any]:
     cfg = config or NativeDockingConfig()
+    from .v6_compute_pipeline import validate_native_config
+    validate_native_config(cfg)
     if str(cfg.mode).lower() not in {"blind", "manual", "hotspot"}:
         raise ValueError("mode must be blind, manual, or hotspot")
     receptor_path = Path(receptor_pdb).expanduser().resolve()
@@ -356,6 +359,10 @@ def run_native_docking(
                 atoms=placed, summary=interaction_summary(evidence),
             ))
             cid += 1
+        if progress_callback is not None:
+            # Search progress is based on completed anchor/rotation work, not elapsed time.
+            total = min(int(cfg.max_candidates), len(anchors) * len(rotations))
+            progress_callback(min(1.0, cid / max(1, total)), f"Pose search {cid}/{total} trials")
         if cid >= int(cfg.max_candidates):
             break
 

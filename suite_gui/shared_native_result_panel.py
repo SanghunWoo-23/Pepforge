@@ -67,37 +67,41 @@ class SharedNativeResultPanel(ttk.Frame):
         self._build(title)
 
     def _build(self, title: str) -> None:
+        # Keep the primary path small; expert comparison tools remain accessible
+        # on demand without crowding the main results toolbar.
         header = ttk.Frame(self)
-        header.pack(fill="x", padx=4, pady=(4, 2))
-        ttk.Label(header, text=title).pack(side="left")
-        ttk.Label(
-            header,
-            text="Shared view: pose → interaction → mechanics → trajectory → provenance",
-        ).pack(side="left", padx=12)
-        ttk.Button(header, text="Open selected pose", command=self.open_selected_pose).pack(side="right", padx=3)
-        ttk.Button(header, text="3D review", command=self.open_selected_review).pack(side="right", padx=3)
-        self.rerun_btn = ttk.Button(header, text="Run follow-up for selected", command=self.rerun_selected_followup)
-        self.rerun_btn.pack(side="right", padx=3)
-        ttk.Button(header, text="Show all", command=self.show_all).pack(side="right", padx=3)
-        ttk.Button(header, text="Open result folder", command=self.open_result_folder).pack(side="right", padx=3)
+        header.pack(fill="x", padx=4, pady=(4, 5))
+        ttk.Label(header, text="Native docking results").pack(side="left", padx=(2, 14))
+        ttk.Button(header, text="Open results", command=self.open_result_folder).pack(side="left", padx=3)
+        ttk.Button(header, text="Open pose", command=self.open_selected_pose).pack(side="left", padx=3)
+        ttk.Button(header, text="3D review", command=self.open_selected_review).pack(side="left", padx=3)
+        ttk.Button(header, text="Export report", command=self.export_review_report).pack(side="left", padx=3)
+        ttk.Button(header, text="Interpret", command=self.show_interpretation).pack(side="left", padx=3)
+        self._advanced_visible = tk.BooleanVar(value=False)
+        ttk.Checkbutton(header, text="Advanced tools", variable=self._advanced_visible,
+                        command=self._toggle_advanced_tools).pack(side="right", padx=6)
 
-        controls = ttk.Frame(self)
-        controls.pack(fill="x", padx=4, pady=(0,2))
+        self.advanced_controls = ttk.Frame(self)
+        controls = self.advanced_controls
         ttk.Label(controls, text="Interaction filter").pack(side="left")
-        self.interaction_filter_box = ttk.Combobox(controls, textvariable=self._interaction_filter, state="readonly", width=18,
-            values=("ALL","hydrogen_bond","hydrophobic","salt_bridge","pi_pi","cation_pi","clash","van_der_Waals","weak_C_H_O_N"))
-        self.interaction_filter_box.pack(side="left", padx=(4,10))
+        self._interaction_filter = tk.StringVar(value="ALL")
+        self.interaction_filter_box = ttk.Combobox(controls, textvariable=self._interaction_filter,
+            state="readonly", width=15,
+            values=("ALL", "hydrogen_bond", "hydrophobic", "salt_bridge", "pi_pi", "cation_pi", "clash", "van_der_Waals", "weak_C_H_O_N"))
+        self.interaction_filter_box.pack(side="left", padx=(4, 10))
         self.interaction_filter_box.bind("<<ComboboxSelected>>", lambda _e: self._render_detail_rows())
-        ttk.Button(controls, text="Set compare A", command=self.set_compare_a).pack(side="left", padx=2)
-        ttk.Button(controls, text="Set compare B", command=self.set_compare_b).pack(side="left", padx=2)
-        ttk.Button(controls, text="Open A/B comparison", command=self.open_pose_comparison).pack(side="left", padx=2)
-        ttk.Button(controls, text="Compare metrics", command=self.show_pose_comparison_metrics).pack(side="left", padx=2)
-        ttk.Button(controls, text="Export review report", command=self.export_review_report).pack(side="left", padx=2)
-        ttk.Button(controls, text="Interpret result", command=self.show_interpretation).pack(side="left", padx=2)
-        ttk.Button(controls, text="Gain/Loss 3D", command=self.open_gain_loss_review).pack(side="left", padx=2)
-        ttk.Button(controls, text="Multi-pose matrix", command=self.export_multi_pose_matrix).pack(side="left", padx=2)
+        for label, command in (
+            ("Compare A", self.set_compare_a), ("Compare B", self.set_compare_b),
+            ("A/B review", self.open_pose_comparison), ("Metrics", self.show_pose_comparison_metrics),
+            ("Gain/Loss 3D", self.open_gain_loss_review), ("Pose matrix", self.export_multi_pose_matrix),
+            ("Follow-up", self.rerun_selected_followup), ("Show all", self.show_all),
+        ):
+            button = ttk.Button(controls, text=label, command=command)
+            button.pack(side="left", padx=2)
+            if label == "Follow-up":
+                self.rerun_btn = button
         self.compare_label = ttk.Label(controls, text="A: -   B: -")
-        self.compare_label.pack(side="left", padx=8)
+        self.compare_label.pack(side="left", padx=6)
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=4, pady=(2, 4))
@@ -152,6 +156,12 @@ class SharedNativeResultPanel(ttk.Frame):
         self.trajectory_frame_label.pack(side="left", padx=4)
         ttk.Button(traj_controls, text="Open slider frame", command=self.open_slider_trajectory_frame).pack(side="left", padx=2)
         self.pose_tree.bind("<<TreeviewSelect>>", self._on_pose_selected)
+
+    def _toggle_advanced_tools(self) -> None:
+        if self._advanced_visible.get():
+            self.advanced_controls.pack(fill="x", padx=4, pady=(0, 4), before=self.notebook)
+        else:
+            self.advanced_controls.pack_forget()
 
     def _tree_tab(self, label: str, columns: tuple[str, ...], widths: tuple[int, ...]):
         frame = ttk.Frame(self.notebook)

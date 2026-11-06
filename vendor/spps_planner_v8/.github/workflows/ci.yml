@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    name: Windows / Python ${{ matrix.version }}
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '3.11.9'
+            tag: '311'
+            installer_url: 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe'
+          - version: '3.12.10'
+            tag: '312'
+            installer_url: 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Do not use the GitHub-hosted Python tool cache on Windows for Tk tests.
+      # A known setup-python/windows-latest issue can intermittently leave Tcl/Tk
+      # unable to read init.tcl, especially on Python 3.11.  Install the official
+      # CPython build into RUNNER_TEMP so each job gets its own complete Tcl/Tk.
+      - name: Install official CPython with Tcl/Tk
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $installer = Join-Path $env:RUNNER_TEMP "python-${{ matrix.version }}-amd64.exe"
+          $target = Join-Path $env:RUNNER_TEMP "spps-python-${{ matrix.tag }}"
+
+          if (Test-Path $target) {
+            Remove-Item -Recurse -Force $target
+          }
+
+          & curl.exe --fail --location --retry 5 --retry-delay 2 --output $installer '${{ matrix.installer_url }}'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download Python ${{ matrix.version }} installer."
+          }
+          if (-not (Test-Path $installer) -or (Get-Item $installer).Length -lt 10MB) {
+            throw "Downloaded Python installer is missing or unexpectedly small."
+          }
+
+          $arguments = @(
+            '/quiet',
+            'InstallAllUsers=0',
+            "TargetDir=$target",
+            'Include_exe=1',
+            'Include_lib=1',
+            'Include_dev=1',
+            'Include_pip=1',
+            'Include_tcltk=1',
+            'Include_launcher=0',
+            'Include_test=0',
+            'Include_doc=0',
+            'Shortcuts=0',
+            'PrependPath=0'
+          )
+
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -notin @(0, 3010)) {
+            throw "Python installer failed with exit code $($process.ExitCode)."
+          }
+
+          $python = Join-Path $target 'python.exe'
+          if (-not (Test-Path $python)) {
+            throw "Installed python.exe was not found at $python"
+          }
+
+          $actual = (& $python -c "import platform; print(platform.python_version())").Trim()
+          if ($actual -ne '${{ matrix.version }}') {
+            throw "Expected Python ${{ matrix.version }}, got $actual"
+          }
+
+          $tclRoot = Join-Path $target 'tcl'
+          $tclDir = Get-ChildItem $tclRoot -Directory |
+            Where-Object { $_.Name -like 'tcl8.*' } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1
+          $tkDir = Get-ChildItem $tclRoot -Directory |
+            Where-Object { $_.Name -like 'tk8.*' } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1
+
+          if ($null -eq $tclDir -or -not (Test-Path (Join-Path $tclDir.FullName 'init.tcl'))) {
+            throw "Fresh Python installation does not contain a usable Tcl init.tcl."
+          }
+          if ($null -eq $tkDir -or -not (Test-Path (Join-Path $tkDir.FullName 'tk.tcl'))) {
+            throw "Fresh Python installation does not contain a usable Tk tk.tcl."
+          }
+
+          $env:TCL_LIBRARY = $tclDir.FullName
+          $env:TK_LIBRARY = $tkDir.FullName
+
+          "SPPS_PYTHON=$python" >> $env:GITHUB_ENV
+          "TCL_LIBRARY=$($tclDir.FullName)" >> $env:GITHUB_ENV
+          "TK_LIBRARY=$($tkDir.FullName)" >> $env:GITHUB_ENV
+          $target >> $env:GITHUB_PATH
+          (Join-Path $target 'Scripts') >> $env:GITHUB_PATH
+
+          & $python -VV
+          & $python -c "import tkinter as tk; r=tk.Tk(); r.withdraw(); print('Tk patchlevel:', r.tk.call('info','patchlevel')); r.update_idletasks(); r.destroy()"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tk startup failed in the fresh official CPython installation."
+          }
+
+      - name: Upgrade pip
+        shell: pwsh
+        run: '& $env:SPPS_PYTHON -m pip install --upgrade pip'
+
+      - name: Install runtime and test dependencies
+        shell: pwsh
+        run: '& $env:SPPS_PYTHON -m pip install -r requirements.txt -r requirements-dev.txt'
+
+      - name: Verify Tk before tests
+        shell: pwsh
+        run: |
+          & $env:SPPS_PYTHON -c "import tkinter as tk; r=tk.Tk(); r.withdraw(); print('Tk OK:', r.tk.call('info','patchlevel')); r.destroy()"
+          if ($LASTEXITCODE -ne 0) { throw 'Tk verification failed.' }
+
+      - name: Run pytest
+        shell: pwsh
+        run: '& $env:SPPS_PYTHON -m pytest -q'
+
+      - name: Verify V6 integrity
+        shell: pwsh
+        run: '& $env:SPPS_PYTHON tools/verify_v6_integrity.py'
+
+      - name: Verify Windows release
+        shell: pwsh
+        run: '& $env:SPPS_PYTHON tools/verify_windows_release.py'
+
+      - name: Verify release
+        shell: pwsh
+        run: '& $env:SPPS_PYTHON tools/verify_release.py --passes 1'
+
+  linux-tk:
+    name: Linux / Tk / Python 3.11.9
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11.9'
+          check-latest: false
+
+      - name: Install system Tk/Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb python3-tk
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install runtime and test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Verify Tk under Xvfb
+        run: xvfb-run -a python -c "import tkinter as tk; r=tk.Tk(); r.withdraw(); print('Tk OK:', r.tk.call('info','patchlevel')); r.destroy()"
+
+      - name: Run pytest with virtual display
+        run: xvfb-run -a python -m pytest -q

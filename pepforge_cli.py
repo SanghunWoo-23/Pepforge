@@ -1039,7 +1039,215 @@ def build_parser():
     sp.add_argument("--resource-root", default="")
     sp.set_defaults(func=cmd_v5_psb_simulate)
 
+    sp = sub.add_parser("v6-compute", help="Auditable native docking and optional real OpenMM MD; no fabricated results")
+    sp.add_argument("--receptor-pdb", required=True)
+    sp.add_argument("--peptide-pdb", required=True)
+    sp.add_argument("--output-dir", required=True)
+    sp.add_argument("--poses", type=int, default=5)
+    sp.add_argument("--max-candidates", type=int, default=500)
+    sp.add_argument("--run-md", action="store_true")
+    sp.add_argument("--production-ns", type=float, default=1.0)
+    sp.add_argument("--replicates", type=int, default=3)
+    sp.add_argument("--preflight-only", action="store_true")
+    sp.set_defaults(func=cmd_v6_compute)
+
+    sp = sub.add_parser("v6-independent-split", help="Evidence-controlled, family-locked split audit")
+    sp.add_argument("--manifest-csv", required=True)
+    sp.add_argument("--output-dir", required=True)
+    sp.add_argument("--identity-threshold", type=float, default=0.30)
+    sp.add_argument("--seed", type=int, default=42)
+    sp.set_defaults(func=cmd_v6_independent_split)
+
+    sp = sub.add_parser("v6-assess", help="Uncalibrated rank consensus or fail-closed evidence triage")
+    sp.add_argument("--mode", choices=["consensus", "evidence"], required=True)
+    sp.add_argument("--input-csv", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.set_defaults(func=cmd_v6_assessment)
+
+    sp = sub.add_parser("v6-compare-benchmark", help="Paired, held-out V5/V6 success endpoint comparison")
+    sp.add_argument("--input-csv", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.add_argument("--split", choices=["train", "validation", "test"], default="test")
+    sp.add_argument("--seed", type=int, default=42)
+    sp.add_argument("--bootstrap-replicates", type=int, default=2000)
+    sp.add_argument("--minimum-targets", type=int, default=20)
+    sp.add_argument("--minimum-families", type=int, default=5)
+    sp.set_defaults(func=cmd_v6_compare_benchmark)
+
+    sp = sub.add_parser("v6-science-gate", help="Fail-closed V6 scientific release evidence checklist")
+    sp.add_argument("--evidence-json", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.set_defaults(func=cmd_v6_science_gate)
+
+    sp = sub.add_parser("v6-parameter-audit", help="Audit modified residue parameter registry metadata")
+    sp.add_argument("--registry-json", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.set_defaults(func=cmd_v6_parameter_audit)
+
+    sp = sub.add_parser("v6-split-lock", help="Lock or verify target-level split assignments")
+    sp.add_argument("--action", choices=["create", "verify"], required=True)
+    sp.add_argument("--split-csv", required=True)
+    sp.add_argument("--lock-json", required=True)
+    sp.add_argument("--output-json", help="Verification result file (verify action)")
+    sp.set_defaults(func=cmd_v6_split_lock)
+
+    sp = sub.add_parser("v6-evaluate-ranker", help="Leakage-safe held-out ranker probability diagnostics")
+    sp.add_argument("--input-csv", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.add_argument("--bins", type=int, default=10)
+    sp.add_argument("--minimum-test-rows", type=int, default=20)
+    sp.add_argument("--minimum-test-families", type=int, default=5)
+    sp.add_argument("--exploratory", action="store_true", help="Report failed safeguards instead of blocking small tests")
+    sp.set_defaults(func=cmd_v6_evaluate_ranker)
+
+    sp = sub.add_parser("v6-calibrate-ranker", help="Validation-only probability calibration, independent test evaluation")
+    sp.add_argument("--input-csv", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.add_argument("--output-csv", required=True)
+    sp.set_defaults(func=cmd_v6_calibrate_ranker)
+
+    sp = sub.add_parser("v6-import-online-target", help="Import UniProt sequence and linked RCSB structures with SHA-256 provenance")
+    sp.add_argument("--accession", required=True)
+    sp.add_argument("--output-dir", required=True)
+    sp.add_argument("--pdb-limit", type=int, default=3)
+    sp.add_argument("--format", choices=["cif", "pdb"], default="cif")
+    sp.add_argument("--timeout", type=int, default=20)
+    sp.add_argument("--no-structures", action="store_true")
+    sp.add_argument("--offline-uniprot-json", help="Use locally saved UniProt response instead of network")
+    sp.add_argument("--assess-after-import", action="store_true", help="Verify output and inspect structures after import (requires Biopython)")
+    sp.set_defaults(func=cmd_v6_import_online_target)
+
+    sp = sub.add_parser("v6-assess-target", help="Verify imported target provenance and inspect coordinate chains (no docking)")
+    sp.add_argument("--project-dir", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.set_defaults(func=cmd_v6_assess_target)
+
+    sp = sub.add_parser("v6-target-handoff", help="Create a provenance-locked target chain review dossier; does not run docking")
+    sp.add_argument("--project-dir", required=True)
+    sp.add_argument("--structure", required=True, help="Manifest-relative structures/<id>.pdb or .cif")
+    sp.add_argument("--chain", required=True)
+    sp.add_argument("--output-json", required=True)
+    sp.add_argument("--reviewer", default="")
+    sp.add_argument("--notes", default="")
+    sp.set_defaults(func=cmd_v6_target_handoff)
+
+    sp = sub.add_parser("v6-build-workflow", help="Create provenance-verified chain FASTA and next-step research contract (no computation)")
+    sp.add_argument("--project-dir", required=True)
+    sp.add_argument("--handoff-json", required=True)
+    sp.add_argument("--output-dir", required=True)
+    sp.set_defaults(func=cmd_v6_build_workflow)
+
+    sp = sub.add_parser("v6-verify-workflow", help="Check current workflow input hashes")
+    sp.add_argument("--workflow-json", required=True)
+    sp.set_defaults(func=cmd_v6_verify_workflow)
+
     return p
+
+
+def cmd_v6_build_workflow(args):
+    from peptiforg_core.v6_project_workflow import generate_project_workflow
+    print(json.dumps(generate_project_workflow(args.project_dir,args.handoff_json,args.output_dir),ensure_ascii=False,indent=2))
+
+
+def cmd_v6_verify_workflow(args):
+    from peptiforg_core.v6_project_workflow import verify_project_workflow
+    result=verify_project_workflow(args.workflow_json)
+    print(json.dumps(result,ensure_ascii=False,indent=2))
+    if not result['verified']:
+        raise SystemExit(2)
+
+
+def cmd_v6_calibrate_ranker(args):
+    from peptiforg_core.v6_probability_calibration import calibrate_predictions
+    print(json.dumps(calibrate_predictions(args.input_csv, args.output_json, args.output_csv), ensure_ascii=False, indent=2))
+
+
+def cmd_v6_evaluate_ranker(args):
+    from peptiforg_core.v6_ranker_validation import evaluate_ranker
+    result = evaluate_ranker(args.input_csv, args.output_json, bins=args.bins,
+                             minimum_test_rows=args.minimum_test_rows,
+                             minimum_test_families=args.minimum_test_families,
+                             strict=not args.exploratory)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_split_lock(args):
+    from peptiforg_core.v6_blind_split_lock import create_lock, verify_lock
+    if args.action == 'create':
+        if args.output_json: raise ValueError('Creation uses --lock-json; omit --output-json')
+        result = create_lock(args.split_csv, args.lock_json)
+    else:
+        if not args.output_json: raise ValueError('--output-json required for verification')
+        result = verify_lock(args.split_csv, args.lock_json, args.output_json)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_science_gate(args):
+    from peptiforg_core.v6_release_science_gate import audit_science_evidence
+    print(json.dumps(audit_science_evidence(args.evidence_json, args.output_json), indent=2))
+
+
+def cmd_v6_parameter_audit(args):
+    from peptiforg_core.v6_parameter_registry import audit_registry
+    print(json.dumps(audit_registry(args.registry_json, args.output_json), indent=2))
+
+
+def cmd_v6_compare_benchmark(args):
+    from peptiforg_core.paired_benchmark_v2 import evaluate_paired
+    result = evaluate_paired(args.input_csv, args.output_json, split=args.split,
+                             seed=args.seed, bootstrap_replicates=args.bootstrap_replicates,
+                             minimum_targets=args.minimum_targets,
+                             minimum_families=args.minimum_families)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_assessment(args):
+    from peptiforg_core.scientific_assessment_v2 import run_assessment
+    result = run_assessment(args.input_csv, args.output_json, mode=args.mode)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_independent_split(args):
+    from peptiforg_core.independent_benchmark_v2 import build_independent_split
+    report = build_independent_split(args.manifest_csv, args.output_dir,
+                                     identity_threshold=args.identity_threshold, seed=args.seed)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_target_handoff(args):
+    from peptiforg_core.v6_target_handoff import prepare_handoff
+    result = prepare_handoff(args.project_dir, args.structure, args.chain, args.output_json,
+                             reviewer=args.reviewer, notes=args.notes)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_assess_target(args):
+    from peptiforg_core.v6_target_readiness import inspect_target_project
+    print(json.dumps(inspect_target_project(args.project_dir, output_json=args.output_json), indent=2, ensure_ascii=False))
+
+
+def cmd_v6_import_online_target(args):
+    from peptiforg_core.v6_online_target_import import import_uniprot_target
+    result = import_uniprot_target(args.accession, args.output_dir, pdb_limit=args.pdb_limit,
+                                  fmt=args.format, timeout=args.timeout,
+                                  download_structures=not args.no_structures,
+                                  offline_json=args.offline_uniprot_json)
+    if args.assess_after_import:
+        from peptiforg_core.v6_target_readiness import inspect_target_project
+        result['readiness'] = inspect_target_project(args.output_dir, output_json=__import__('pathlib').Path(args.output_dir)/'target_readiness.json')
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def cmd_v6_compute(args):
+    from peptiforg_core.v6_compute_pipeline import preflight, run_pipeline
+    cfg = NativeDockingConfig(poses=args.poses, max_candidates=args.max_candidates)
+    protocol = OpenMMProtocol(production_ns=args.production_ns, replicates=args.replicates)
+    if args.preflight_only:
+        result = preflight(args.receptor_pdb, args.peptide_pdb, config=cfg, md_protocol=protocol)
+    else:
+        result = run_pipeline(args.receptor_pdb, args.peptide_pdb, args.output_dir,
+                              config=cfg, run_md=args.run_md, md_protocol=protocol)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def main(argv=None):

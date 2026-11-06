@@ -1,0 +1,3 @@
+candidate_id,residue_status,parameter_status,receptor_provenance,pose_source,benchmark_domain
+pepA,standard,verified,pdb,executed_native,in_domain_verified
+pepB,unknown,unknown,unknown,unknown,unknown

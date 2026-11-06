@@ -62,7 +62,7 @@ def audit_package(root_dir: str | Path, output_dir: str | Path) -> dict[str, str
     version_file = root / "VERSION.txt"
     add("version_file_exists", version_file.exists(), version_file)
     if version_file.exists():
-        add("version_file_matches_release", version_file.read_text(encoding="utf-8", errors="ignore").strip() == FULL_PACKAGE_AUDIT_VERSION, version_file.read_text(encoding="utf-8", errors="ignore").strip())
+        add("version_file_matches_release", version_file.read_text(encoding="utf-8", errors="ignore").strip().removeprefix("V") == FULL_PACKAGE_AUDIT_VERSION, version_file.read_text(encoding="utf-8", errors="ignore").strip())
 
     citation = root / "CITATION.cff"
     add("citation_exists", citation.exists(), citation)

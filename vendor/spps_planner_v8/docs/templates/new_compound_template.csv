@@ -1,0 +1,2 @@
+Token,Class,Reagent/protected form,Reagent MW (g/mol),Product MW contribution (g/mol),Counts as coupling unit?,Terminal/control only?,Source used,Notes,Active?,Chemistry profile,Applied reagent logic,Preferred chemistry,Source / rationale URL,DB note
+NewToken,N-term modifier,Reagent name,0,0,Yes,No,user added,verify MW and reagent form,Yes,ACID_DIC_HOBT,carboxylic acid modifier/linker/label coupling,DIC/HOBt,,verify before scale-up

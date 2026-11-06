@@ -47,7 +47,7 @@ def release_gate_check(root_dir: str | Path, output_dir: str | Path) -> dict[str
 
     version_file = root / "VERSION.txt"
     vf = version_file.read_text(encoding="utf-8", errors="ignore").strip() if version_file.exists() else ""
-    add("version_file_current_release", vf == RELEASE_GATE_VERSION, vf or "missing")
+    add("version_file_current_release", vf.removeprefix("V") == RELEASE_GATE_VERSION, vf or "missing")
 
     citation = root / "CITATION.cff"
     if citation.exists():

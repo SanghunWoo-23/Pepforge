@@ -1,18 +1,18 @@
 #define MyAppName "Pepforge"
-#define MyAppVersion "5.0.0"
+#define MyAppVersion "6.0.0"
 #define MyAppPublisher "Pepforge Project"
 #define MyAppExeName "Pepforge.exe"
 
 [Setup]
 AppId={{7A8B6BA7-9E5E-4C3B-8B0F-AE10BEE70100}}
 AppName=Pepforge
-AppVersion=5.0.0
+AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output
-OutputBaseFilename=Pepforge_Setup_v5.0.0
+OutputBaseFilename=Pepforge_Setup_v6.0.0
 SetupIconFile=..\assets\Pepforge_Icon.ico
 Compression=lzma2
 SolidCompression=yes
@@ -26,8 +26,8 @@ AppVerName={#MyAppName} {#MyAppVersion}
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CreateUninstallRegKey=yes
-AppSupportURL=https://github.com/
-AppUpdatesURL=https://github.com/
+AppSupportURL=https://github.com/SanghunWoo-23/Pepforge
+AppUpdatesURL=https://github.com/SanghunWoo-23/Pepforge/releases
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

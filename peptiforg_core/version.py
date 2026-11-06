@@ -6,7 +6,7 @@ User-facing release surfaces import this value instead of repeating a version
 literal. Component versions remain independent from the Pepforge suite version.
 """
 
-PEPFORGE_VERSION = "5.0.0"
+PEPFORGE_VERSION = "6.0.0"
 PEPFORGE_RELEASE_NAME = "Integrated Structure, Docking & Synthesis Workflow"
 
 

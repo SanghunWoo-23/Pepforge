@@ -1,4 +1,4 @@
-# Pepforge V5.0.0 core desktop runtime
+# Pepforge V6.0.0 core desktop runtime
 # Heavy ML/web packages are optional and are not installed by default.
 numpy>=1.26
 pandas>=2.0
@@ -7,3 +7,7 @@ PyYAML>=6.0
 joblib>=1.3
 rdkit>=2025.3
 Pillow>=10.0
+
+# mmCIF receptor import: primary parser plus fallback for complex CIF structures.
+biopython>=1.83
+gemmi>=0.6.7

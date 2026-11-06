@@ -1,19 +1,19 @@
 <div align="center">
 
-<img src="assets/Pepforge_Icon.png" alt="Pepforge" width="150">
+<img src="assets/Pepforge_Icon.png" alt="Pepforge icon" width="150">
 
 # Pepforge
 
-### Integrated peptide design, structure generation, docking, SPPS planning, and interaction analysis
+### Modified-peptide design, molecular structures, ensemble docking, thermodynamic workflows, and SPPS planning
 
-**Pepforge V5.0.0 · Public Research Source Release**
+**Pepforge V6.0.0 · Public Research Source Release**
 
-[![Release](https://img.shields.io/badge/release-v5.0.0-2563EB?style=for-the-badge)](VERSION.txt)
+[![Release](https://img.shields.io/badge/release-V6.0.0-2563EB?style=for-the-badge)](VERSION.txt)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](requirements.txt)
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](#quick-start)
-[![Release Gate](https://img.shields.io/badge/release_gate-25%2F25-16A34A?style=for-the-badge)](#verification)
+[![Platform](https://img.shields.io/badge/desktop-Windows-0078D4?style=for-the-badge)](#quick-start)
+[![Status](https://img.shields.io/badge/status-research%20source-64748B?style=for-the-badge)](docs/RELEASE_STATUS_V6.0.0.md)
 
-**[한국어](README_KO.md) · [Quick start](#quick-start) · [Capabilities](#capabilities) · [Structure & Docking Studio](#structure--docking-studio) · [SPPS Planner](#spps-planner) · [Scientific scope](#scientific-scope) · [Manual](MANUAL_EN.md)**
+**[한국어](README_KO.md) · [Quick start](#quick-start) · [Capabilities](#capabilities) · [Structure & Docking](#structure--docking-studio) · [Modified peptides](#modified-peptide-chemistry) · [SPPS Planner](#spps-planner-v800) · [Verification](#verification) · [Manual](MANUAL_EN.md)**
 
 </div>
 
@@ -21,150 +21,107 @@
 
 ## Overview
 
-Pepforge is a Windows-first desktop research workbench that connects the peptide workflow from **sequence-level prioritization** to **candidate design**, **3D conformer generation**, **protein–peptide docking**, **interaction analysis**, and **SPPS planning**.
+**Pepforge** is a Windows-first desktop research workbench for connecting peptide design, chemical structure preparation, protein–peptide docking, interaction review, and synthesis planning. V6.0.0 expands the V5 Structure & Docking Studio workflow with supported modified-peptide conformers, ensemble docking, optional physics/MD and ABFE tooling, and the original **SPPS Planner V8.0.0 (Public)** launched in a normal separate window.
 
-V5.0.0 extends the V4 workflow into a more integrated native protein–peptide analysis environment while preserving the same core principle:
-
-> **Computational evidence must remain distinguishable from experimental evidence.**
-
-Pepforge supports canonical peptides and, where explicitly supported, terminal chemistry, D-residues, non-natural residues, linkers, labels, and other modified-peptide notation.
+> **Core scientific rule:** Computational hypotheses, internal docking scores, simulation-derived estimates, and experimental evidence must remain clearly distinguishable.
 
 ```text
-Target / protein sequence
-        ↓
-Hot Spot Finder
-        ↓
-Peptide Design Engine (PDE)
-        ↓
-Structure & Docking Studio
-   ├─ peptide structure generation
-   ├─ receptor / peptide preparation
-   ├─ native docking
-   ├─ interaction analysis
-   ├─ mechanics / trajectory review
-   └─ result interpretation
-        ↓
-SPPS Planner
-        ↓
-Evidence export / downstream validation
+Target sequence / experimental or predicted receptor structure
+                         ↓
+                   Hot Spot Finder
+                         ↓
+                Peptide Design Engine
+                         ↓
+              Structure & Docking Studio
+          ├─ supported modified-peptide chemistry
+          ├─ conformer generation / MMFF94s screening
+          ├─ receptor & peptide file preparation
+          ├─ native / conformer-ensemble docking
+          ├─ interaction evidence & interface refinement
+          └─ optional MD / ABFE / PyMOL review
+                         ↓
+           SPPS Planner V8.0.0 (Public)
+                         ↓
+         Evidence export / experimental validation
 ```
 
-Pepforge does **not** convert an internal docking score into experimental affinity, does **not** fabricate unsupported chemistry, and does **not** treat generated structures as proof of a native biological state.
+Generated conformers and docking poses are **testable structural hypotheses**, not proof of a native conformation, experimental binding affinity, or biological effect.
 
 ---
 
 ## Capabilities
 
-| Module | What it does |
+| Module | Public V6.0.0 scope |
 | --- | --- |
-| **Workflow Mode** | Connects Hot Spot → PDE → Structure & Docking → SPPS while preserving project/session and candidate lineage |
-| **Hot Spot Finder** | Screens protein/peptide sequences and ranks candidate regions |
-| **Peptide Design Engine (PDE)** | Generates and evaluates peptide candidates with explicit design objectives, chemistry-aware handling, and candidate tracking |
-| **Structure & Docking Studio** | Combines peptide structure generation, receptor preparation, native docking, interaction analysis, mechanics/trajectory review, and result interpretation |
-| **SPPS Planner** | Provides synthesis planning, materials, checklist, cleavage review, project handling, and decision-support workflows |
-| **Validation / benchmark tools** | Supports benchmark preparation, provenance tracking, calibration, release auditing, and external validation hand-off |
+| **Workflow Mode** | Target → hotspot → design → structure/docking → synthesis-planning hand-off |
+| **Hot Spot Finder** | Target sequence/structure review and candidate region screening |
+| **Peptide Design Engine (PDE)** | Candidate generation, design objectives, sequence/chemistry-aware handling |
+| **Structure & Docking Studio** | Structure preparation, conformers, native docking, interaction evidence, optional analyses |
+| **Modified-peptide tools** | Supported D-residue, non-natural residue, terminal modification, linker and tag handling with explicit unsupported states |
+| **Ensemble / torsion workflows** | RDKit/MMFF94s conformer sampling, diversity screening, candidate-wise geometric docking |
+| **Scientific backends (optional)** | OpenMM/OpenFE/OpenFF/GAFF/PyMBAR installation helpers and selected MD/ABFE execution/audit entry points |
+| **PyMOL review (optional)** | Structures, token-to-residue mapping, optional separate full-token panel |
+| **SPPS Planner V8.0.0** | Original V8 Project/Batch/Materials/Cleavage UI launched in its own desktop window from Pepforge |
+| **Benchmark & provenance** | Receptor-aligned pose RMSD, family-aware summaries, output hashes and audit utilities |
 
-### Design modes
+### PDE design objectives
 
-PDE retains explicit scientific-design objectives rather than hiding them inside one opaque score:
+- Interaction Only
+- Interaction First
+- Balanced
+- Structure Guided
+- Structure Exploration
 
-- **Interaction Only**
-- **Interaction First**
-- **Balanced**
-- **Structure Guided**
-- **Structure Exploration**
-
-Structure-guided modes require explicit structural intent. Pepforge does not invent a target conformation when one has not been supplied.
+Structure-guided modes require meaningful structural inputs; missing target structures are not silently treated as a reliable predicted fold.
 
 ---
 
 ## Structure & Docking Studio
 
-V5 consolidates the peptide structure and docking workflow into a single primary workspace.
+In the **Docking & Simulation** tab, molecular inputs are arranged as **Receptor (source → PDB/mmCIF → sequence)** followed by **Peptide (source → PDB/mmCIF/SDF/MOL → sequence)**; docking settings are below them. The peptide sequence is shared with Structure Builder and persists across tab switches. Each Studio tab remains within the **same Studio window**.
 
-The Studio is designed to move from sequence to structural hypotheses without forcing the user to switch repeatedly between disconnected windows.
+The primary V6 workflow retains V5's unified structure/docking workspace and extends its *optional* modified-peptide and research execution routes.
 
-### Main workflow
+### Structure generation and conformer review
 
-```text
-Peptide sequence / modified construct
-        ↓
-Conformer generation
-        ↓
-Candidate structure review
-        ↓
-Target / receptor loading
-        ↓
-Native docking
-        ↓
-Interaction evidence
-        ↓
-Optional mechanics / trajectory review
-        ↓
-Interpretation / export
-```
+Supported exploratory conformational families, where chemically applicable, include **α-helix, 3₁₀-helix, β-extended, β-hairpin-like, PPII, turns, and coil/mixed**. Additional tools generate multiple 3D conformers with ETKDG and MMFF94s where parameters are available, then screen energy, convergence, stereochemistry, and structural diversity.
 
-### Peptide structure generation
+**Important:** A low MMFF94s conformer energy is not a protein-binding ΔG and is not a calibrated population estimate.
 
-Supported conformational families include, where chemically applicable:
+### Native, ensemble, and interface docking
 
-- α-helix
-- 3₁₀-helix
-- β-extended / strand-like
-- β-hairpin-like
-- PPII
-- turn-rich
-- coil / mixed
+The public source contains pathways for:
 
-Generated conformers are **starting hypotheses for inspection and downstream validation**, not experimentally established conformational populations.
+- protein/receptor structure files (including preparation from PDB/mmCIF where supported);
+- peptide structure files including supported PDB/mmCIF and SDF/MOL inputs;
+- blind, manual, and hotspot-guided native pose search;
+- multiple candidate conformers and torsion-sampled ensemble search;
+- clash/contact inspection, ranked pose hypotheses, and receptor-conditioned interface refinement;
+- receptor-aligned peptide RMSD and audit-ready manifests.
 
-### Native docking
-
-Pepforge V5 includes a native docking path intended for pose generation and structural screening.
-
-The native docking score is an **internal dimensionless pose-search / ranking score**.
-
-It must **not** be reported as:
-
-- ΔG,
-- Kd,
-- experimental affinity,
-- biological activity,
-- or a validated free-energy estimate.
+The native docking score is an **internal, dimensionless structural-screening score**. It is **not** ΔG_bind, Kd, an experimental affinity, or biological activity. Conformer-wise docking and empirical interface refinement do not establish validated simultaneous receptor/peptide flexibility.
 
 ### Interaction analysis
 
-Pepforge can inspect residue-centered structural evidence including:
-
-- hydrogen-bond candidates,
-- hydrophobic contacts,
-- salt bridges / ionic interactions,
-- π–π interactions,
-- cation–π interactions,
-- van der Waals contacts / clashes,
-- disulfide geometry,
-- water-mediated contact candidates,
-- metal coordination,
-- halogen-bond geometry,
-- aromatic–sulfur interactions,
-- weak C–H···O/N interactions,
-- NH–π / amino–aromatic interactions.
-
-Geometry-based interaction evidence is **structural screening evidence**, not automatic proof of binding strength.
-
-### Native Mechanics / trajectory review
-
-V5 provides a native mechanics and trajectory-analysis path for exploratory structural review.
-
-It is **not presented as production-grade molecular dynamics**. Production MD requires validated force-field parameters, timestep / ensemble controls, and a validated simulation backend.
+The geometry-based evidence layer can inspect supported candidates for hydrogen bonds, hydrophobic contacts, salt bridges, aromatic interactions (π–π/cation–π), van der Waals contacts/clashes, disulfide geometry, water-mediated contacts, metal coordination, halogen bonds and other specialized contact geometries. These are **screening signals, not measured interaction energies**.
 
 ---
 
-## Modified-peptide support
+### Tabbed Studio workspace (V6.0.0)
 
-Pepforge uses explicit tokenization so terminal chemistry, residue identity, and linker/tag notation remain distinguishable.
+The Studio now uses **three tabs within the same window**, rather than one long scrollable page:
 
-Examples:
+| Tab | Main actions |
+| --- | --- |
+| **1. Structure Builder** | Sequence, conditions, conformer generation, token map and output |
+| **2. Docking & Simulation** | Receptor selection, binding site, docking/ensemble settings, optional mechanics and MD |
+| **3. Results & Analysis** | Chemistry table, conformer evidence, shared native docking result viewer |
+
+Switch by clicking a tab or using `Ctrl+1`, `Ctrl+2`, or `Ctrl+3`. Each tab scrolls separately; values persist across tabs. No extra top-level windows are opened when changing Studio tabs; all form state is shared. Analysis automatically selects the Results tab in the same window. Explanatory paragraphs have moved to this README and `MANUAL_EN.md`.
+
+## Modified-peptide chemistry
+
+Pepforge distinguishes registered terminal modifications, residue identities, stereochemistry, tags, and linkers when supported. Examples of **notation**, not guarantees of all-atom force-field coverage:
 
 ```text
 Ac-EEMQRR-NH2
@@ -172,92 +129,75 @@ Pal-AEEA-dK-NH2
 Biotin-AEEA-GH-dab(EEEK)-NH2
 ```
 
-Important examples:
-
-| Input | Interpretation |
+| Construct component | Treatment |
 | --- | --- |
-| `Ac-` / `AC-` | N-terminal acetyl modifier |
-| `Pal-` / `PAL-` | N-terminal palmitoyl modifier |
-| `A-C-` | Ala–Cys residue sequence |
-| `P-A-L-` | Pro–Ala–Leu residue sequence |
-| `FITC-` / `Biotin-` | Registered label / tag token when supported |
-| `AEEA`, `Ahx`, PEG tokens | Registered linker chemistry when supported |
-| D / non-natural residue tokens | Preserved as explicit chemistry rather than silently converted to canonical L-residues |
+| `Ac-`, `Pal-` | Explicit N-terminal modification notation when registered |
+| D-form residue (e.g. `dK`) | Stereochemical identity preserved/checked where structure generation is supported |
+| Aib / Dab / other non-natural residue | Explicit token with stage-specific structure and parameter support |
+| AEEA / Ahx / PEG linkers | Registered linker components when available |
+| FITC / Biotin / chemical tags | Distinct chemical tokens; structural support must be checked per construct |
 
-Support remains **stage-specific**. A construct may be parsed and preserved even when a unique all-atom derivative or force-field parameter set is unavailable.
+A token can be **parsed successfully** while still lacking validated 3D coordinates or force-field parameters. Pepforge must not fabricate unsupported atom types, charges, parameters, or stereochemical assignments.
 
-Pepforge reports that limitation instead of fabricating a structure or parameter set.
+### PyMOL visualization
 
----
-
-## SPPS Planner
-
-Pepforge integrates an SPPS planning workflow as part of the peptide research environment.
-
-The current integration provides:
-
-- Project Manager workflow
-- Batch-oriented project handling
-- editable synthesis Plan
-- step-wise Materials
-- Total Materials
-- Checklist
-- cleavage review
-- sequence / construct transfer from Pepforge workflows
-- project/session persistence
-- literature/evidence guidance
-- user-provided experimental evidence support
-
-The SPPS Planner remains a synthesis-planning and decision-support tool. It does not guarantee:
-
-- synthesis yield,
-- purity,
-- reaction completion,
-- cleavage success,
-- or laboratory safety.
-
-Public Pepforge packages must not include private laboratory history, credentials, local experimental databases, or internal operator records.
+Structure exports can include residue/token mapping information. An optional PyMOL **separate chemical-token panel** displays full labels and assists residue selection. This is *not* a patch that makes PyMOL's native sequence strip support arbitrary-length labels. Verify the optional panel against your installed PyMOL distribution.
 
 ---
 
-## Public benchmark and provenance support
+## Optional molecular dynamics and ABFE research workflows
 
-V5 includes infrastructure for public protein–peptide benchmark preparation and validation.
+Pepforge includes source integrations, installation helpers, and auditing utilities for supported OpenMM/OpenFE/OpenFF/GAFF/PyMBAR workflows. The preferred ABFE pathway uses an **OpenFE complete protocol**; manually calculated Boresch restraint corrections must **not** be added again to the completed OpenFE result.
 
-Supported provenance workflows include:
+| Task | Scope and boundary |
+| --- | --- |
+| MMFF94s conformer evaluation | Internal peptide force-field minimization where parameterized |
+| GAFF/OpenMM complex preparation | Optional protocol pathway; chemistry and execution environment require validation |
+| Solvated MD | Optional execution and trajectory/log-quality analysis tools |
+| OpenFE ABFE | Optional transformation creation and execution/audit bridge, not a benchmark-certified predictor |
+| Boresch / MBAR / replica checks | Protocol-aware correction and uncertainty analysis of genuine simulation data |
+| Experimental comparison | Compare traceable computed ΔG_bind with independently supplied Kd data; does not create experimental evidence |
 
-- public benchmark registry handling,
-- RCSB PDB coordinate retrieval / local cache use,
-- receptor / peptide chain normalization,
-- SHA-256 provenance records,
-- UniProtKB sequence / identity metadata,
-- train / holdout split auditing,
-- leakage checks,
-- docking-score / structural-recovery calibration,
-- validation workspace auditing,
-- release dossiers.
+**Do not interpret:** an ABFE JSON file, completed trajectory, low internal docking score, or software unit-test pass as proof of converged binding free energy. Modified-peptide parameterization and independent replicate/experimental validation must be demonstrated on the actual system.
 
-RCSB or UniProt provenance does **not** by itself establish correctness of a docking result.
-
-A deterministic holdout split also does **not** automatically prove sequence-independent generalization.
+See [scientific release status](docs/RELEASE_STATUS_V6.0.0.md) and [science-engine installation guide](SCIENCE_ENGINE_INSTALL_GUIDE_KO.md).
 
 ---
 
-## UI / workflow improvements in the final V5 build
+## SPPS Planner V8.0.0
 
-The final V5 UI polish focuses on making the application behave more like a conventional desktop scientific workbench.
+**Normal SPPS Planner V8 window:** In the Pepforge main launcher, select **4 · SPPS Planner** and click **Open SPPS Planner**. The original V8 Public GUI opens in a **normal independent desktop window**, just like PDE or Structure Builder. This avoids cross-process Windows `SetParent` limitations (window focus, modal dialogs and DPI). Pepforge stays available for other work; saving and closing the Planner follows V8's native Project Manager workflow.
 
-Highlights include:
+The bundled V8 retains Project Manager, Batch Manager, Plan, Materials, Checklist, Cleavage, Sequence Risk, and Recommendations & Lab History. Removed redundant shortcuts (Loading Advice / Cleavage Advice / Record Lab Data) are not re-added. The original calculation engine is not modified.
 
-- integrated **Structure & Docking Studio** instead of exposing overlapping PSB / Docking paths as separate primary workflows,
-- larger peptide-sequence editing area,
-- larger default workspaces,
-- standard mouse-wheel scrolling in long analysis pages,
-- scroll handling in both **Structure & Docking Studio** and **Workflow Mode**,
-- stabilized canvas / viewport sizing to avoid layout stretching while dragging scrollbars,
-- reduced end-of-page scroll event accumulation,
-- updated SPPS Planner launch integration,
-- compatibility access to legacy / advanced docking review where needed.
+**Source:** `python -m pip install -r vendor/spps_planner_v8/requirements.txt`, then `python main_launcher.py` → **SPPS Planner** → **Open**, or `python main_launcher.py --tool spps`. Source and packaged startup errors are logged to the Pepforge launcher log `spps_v8_launch.log`.
+
+**Installed Windows build:** The unified builder must include `SPPS_Planner/SPPS_Planner.exe` alongside `Pepforge.exe` inside the installation directory; the frozen Pepforge executable is not itself a Python interpreter. Keep the full installer folder. Only Pepforge is V6.0.0; SPPS Planner retains its own V8.0.0 version.
+
+**Scientific boundary:** SPPS results are decision support, not guaranteed yield or purity.
+
+The planner supports laboratory planning and decision making, **not guaranteed yield, purity, reaction completion, or cleavage success**. [V8 integration notes (KO)](SPPS_V8_INTEGRATION_README_KO.md).
+
+### V8 Recommendations / Plan Treeview style isolation
+
+The bundled **SPPS Planner V8.0.0** has been refreshed from the latest supplied **Treeview Style Fixed** source. When **Recommendations & Lab History** is opened, its tables use the namespaced `SPPS.History.Treeview` and `SPPS.History.Treeview.Heading` styles, rather than changing Tk's global `Treeview` styles. This preserves the **bold Project Manager Plan/Materials headings** and the main table row height when switching between panels. The original V8 planning calculations and Project/Batch flows remain unchanged.
+
+To verify the fix on a computer with Tk/display support, run the vendored test from its own directory (do not accidentally import Pepforge's `suite_gui` module):
+
+```bat
+cd vendor\spps_planner_v8
+python -m pytest -q tests/test_v8_recommendations_style_isolation.py
+```
+
+If running from source, install the SPPS requirements and test dependency `pytest` first. An automated Treeview-style check is not a substitute for inspecting the actual Windows GUI at 100%, 125%, and 150% scaling.
+
+---
+
+## Benchmark, provenance, and evidence
+
+Tools include public-data provenance, receptor alignment, structural RMSD, candidate screening, family-aware bootstrap summaries, leakage/split auditing, SHA-256 input-output records, and explicit error/incomplete states.
+
+**Reproducible evaluation infrastructure is not equivalent to independently demonstrated accuracy.** Independent public benchmark execution and experimental ΔG_bind accuracy for this integrated release have not been certified.
 
 ---
 
@@ -265,113 +205,78 @@ Highlights include:
 
 ### Requirements
 
-- Windows 10 or 11 recommended
-- 64-bit Python **3.10+**
-- Tk support
-- RDKit for 3D structure generation
+- **Windows 10/11** recommended for desktop usage; Python **3.10+** and Tk support.
+- Install the core packages in [`requirements.txt`](requirements.txt). RDKit is used for supported 3D chemistry workflows.
+- Scientific backends may require compatible versions beyond the core environment; OpenFE on Windows is intended for a **WSL2/Linux** science environment.
+- PyMOL is optional and installed separately. No dedicated GPU is required for CPU-compatible core paths.
 
-Optional external tools may be used for downstream review or validation, but are installed separately.
-
-### Run from source
+### Launch from source (Windows)
 
 ```bat
-git clone https://github.com/SanghunWoo-23/Pepforge.git
-cd Pepforge
-
 python -m venv .venv
 .venv\Scripts\activate
-
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-
 python main_launcher.py
 ```
 
-If several Python installations are present on Windows:
-
-```bat
-py main_launcher.py
-```
-
-### Direct module launch
+Or double-click `RUN_PEPFORGE_SOURCE.bat` after dependencies are installed. For a specific workspace:
 
 ```bat
 python main_launcher.py --tool hotspot
 python main_launcher.py --tool design
 python main_launcher.py --tool structure
+python main_launcher.py --tool docking
 python main_launcher.py --tool spps
 python main_launcher.py --tool workflow
-python main_launcher.py --tool external
 ```
 
-Compatibility / advanced routes may remain available for specific review workflows, but the primary V5 structural workflow is **Structure & Docking Studio**.
+### One-entry Windows build and optional science setup
 
-For full UI instructions, inputs, outputs, and troubleshooting, use [MANUAL_EN.md](MANUAL_EN.md) or [MANUAL_KO.md](MANUAL_KO.md).
+Double-click `INSTALL_BUILD_TOOLS_AND_BUILD.bat` and select a mode:
 
----
+| Menu | Action |
+| --- | --- |
+| **1 — Windows build** | Builds the Pepforge EXE and Inno Setup installer. Does not install science engines. |
+| **2 — Build + Science** | Builds the Windows installer, provisions missing WSL Ubuntu/Miniforge when possible, then installs / verifies the science stack. |
+| **3 — Science only** | Sets up missing WSL Ubuntu/Miniforge when possible, then installs or updates `pepforge-science`. |
+| **4 — Verify** | Verifies scientific imports and the OpenFE CLI without downloading packages. |
+| **5 — Exit** | Closes the menu. |
 
-## Typical workflow
+Scripted options: `--build`, `--all`, `--science`, `--verify-science`. **Ubuntu and Miniforge are now bootstrapped when missing** after the user selects science installation (menu 2 or 3). The installer invokes `wsl --install -d Ubuntu` only for an explicitly selected install; Windows administrator approval, a reboot and first-launch Linux user creation may require manual action. On rerun, missing Miniforge is downloaded from conda-forge with a pinned SHA-256 check before science packages are installed. Verification-only mode never installs. Failures are never reported as success. OpenFE remains in Linux and is **not** bundled into the Windows EXE. See [science setup](SCIENCE_ENGINE_INSTALL_GUIDE_KO.md).
 
-1. **Create or open a project/session.**
-2. **Enter a target/protein sequence** and run Hot Spot Finder when sequence-level prioritization is needed.
-3. **Generate or evaluate peptide candidates in PDE.**
-4. **Open the selected candidate in Structure & Docking Studio.**
-5. **Generate and review peptide conformers.**
-6. **Load the receptor / target structure.**
-7. **Run native docking and inspect ranked pose hypotheses.**
-8. **Review interaction evidence and, where appropriate, mechanics / trajectory outputs.**
-9. **Transfer the active construct to SPPS Planner for synthesis planning.**
-10. **Export results for external review, benchmark comparison, or downstream validation.**
+SPPS V8 separate window from source: install `vendor/spps_planner_v8/requirements.txt`, run `python main_launcher.py`, select **SPPS Planner** and click **Open**. Direct launch: `python main_launcher.py --tool spps`. When bundled as an EXE, keep the full `dist/Pepforge/` folder; the `SPPS_Planner/SPPS_Planner.exe` companion is required. Launch failures are recorded in `workspace/launcher/logs/spps_v8_launch.log` (source mode), or under the user-local Pepforge launcher log directory (installed mode).
 
-Evidence generated at different stages remains distinguishable rather than being collapsed into an unsupported universal confidence score.
+### Selected research CLI entry points
 
----
-
-## Repository structure
-
-```text
-Pepforge/
-├─ main_launcher.py
-├─ pepforge_cli.py
-├─ suite_gui/
-├─ peptiforg_core/
-├─ pepforge_structure_tool/
-├─ apps/
-├─ tests/
-├─ docs/
-├─ data/
-├─ installer/
-├─ MANUAL_EN.md
-├─ MANUAL_KO.md
-├─ README.md
-└─ README_KO.md
+```bat
+python RUN_MODIFIED_PEPTIDE_FF.py --help
+python RUN_ENSEMBLE_DOCKING.py --help
+python RUN_RELEASE_READINESS.py --help
+python RUN_ABFE_EXPERIMENTAL_VALIDATION.py --help
 ```
 
-Runtime workspaces, generated outputs, caches, credentials, private experimental history, and internal development handover material are excluded from the public source package.
+Refer to [English manual](MANUAL_EN.md) and [한국어 매뉴얼](MANUAL_KO.md) for tool-specific inputs.
 
 ---
 
 ## Verification
 
-The final V5 public build was regression-tested after the UI and packaging cleanup.
+**Research-source verification remains bounded.** The V6.0.0 installer, version, SPPS V8 hand-off and packaging contracts have been checked; the full test suite and actual Windows/WSL2 installations have **not** been certified.
 
-| Check | Result |
-| --- | ---: |
-| V5 regression tests | **130 passed / 0 failed** |
-| Legacy V4 release / verify / integrity audit | **6 passed / 0 failed** |
-| Legacy full-package / regression / source-integrity audit | **7 passed / 0 failed** |
-| Release Gate | **25 / 25 passed** |
-| Compile errors | **0** |
+| Check | Verified result |
+| --- | --- |
+| Focused installer / release / SPPS compatibility tests | **41 passed / 0 failed** (2026-10-28 focused regression) |
+| Pepforge release gate | **25 / 25 passed** (2026-10-27) |
+| Python compile via release gate | **780 files / 0 compile errors** |
+| Static V6 packaging and document inventory | **Passed** (source-only checks) |
+| Complete Pepforge regression | **Not completed**; extended run stopped before full completion |
+| Native Windows GUI / installer and WSL2 package installation | **Not verified on an actual target PC** |
+| OpenFE production ABFE and experimental ΔG_bind accuracy | **Not verified** |
 
-Representative UI checks also covered:
+Historical V3 menu-label mismatch has been addressed in the legacy compatibility route, but **this is not equivalent to completion of the full regression suite**.
 
-- normal mouse-wheel scrolling in Structure & Docking Studio,
-- normal mouse-wheel scrolling in Workflow Mode,
-- stable outer canvas width while dragging scrollbars,
-- prevention of repeated end-of-page wheel-event accumulation,
-- SPPS Planner launch-path compatibility.
-
-You can run the included checks with:
+Run local validation on your target environment:
 
 ```bat
 python -m compileall -q .
@@ -379,92 +284,86 @@ python -m pytest -q
 python pepforge_cli.py release-gate --root-dir . --output-dir qa_output
 ```
 
-Native Windows rendering, packaged installer / EXE behavior, third-party simulation engines, GPU-specific paths, and external applications remain environment-specific checks.
+Passing these checks establishes only their respective test coverage. See [release status](docs/RELEASE_STATUS_V6.0.0.md) and [publication checklist](PUBLICATION_CHECKLIST.md).
 
 ---
 
-## Scientific scope
+## Scientific scope and limitations
 
-Pepforge is intended for:
+Intended for **research prioritization, computational preparation, conformer hypotheses, docking/interaction screening, synthesis planning, and validation hand-off**.
 
-- research prioritization,
-- reproducible computational preparation,
-- peptide-structure hypothesis generation,
-- docking / interaction screening,
-- synthesis planning,
-- validation hand-off.
+Output alone does **not** establish experimental Kd/Ki, validated binding free energy, native in-vivo conformation, biological efficacy, reaction yield/purity, or production MD convergence. ESMFold/AF3-class accuracy and superiority over other docking engines are **not claimed**.
 
-Pepforge output alone does **not** establish:
+For confidential targets and unpublished chemistry, check whether selected external structure-prediction or service integrations transmit sequence data before enabling them.
 
-- experimental binding affinity or Kd,
-- binding free energy,
-- native in-vivo peptide conformation,
-- biological efficacy,
-- synthesis yield or purity,
-- validated laboratory SOPs,
-- production-grade MD validity.
+---
 
-Unsupported building blocks, force-field parameters, experimental results, or optimum synthesis conditions must not be invented.
+## Repository layout
+
+```text
+Pepforge_V6.0.0/
+├─ main_launcher.py             # desktop entry point
+├─ pepforge_cli.py             # workflow and verification CLI
+├─ suite_gui/                  # integrated GUIs
+├─ peptiforg_core/             # calculation, provenance and audits
+├─ pepforge_structure_tool/    # structure-related tools
+├─ apps/                       # hotspot, PDE, compatibility modules
+├─ vendor/spps_planner_v8/     # SPPS Planner V8.0.0 Public (separate module)
+├─ tests/                      # automated checks
+├─ docs/                       # technical references and policies
+├─ installer/                  # build/installer support
+├─ README_KO.md
+├─ MANUAL_EN.md
+├─ MANUAL_KO.md
+└─ LICENSE
+```
+
+Runtime outputs, experimental data, private records, credentials, and training artifacts must not enter public commits.
 
 ---
 
 ## Documentation
 
-| Document | Purpose |
+| File | Description |
 | --- | --- |
-| [English manual](MANUAL_EN.md) | Installation, workflow, inputs, outputs, troubleshooting |
-| [한국어 매뉴얼](MANUAL_KO.md) | 설치, 워크플로우, 입력, 출력, 문제 해결 |
-| [Public Data Policy](PUBLIC_DATA_POLICY.md) | Public/private data boundary |
-| [Changelog](CHANGELOG.md) | Public development / release history |
-| [Contributing](CONTRIBUTING.md) | Bug reports and contribution guidance |
-| [Security](SECURITY.md) | Security reporting and public-package precautions |
-
-Detailed internal handover notes and future-version roadmaps are intentionally maintained **outside the public GitHub source package**.
-
----
-
-## Citation
-
-If Pepforge or Pepforge-generated workflows materially contribute to academic work, cite the **exact release used**.
-
-If `CITATION.cff` is included in the repository, GitHub can expose the citation metadata directly.
-
-Recommended repository citation:
-
-> Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. Version 5.0.0, 2026. https://github.com/SanghunWoo-23/Pepforge
-
-If a DOI-backed release becomes available, prefer the DOI-linked citation for that exact release.
+| [README_KO.md](README_KO.md) | Korean GitHub overview and quick start |
+| [MANUAL_EN.md](MANUAL_EN.md) / [MANUAL_KO.md](MANUAL_KO.md) | Detailed workflow and usage references |
+| [SPPS V8 integration guide](SPPS_V8_INTEGRATION_README_KO.md) | Public planner process and version boundary |
+| [Scientific installation guide](SCIENCE_ENGINE_INSTALL_GUIDE_KO.md) | WSL2/Linux optional OpenFE/OpenMM science stack |
+| [Scientific release status](docs/RELEASE_STATUS_V6.0.0.md) | Supported/unsupported and unverified claims |
+| [Public data policy](PUBLIC_DATA_POLICY.md) | Sensitive-data exclusion from GitHub |
+| [Publication checklist](PUBLICATION_CHECKLIST.md) | Repository-owner release review |
+| [Changelog](CHANGELOG.md) | Version history |
 
 ---
 
-## License
+## Citation and license
 
-Pepforge uses the license distributed with the public repository.
+If Pepforge or a Pepforge-derived workflow materially contributes to academic work, cite the **exact release used**, as applicable. GitHub citation metadata is provided in [`CITATION.cff`](CITATION.cff).
 
-Read [LICENSE](LICENSE) before redistribution, derivative distribution, or commercial use.
+> Woo, S. *Pepforge: An Integrated Peptide Research Workbench*. V6.0.0 (source release candidate), 2026. https://github.com/SanghunWoo-23/Pepforge
 
----
+**License:** [Pepforge Public Academic Citation License](LICENSE) (custom source-available license; **not** an OSI-approved open-source license). Embedded third-party components have their own notices; review them before redistribution. This documentation edit is not a licensing or redistribution clearance.
 
-## Contributing and security
-
-Bug reports should include:
-
-- Pepforge version,
-- operating system,
-- Python version,
-- launch method,
-- affected module,
-- minimal reproducible input,
-- reproduction steps,
-- relevant logs with confidential or unpublished information removed.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+For bug reports, provide the Pepforge version, OS, Python version, minimal *nonconfidential* input, and redacted logs. See [CONTRIBUTING](CONTRIBUTING.md) and [SECURITY](SECURITY.md).
 
 ---
 
 <div align="center">
 
-**Pepforge V5.0.0**  
-From peptide sequence to design, structure, docking, synthesis planning, interaction review, and validation hand-off.
+**Pepforge V6.0.0**  
+*From modified-peptide design to structures, docking hypotheses, thermodynamic analysis, SPPS Planner V8.0.0, and validation hand-off.*
 
 </div>
+
+
+## V6.0.0 native docking input and results update (2026-10-30)
+
+- **Receptor file input** accepts `.pdb`, `.cif`, and `.mmcif`. mmCIF is converted into a validated PDB coordinate adapter with Biopython; Gemmi is available as a fallback. Preserve the original mmCIF as the authoritative source. Check chain identifiers, alternate conformers, ligands, and atom coverage after conversion.
+- **Peptide file input** accepts PDB, mmCIF, SDF, or MOL when suitable 3D coordinates are present. Structure Builder and Docking tabs share the modified-peptide sequence.
+- **BUILD + DOCK + ANALYZE** uses the native rigid-body docking engine for direct file inputs. The Docking tab reports real search-trial completion (not an estimated MD duration); the Results & Analysis tab now loads verified poses and geometric interaction evidence. Failed/no-pose runs display an explicit error rather than a success message.
+- **Native Results toolbar** displays the essentials (results, selected pose, 3D review, export, interpretation). A/B comparison, advanced filters, pose matrix and selected follow-up remain available behind **Advanced tools**.
+- **Progress bars:** known completed stages and native-search iteration counts fill a left-to-right bar. Operations without stage telemetry do **not** claim a fabricated percent-complete or ETA.
+- **What is verified:** automated native-docking PDB/mmCIF tests and a Tk GUI smoke run in a Linux virtual display with generated test structures. **What is not verified:** every user-supplied PDB/mmCIF, Windows installer/EXE, force-field validity, experimental affinity, OpenMM/ABFE performance, or full project regression.
+
+See [MANUAL_EN.md](MANUAL_EN.md) for use and troubleshooting.

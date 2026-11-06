@@ -1,0 +1,5 @@
+backend,candidate_id,score,direction
+engine_a,pepA,12,higher
+engine_a,pepB,8,higher
+engine_b,pepA,-24,lower
+engine_b,pepB,-11,lower

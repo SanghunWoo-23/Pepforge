@@ -2478,6 +2478,7 @@ class DockingWorkbenchGUI(tk.Tk):
         ttk.Button(action_row,text="Analyze Inputs",command=self.analyze).pack(side="left",padx=3)
         self.run_screening_btn = ttk.Button(action_row,text="Run Docking / Screening",command=self.run_docking,style="Accent.TButton")
         self.run_screening_btn.pack(side="left",padx=3)
+        ttk.Button(action_row,text="Modified Peptide Ensemble",command=self.open_modified_peptide_ensemble).pack(side="left",padx=3)
         ttk.Button(action_row,text="Export Results",command=self.export).pack(side="left",padx=3)
         ttk.Button(action_row,text="Load Results",command=self.load_output_folder).pack(side="left",padx=3)
         ttk.Button(action_row,text="Open Output Folder",command=self.open_output).pack(side="left",padx=3)
@@ -3972,6 +3973,10 @@ class DockingWorkbenchGUI(tk.Tk):
             self.run_screening_btn.configure(state="disabled" if busy else "normal")
         except Exception as exc:
             LOGGER.debug("Could not update Run Screening state: %s", exc)
+
+    def open_modified_peptide_ensemble(self):
+        from suite_gui.ensemble_docking_dialog import open_ensemble_docking_dialog
+        return open_ensemble_docking_dialog(self)
 
     def run_docking(self):
         """Start screening with immediate UI feedback and guarded validation.

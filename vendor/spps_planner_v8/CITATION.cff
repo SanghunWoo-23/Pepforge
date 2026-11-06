@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use SPPS Planner in academic work, please cite this software release and its DOI when available."
+title: "SPPS Planner: Solid-Phase Peptide Synthesis Planning and Evidence-Driven Decision Support"
+type: software
+authors:
+  - family-names: "Woo"
+    given-names: "Sanghun"
+repository-code: "https://github.com/SanghunWoo-23/SPPS-PLANNER"
+url: "https://github.com/SanghunWoo-23/SPPS-PLANNER"
+version: "8.0.0"
+abstract: >-
+  SPPS Planner is a Windows-first desktop application for solid-phase peptide
+  synthesis planning, editable workflow calculation, material/checklist/batch
+  generation, experimental record traceability, and evidence-driven Loading and
+  Cleavage decision support.
+keywords:
+  - peptide
+  - SPPS
+  - solid-phase peptide synthesis
+  - peptide synthesis
+  - laboratory software
+  - decision support
+  - experimental data

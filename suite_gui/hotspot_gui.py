@@ -122,7 +122,7 @@ class HotspotGUI(tk.Tk):
         ttk.Button(btns, text="Export Motif Hints", command=self.export_motif_hints).pack(side="left", padx=8)
         ttk.Button(btns, text="Load Example", command=self.load_example_input).pack(side="left")
         self.progress_var = tk.StringVar(value="Ready")
-        self.progress = ttk.Progressbar(main, mode="indeterminate", style="PepforgeGreen.Horizontal.TProgressbar")
+        self.progress = ttk.Progressbar(main, mode="determinate", maximum=100, value=0, style="PepforgeGreen.Horizontal.TProgressbar")
         self.progress.pack(fill="x", pady=(0, 2))
         ttk.Label(main, textvariable=self.progress_var).pack(anchor="w", pady=(0, 6))
 
@@ -234,7 +234,7 @@ class HotspotGUI(tk.Tk):
         }
         self.run_button.configure(state="disabled")
         self.progress_var.set("Analyzing sequence...")
-        self.progress.start(12)
+        self.progress.configure(mode="determinate", value=5)
         self.log.insert("end", "Analyzing sequence...\n"); self.log.see("end")
         threading.Thread(target=self._worker, args=(tmp_input, outdir, settings), daemon=True).start()
 
@@ -246,6 +246,7 @@ class HotspotGUI(tk.Tk):
             self._startup_trace.write()
             cfg = load_config(str(APP / "data" / "default_config.json"))
             cfg.update(settings)
+            self.q.put(("progress", (15, "Analysis configuration loaded (computation running)")))
             result = analyze_input(
                 user_input=input_file.read_text(encoding="utf-8"),
                 config=cfg,
@@ -261,6 +262,11 @@ class HotspotGUI(tk.Tk):
         try:
             while True:
                 item = self.q.get_nowait()
+                if item[0] == "progress":
+                    value, label = item[1]
+                    self.progress.configure(mode="determinate", value=value)
+                    self.progress_var.set(label)
+                    continue
                 if item[0] == "done":
                     self.progress.stop()
                     self.progress.configure(mode="determinate", value=100)

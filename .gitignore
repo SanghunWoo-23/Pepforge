@@ -21,6 +21,9 @@ installer/output/
 *.exe
 *.spec
 !installer/Pepforge.spec
+!vendor/spps_planner_v8/SPPS_Planner.spec
+.spps_build_dist/
+.spps_build_work/
 
 # Runtime outputs / local workspaces
 workspace/
@@ -75,3 +78,7 @@ Thumbs.db
 
 # Release-audit output
 qa_output/
+
+# Isolated WSL2 scientific environment reports (local runtime evidence)
+SCIENCE_ENGINE_INSTALL.log
+SCIENCE_ENGINE_INSTALL_REPORT.json

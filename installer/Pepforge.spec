@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Pepforge V5.0.0 lightweight PyInstaller spec.
+"""Pepforge V6.0.0 lightweight PyInstaller spec.
 
 This spec deliberately packages only the desktop runtime. Research/training
 stacks (xgboost, scikit-learn training modules, torch/ESM, Streamlit, pytest)
@@ -78,6 +78,7 @@ a = Analysis(
         (str(ROOT / 'spps_v4_gui'), 'spps_v4_gui'),
         (str(ROOT / 'docs'), 'docs'),
         (str(ROOT / 'examples'), 'examples'),
+        (str(ROOT / 'vendor' / 'spps_planner_v8'), 'vendor/spps_planner_v8'),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

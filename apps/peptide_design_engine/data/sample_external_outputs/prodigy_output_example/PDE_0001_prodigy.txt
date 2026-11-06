@@ -1,3 +1,0 @@
-PRODIGY RESULTS
-Predicted binding affinity (kcal.mol-1): -8.4
-Predicted dissociation constant (M) at 25.0˚C: 1.2e-6

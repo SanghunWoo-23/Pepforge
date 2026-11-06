@@ -1,37 +1,18 @@
-# SPPS Planner V5.0.0
+# Legacy embedded SPPS engine (compatibility module)
 
-SPPS Planner V5.0.0 application engine and required data, embedded in Pepforge V5.0.0.
+**Pepforge suite version: V6.0.0.** The primary standalone synthesis planning workflow is **SPPS Planner V8.0.0 Public** at `vendor/spps_planner_v8/`.
 
-## Key behavior
+This `apps/spps_planner_app/` tree is preserved for legacy imports, data migration, and compatibility with older project files. It is **not** a separate Pepforge V6 installer. Do not follow historical V5 build instructions from this directory.
 
-- Shows one blank peptide item at startup when no saved items exist.
-- `CTC(합성기)` uses every residue written in Sequence as a coupling target, without loading AA/DIEA rows. The removed `CTC(합성용)` label is migrated only when opening older saved data.
-- Cleavage preset names show the actual components, for example `TFA=95; TIS=2.5; Water=2.5`.
-- The embedded SPPS module reports V4.0.0; the surrounding Pepforge release is V5.0.0.
-- Windows EXE/Installer build paths and output-name mismatches were corrected.
+## Supported entry points
 
-## Run from source
+From the Pepforge root directory:
 
 ```bat
-python main_launcher.py
+python main_launcher.py --tool spps
+INSTALL_BUILD_TOOLS_AND_BUILD.bat
 ```
 
-## Build Windows EXE
+The launcher uses the supported SPPS V8 Public process route when available. The root build batch script handles Pepforge packaging; V8 independent build scripts remain inside `vendor/spps_planner_v8/` solely for separate planner packaging and verification.
 
-```bat
-BUILD_EXE_ONLY.bat
-```
-
-## Build Windows Installer
-
-Install Python 3.11/3.12 and Inno Setup 6/7, then run:
-
-```bat
-BUILD_INSTALLER.bat
-```
-
-Expected installer:
-
-```text
-installer\output\Pepforge_Setup_v5.0.0.exe
-```
+SPPS planning is decision support; generated plans are not validated laboratory SOPs.

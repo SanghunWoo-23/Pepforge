@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-import json, re
+import json, re, csv
 
 CATEGORY_COLORS = {
     "std_aa": "white",
@@ -60,6 +60,9 @@ def make_pymol_pml(meta_path: str | Path, output_path: str | Path | None = None,
     lines.append(f"show sticks, {obj}")
     lines.append(f"show cartoon, {obj} and chain P")
     lines.append("set seq_view, 1")
+    lines.append("set seq_view_label_mode, 1")
+    lines.append("set seq_view_label_spacing, 1")
+    lines.append("set seq_view_fill_char, -")
     lines.append(f"set stick_radius, 0.14, {obj}")
     lines.append(f"set sphere_scale, 0.18, {obj}")
     lines.append(f"hide everything, {obj} and elem H")
@@ -68,6 +71,32 @@ def make_pymol_pml(meta_path: str | Path, output_path: str | Path | None = None,
     lines.append("set label_color, black")
     lines.append(f"color gray80, {obj}")
     lines.append("")
+    # PyMOL sequence viewer uses residue identifiers rather than atom labels.
+    # Assign each chemical token a separate residue, including linkers and dyes.
+    # PDB residue names are three characters; retain full token text in a TSV map.
+    sequence_rows = []
+    for i, r in enumerate(atom_ranges, start=1):
+        start, end = r.get("heavy_start_1based"), r.get("heavy_end_1based")
+        if not isinstance(start, int) or not isinstance(end, int) or start < 1 or end < start:
+            continue
+        token_text = str(r.get("token", f"component_{i}"))
+        kind_text = str(r.get("kind", "unknown"))
+        simple = re.sub(r"[^A-Za-z0-9]", "", token_text).upper()
+        residue_name = (simple[:3] or "UNK")
+        sequence_rows.append((i, token_text, kind_text, residue_name, start, end))
+        lines.append(f"alter ({obj} and index {start}-{end}), chain='P'")
+        lines.append(f"alter ({obj} and index {start}-{end}), resi='{i}'")
+        lines.append(f"alter ({obj} and index {start}-{end}), resn='{residue_name}'")
+    if sequence_rows:
+        lines.append("sort")
+        lines.append("rebuild")
+        lines.append("set seq_view, 1")
+        lines.append("# Chemical unit sequence: each unit is one PyMOL residue; see adjacent token map TSV for full names")
+        mapping_path = output_path.with_name(output_path.stem + "_sequence_token_map.tsv")
+        with mapping_path.open("w", encoding="utf-8", newline="") as fp:
+            writer = csv.writer(fp, delimiter="\t")
+            writer.writerow(("residue_number", "full_token", "category", "pymol_resn", "first_heavy_atom_index", "last_heavy_atom_index"))
+            writer.writerows(sequence_rows)
     for i, r in enumerate(atom_ranges, start=1):
         start, end = r.get("heavy_start_1based"), r.get("heavy_end_1based")
         if not start or not end:

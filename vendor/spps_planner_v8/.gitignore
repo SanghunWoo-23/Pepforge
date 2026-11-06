@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+installer/output/
+
+# Runtime/user data
+runtime_logs/
+outputs/
+models/
+*.log
+spps_planner_session_v1.json
+project_state.json
+
+# IDE/OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archives and temporary files
+*.zip
+*.7z
+*.rar
+*.tmp
+*.temp
+~$*
+
+# Experimental/runtime data: never commit private lab history
+experimental_v4.sqlite
+*.sqlite
+*.sqlite3
+private_data/
+private_experiments/
+user_experiments/

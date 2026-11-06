@@ -104,11 +104,11 @@ def validate_protocol(protocol: OpenMMProtocol) -> None:
         "friction_per_ps": protocol.friction_per_ps, "production_ns": protocol.production_ns,
     }
     for name, value in positive.items():
-        if float(value) <= 0:
+        if not math.isfinite(float(value)) or float(value) <= 0:
             raise ValueError(f"{name} must be > 0; got {value}")
-    if float(protocol.ionic_strength_molar) < 0:
+    if not math.isfinite(float(protocol.ionic_strength_molar)) or float(protocol.ionic_strength_molar) < 0:
         raise ValueError("ionic_strength_molar must be >= 0")
-    if float(protocol.equilibration_ps) < 0:
+    if not math.isfinite(float(protocol.equilibration_ps)) or float(protocol.equilibration_ps) < 0:
         raise ValueError("equilibration_ps must be >= 0")
     if int(protocol.report_frames) < 1 or int(protocol.replicates) < 1:
         raise ValueError("report_frames and replicates must be >= 1")
@@ -131,7 +131,10 @@ def _preparation_matches(path: Path, input_sha: str, protocol: OpenMMProtocol) -
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return False
-    return data.get("input_sha256") == input_sha and data.get("protocol_fingerprint") == _protocol_fingerprint(protocol)
+    return (data.get("input_sha256") == input_sha and
+            data.get("protocol_fingerprint") == _protocol_fingerprint(protocol) and
+            all(Path(data.get(name, "")).is_file() and _sha256(Path(data[name])) == data.get(digest_name)
+                for name, digest_name in (("solvated_system_pdb", "solvated_sha256"), ("system_xml", "system_sha256"))))
 
 
 def run_openmm_replicates(
@@ -207,6 +210,7 @@ def run_openmm_replicates(
             "version": OPENMM_BACKEND_VERSION, "input_sha256": input_sha,
             "protocol_fingerprint": _protocol_fingerprint(protocol),
             "solvated_system_pdb": str(solvated), "system_xml": str(system_xml),
+            "solvated_sha256": _sha256(solvated), "system_sha256": _sha256(system_xml),
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         preparation_status = "CREATED_NEW_PREPARATION"
 
@@ -224,7 +228,10 @@ def run_openmm_replicates(
                 old = json.loads(manifest_path.read_text(encoding="utf-8"))
             except Exception:
                 old = {}
-            if old.get("status") == "COMPLETED" and Path(str(old.get("trajectory", ""))).exists() and Path(str(old.get("final_pdb", ""))).exists():
+            if (old.get("status") == "COMPLETED" and old.get("input_sha256") == input_sha and
+                old.get("protocol_fingerprint") == _protocol_fingerprint(protocol) and
+                all(Path(str(old.get(k, ""))).is_file() and _sha256(Path(old[k])) == old.get(hash_key)
+                    for k, hash_key in (("trajectory", "trajectory_sha256"), ("final_pdb", "final_pdb_sha256")))):
                 reused = dict(old); reused["resume_status"] = "REUSED_COMPLETED_REPLICATE"
                 results.append(reused)
                 continue
@@ -279,6 +286,9 @@ def run_openmm_replicates(
             simulation.saveState(str(state_xml))
             result = {
                 "replicate": rep, "seed": seed, "status": "COMPLETED",
+                "input_sha256": input_sha, "protocol_fingerprint": _protocol_fingerprint(protocol),
+                "trajectory_sha256": _sha256(trajectory) if trajectory.exists() else None,
+                "final_pdb_sha256": _sha256(final_pdb),
                 "resume_status": "RESUMED_FROM_CHECKPOINT" if resumed_from_checkpoint else "FRESH_RUN",
                 "trajectory": str(trajectory), "topology_pdb": str(solvated),
                 "minimized_pdb": str(min_pdb) if min_pdb.exists() else None, "final_pdb": str(final_pdb),

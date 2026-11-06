@@ -20,3 +20,25 @@ jobs:
         env:
           SPPS_PLANNER_USER_DATA: ${{ runner.temp }}/spps-planner
         run: python pepforge_cli.py release-gate --root-dir . --output-dir qa_output
+
+  windows-source-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install pytest numpy pandas openpyxl PyYAML joblib Pillow
+      - name: Windows static distribution audit
+        run: python tools/v6_windows_distribution_audit.py --output windows_distribution_audit.json
+      - name: Windows syntax and CLI smoke
+        run: |
+          python -m compileall -q peptiforg_core main_launcher.py pepforge_cli.py
+          python pepforge_cli.py --help
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-distribution-audit
+          path: windows_distribution_audit.json
