@@ -21,7 +21,7 @@
 
 ## Overview
 
-**Pepforge** is a Windows-first desktop research workbench for connecting peptide design, chemical structure preparation, protein–peptide docking, interaction review, and synthesis planning. V6.0.0 expands the V5 Structure & Docking Studio workflow with supported modified-peptide conformers, ensemble docking, optional physics/MD and ABFE tooling, and the original **SPPS Planner V8.0.0 (Public)** launched in a normal separate window.
+**Pepforge** is a Windows-first desktop research workbench for connecting peptide design, chemical structure preparation, protein–peptide docking, interaction review, and synthesis planning. V6.0.0 expands the V5 Structure & Docking Studio workflow with supported modified-peptide conformers, ensemble docking, optional physics/MD and ABFE tooling, and the original **SPPS Planner V8.0.0 ** launched in a normal separate window.
 
 > **Core scientific rule:** Computational hypotheses, internal docking scores, simulation-derived estimates, and experimental evidence must remain clearly distinguishable.
 
