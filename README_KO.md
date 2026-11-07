@@ -23,7 +23,7 @@
 
 **Pepforge**는 Windows 중심의 펩타이드 연구용 데스크톱 프로그램입니다. Hot Spot Finder → Peptide Design Engine(PDE) → Structure & Docking Studio → SPPS Planner를 하나의 연구 흐름으로 연결합니다.
 
-V6.0.0은 V5의 구조·Docking 작업 흐름에 **지원 가능한 D-form/비천연 아미노산 및 chemical/linker, conformer ensemble, 유연 구조 후보 탐색, 선택형 MD·ABFE 계산 도구, SPPS Planner V8.0.0 Public 연결**을 추가한 소스 릴리스 후보입니다.
+V6.0.0은 V5의 구조·Docking 작업 흐름에 **지원 가능한 D-form/비천연 아미노산 및 chemical/linker, conformer ensemble, 유연 구조 후보 탐색, 선택형 MD·ABFE 계산 도구, SPPS Planner V8.0.0 연결**을 추가한 소스 릴리스 후보입니다.
 
 > **기본 원칙:** 계산 결과·모델 기반 점수·자유에너지 추정값과 실험 증거는 명확하게 구분합니다.
 
